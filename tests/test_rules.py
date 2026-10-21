@@ -42,18 +42,18 @@ def _verdicts(conn):
 
 
 def test_status_awaiting_when_no_verdicts():
-    assert compute_status([], 1) == "awaiting_review"
+    assert compute_status([], 1, signed=True) == "awaiting_review"
 
 
 def test_status_approved_single_approve(conn):
     _verdict(conn, "alice", "approve")
-    assert compute_status(_verdicts(conn), 1) == "approved"
+    assert compute_status(_verdicts(conn), 1, signed=True) == "approved"
 
 
 def test_request_changes_wins_over_approve(conn):
     _verdict(conn, "alice", "approve")
     _verdict(conn, "bob", "request_changes")
-    assert compute_status(_verdicts(conn), 1) == "changes_requested"
+    assert compute_status(_verdicts(conn), 1, signed=True) == "changes_requested"
 
 
 def test_newer_verdict_by_same_reviewer_replaces_older(conn):
@@ -61,12 +61,12 @@ def test_newer_verdict_by_same_reviewer_replaces_older(conn):
     _verdict(conn, "alice", "approve")
     rows = _verdicts(conn)
     assert latest_verdicts(rows, 1)["alice"]["verdict"] == "approve"
-    assert compute_status(rows, 1) == "approved"
+    assert compute_status(rows, 1, signed=True) == "approved"
 
 
 def test_old_version_verdicts_do_not_count(conn):
     _verdict(conn, "alice", "approve", version=1)
-    assert compute_status(_verdicts(conn), 2) == "awaiting_review"
+    assert compute_status(_verdicts(conn), 2, signed=True) == "awaiting_review"
 
 
 def test_reviewers_label_and_agent_excluded(conn):
@@ -119,7 +119,7 @@ def test_latest_verdict_is_by_id_not_created_at(conn):
     _verdict(conn, "alice", "request_changes")
     _verdict(conn, "alice", "approve")
     conn.execute("UPDATE verdicts SET created_at = '2000-01-01' WHERE verdict = 'approve'")
-    assert compute_status(_verdicts(conn), 1) == "approved"
+    assert compute_status(_verdicts(conn), 1, signed=True) == "approved"
     assert reviewers([], _verdicts(conn))[0].verdict == "approve"
 
 
@@ -144,4 +144,9 @@ def test_can_request_changes_needs_summary_or_own_open_thread(conn):
 def test_unsigned_overrides_verdicts(conn):
     assert compute_status(_verdicts(conn), 1, signed=False) == "unsigned"
     assert compute_status([], 1, signed=False) == "unsigned"
-    assert compute_status([], 1) == "awaiting_review"
+    assert compute_status([], 1, signed=True) == "awaiting_review"
+
+
+def test_signed_is_required():
+    with pytest.raises(TypeError):
+        compute_status([], 1)

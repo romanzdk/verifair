@@ -809,3 +809,21 @@ def test_identity_header_anyone_may_sign_agent_authored_report(proxied):
         "/r/prorate/sign", data={"version": 1}, headers={"X-Forwarded-Email": "bob@example.com"}
     )
     assert r.status_code == 200 and api_report(proxied)["signed_by"] == "bob"
+
+
+def test_resigning_keeps_the_first_signer_and_does_not_notify(client, monkeypatch):
+    from verifair import notify
+
+    push(client)
+    sign(client)
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda settings, text: sent.append(text))
+    client.cookies.set("vf_id", "bob00000")
+    client.cookies.set("vf_name", "Bob")
+    client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
+    sent.clear()
+    r = client.post("/r/prorate/sign", data={"version": 1})
+    assert r.status_code == 200 and "Signed by <b>Signer</b>" in r.text
+    assert sent == []
+    g = api_report(client)
+    assert (g["status"], g["signed_by"]) == ("approved", "Signer")

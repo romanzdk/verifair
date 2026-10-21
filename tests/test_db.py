@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from verifair import db
 from verifair.db import (
+    AlreadySigned,
     ProjectMismatch,
     StaleVersion,
     add_comment,
@@ -359,13 +360,14 @@ def test_push_stores_provenance_and_overwrites_on_new_version(conn):
     assert [v["commit"] for v in list_versions(conn, "r1")] == ["c1", "c2"]
 
 
-def test_sign_version_stores_and_resigning_replaces(conn):
+def test_sign_version_stores_and_resigning_is_refused(conn):
     push_report(conn, project="p", title="T", risk="low", body="v1", id="r1")
     assert get_signature(conn, "r1", 1) is None
-    sign_version(conn, report_id="r1", version=1, signer_id="u1", signer_name="Ann")
-    sig = sign_version(conn, report_id="r1", version=1, signer_id="u2", signer_name="Bob")
-    assert (sig["signer_id"], sig["signer_name"]) == ("u2", "Bob")
-    assert get_signature(conn, "r1", 1)["signer_name"] == "Bob"
+    sig = sign_version(conn, report_id="r1", version=1, signer_id="u1", signer_name="Ann")
+    assert (sig["signer_id"], sig["signer_name"]) == ("u1", "Ann")
+    with pytest.raises(AlreadySigned):
+        sign_version(conn, report_id="r1", version=1, signer_id="u2", signer_name="Bob")
+    assert get_signature(conn, "r1", 1)["signer_id"] == "u1"
 
 
 def test_sign_version_refuses_stale_version(conn):

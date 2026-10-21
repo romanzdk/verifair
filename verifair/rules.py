@@ -35,7 +35,7 @@ def latest_verdicts(verdicts: list[sqlite3.Row], version: int) -> dict[str, sqli
     return latest
 
 
-def compute_status(verdicts: list[sqlite3.Row], current_version: int, signed: bool = True) -> str:
+def compute_status(verdicts: list[sqlite3.Row], current_version: int, signed: bool) -> str:
     if not signed:
         return "unsigned"
     kinds = {row["verdict"] for row in latest_verdicts(verdicts, current_version).values()}

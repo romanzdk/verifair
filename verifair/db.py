@@ -74,6 +74,10 @@ class ProjectMismatch(Exception):
     pass
 
 
+class AlreadySigned(Exception):
+    pass
+
+
 class StaleVersion(Exception):
     def __init__(self, latest: int) -> None:
         super().__init__(f"latest version is {latest}")
@@ -372,11 +376,14 @@ def sign_version(
 ) -> sqlite3.Row:
     with _write(conn):
         _check_version(conn, report_id, version)
-        conn.execute(
-            "INSERT OR REPLACE INTO signatures (report_id, version, signer_id, signer_name,"
-            " created_at) VALUES (?, ?, ?, ?, ?)",
-            (report_id, version, signer_id, signer_name, _now()),
-        )
+        try:
+            conn.execute(
+                "INSERT INTO signatures (report_id, version, signer_id, signer_name, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (report_id, version, signer_id, signer_name, _now()),
+            )
+        except sqlite3.IntegrityError:
+            raise AlreadySigned(f"{report_id} v{version} is already signed") from None
     log.info(
         "version signed report=%s version=%d signer_id=%s", report_id, version, _short(signer_id)
     )

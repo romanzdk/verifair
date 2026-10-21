@@ -417,9 +417,12 @@ def sign(
         db.sign_version(conn, report_id=id, version=version, signer_id=user_id, signer_name=name)
     except db.StaleVersion as stale:
         return _stale(request, id, stale.latest)
-    settings = request.app.state.settings
-    text = notify.ready_for_review_text(report, version, name, settings.base_url)
-    background.add_task(notify.send, settings, text)
+    except db.AlreadySigned:
+        pass
+    else:
+        settings = request.app.state.settings
+        text = notify.ready_for_review_text(report, version, name, settings.base_url)
+        background.add_task(notify.send, settings, text)
     ctx = report_context(conn, report, version, user_id) | {"oob": True, "verdict_oob": True}
     return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html"], ctx)
 
