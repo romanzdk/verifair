@@ -77,6 +77,8 @@ def create_app(settings: Settings) -> FastAPI:
                 return PlainTextResponse("cross-origin request refused", 403)
         response = denial if denial is not None else await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
+        if path == "/access" or path.startswith("/access/"):
+            response.headers["Cache-Control"] = "no-store"
         if response.headers.get("content-type", "").startswith("text/html"):
             response.headers["Content-Security-Policy"] = CSP
         return response

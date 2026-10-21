@@ -24,10 +24,9 @@ from verifair.render import (
     section_headings,
     split_sections,
 )
-from verifair.rules import compute_status
+from verifair.rules import MODERATION, compute_status
 
 NOT_OWNER = "This report belongs to another member."
-MODERATION = "Only the person who started this thread or an admin can do that."
 
 
 def require_token(request: Request) -> None:

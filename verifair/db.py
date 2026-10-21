@@ -599,7 +599,7 @@ def bootstrap_admin(conn: sqlite3.Connection, admin_id: str) -> bool:
         cur = conn.execute(
             "INSERT INTO users (id, name, role, created_at, updated_at)"
             " SELECT ?, ?, 'admin', ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)",
-            (admin_id, admin_id.partition("@")[0] or admin_id, now, now),
+            (admin_id, (admin_id.partition("@")[0] or admin_id)[:60], now, now),
         )
     return cur.rowcount > 0
 
@@ -619,10 +619,13 @@ def create_token(conn: sqlite3.Connection, *, owner_id: str, label: str) -> tupl
             " VALUES (?, ?, ?, ?, ?)",
             (public_id, _digest(secret), owner_id, label, _now()),
         )
-    row = conn.execute(
-        f"SELECT {TOKEN_COLUMNS} FROM api_tokens WHERE id=?", (public_id,)
+    return f"vf_{public_id}.{secret}", get_token(conn, public_id)
+
+
+def get_token(conn: sqlite3.Connection, token_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        f"SELECT {TOKEN_COLUMNS} FROM api_tokens WHERE id=?", (token_id,)
     ).fetchone()
-    return f"vf_{public_id}.{secret}", row
 
 
 def authenticate_token(conn: sqlite3.Connection, token: str) -> sqlite3.Row | None:

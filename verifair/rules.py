@@ -10,6 +10,8 @@ STATUS_LABELS = {
     "approved": "Approved",
 }
 
+MODERATION = "Only the person who started this thread or an admin can do that."
+
 _VERDICT_LABELS = {"approve": "approved", "request_changes": "requested changes"}
 
 

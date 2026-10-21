@@ -1,0 +1,93 @@
+{% extends "landing_base.html" %}
+{% block title %}Access · verifair{% endblock %}
+{% block crumb %}<a href="/"><b>Projects</b></a><i>›</i>Access{% endblock %}
+{% macro token_rows(tokens, owner=False) %}
+<table>
+  <thead><tr>{% if owner %}<th>Owner</th>{% endif %}<th>Label</th><th>Token id</th><th>Created</th><th>Status</th><th><span class="landing-sr-only">Actions</span></th></tr></thead>
+  <tbody>
+    {% for t in tokens %}
+    <tr>
+      {% if owner %}<td><code>{{ t.owner_id }}</code></td>{% endif %}
+      <td>{{ t.label }}</td>
+      <td><code>{{ t.id }}</code></td>
+      <td><time datetime="{{ t.created_at }}">{{ t.created_at|date }}</time></td>
+      {% if t.revoked_at %}
+      <td>Revoked <time datetime="{{ t.revoked_at }}">{{ t.revoked_at|date }}</time></td><td></td>
+      {% else %}
+      <td>Active</td>
+      <td><form method="post" action="/access/tokens/{{ t.id|urlencode }}/revoke"><button class="btn">Revoke</button></form></td>
+      {% endif %}
+    </tr>
+    {% else %}
+    <tr><td colspan="{{ 6 if owner else 5 }}">No tokens yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+{% block landing_content %}
+<header class="landing-heading">
+  <div>
+    <div class="landing-eyebrow">Workspace</div>
+    <h1>Access</h1>
+    <p>Agent tokens{% if is_admin %}, members and roles{% endif %}.</p>
+  </div>
+</header>
+{% if not shared %}
+<p>Access management needs a sign-in proxy. See the README.</p>
+{% else %}
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if new_token %}
+<section class="landing-access">
+  <h2>New token</h2>
+  <input readonly value="{{ new_token }}" aria-label="New token" autocomplete="off" spellcheck="false">
+  <p>Copy it now. It will not be shown again.</p>
+</section>
+{% endif %}
+<section class="landing-access">
+  <h2>Your agent tokens</h2>
+  {{ token_rows(tokens) }}
+  <form method="post" action="/access/tokens" class="landing-access-form">
+    <input name="label" maxlength="60" required placeholder="Label, for example laptop" aria-label="Token label">
+    <button class="btn p">New token</button>
+  </form>
+</section>
+{% if is_admin %}
+<section class="landing-access">
+  <h2>Members</h2>
+  <table>
+    <thead><tr><th>Id</th><th>Name</th><th>Role</th><th>Active</th><th><span class="landing-sr-only">Actions</span></th></tr></thead>
+    <tbody>
+      {% for u in users %}{% set action = "/access/users/" ~ u.id|urlencode %}
+      <tr>
+        <td><code>{{ u.id }}</code></td>
+        <td>{{ u.name }}</td>
+        <td><form method="post" action="{{ action }}" class="landing-access-form">
+          <select name="role" aria-label="Role for {{ u.id }}">{% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}</select>
+          <button class="btn">Save</button>
+        </form></td>
+        <td>{{ "Yes" if u.active else "No" }}</td>
+        <td><form method="post" action="{{ action }}">
+          <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
+          <button class="btn">{{ "Deactivate" if u.active else "Reactivate" }}</button>
+        </form></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+<section class="landing-access">
+  <h2>Add member</h2>
+  <form method="post" action="/access/users" class="landing-access-form">
+    <input name="id" maxlength="200" required placeholder="Id, for example jane@example.com" aria-label="Member id">
+    <input name="name" maxlength="60" required placeholder="Name" aria-label="Member name">
+    <select name="role" aria-label="Role">{% for r in roles %}<option value="{{ r }}"{% if r == "member" %} selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}</select>
+    <button class="btn p">Add member</button>
+  </form>
+</section>
+<section class="landing-access">
+  <h2>All tokens</h2>
+  {{ token_rows(all_tokens, owner=True) }}
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

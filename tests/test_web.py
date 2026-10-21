@@ -1442,7 +1442,7 @@ def test_thread_markup_for_allowed_users_matches_local_mode(shared_settings, mod
 
     def threads(user_id):
         member = db.get_user(conn, user_id)
-        ctx = web.report_context(conn, report, 1, user_id, member)
+        ctx = web.report_context(conn, report, 1, user_id, member, member is not None)
         return {t.root["id"]: template.render(ctx | {"thread": t}) for t in ctx["threads"]}
 
     local = threads("someone0")

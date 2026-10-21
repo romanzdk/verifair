@@ -707,3 +707,8 @@ def test_create_token_refuses_unknown_or_inactive_owner(conn):
 def test_api_tokens_owner_index_exists(conn):
     indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     assert "api_tokens_owner" in indexes
+
+
+def test_bootstrap_admin_name_is_capped_at_60(conn):
+    assert bootstrap_admin(conn, "a" * 80 + "@example.com") is True
+    assert get_user(conn, "a" * 80 + "@example.com")["name"] == "a" * 60

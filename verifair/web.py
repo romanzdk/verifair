@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import secrets
 import sqlite3
@@ -14,10 +15,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from verifair import db, notify, rules
-from verifair.api import MODERATION
 from verifair.deps import get_conn
 from verifair.render import build_threads, split_sections, threads_by_section
 
+log = logging.getLogger("verifair")
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
@@ -41,12 +42,24 @@ SELF_REVIEW = "You signed this report. Someone else has to approve it."
 BLOCKED = "Resolve the open blocking threads first, or mark them non-blocking."
 Body = Annotated[str, Form(max_length=20000)]
 Anchor = Annotated[str, Form(max_length=2000)]
+LAST_ADMIN = "There must be at least one active admin."
+MEMBER_EXISTS = "That member already exists."
+MEMBER_INPUT = "Enter an id (1–200 characters) and a name (1–60 characters)."
+LABEL_INPUT = "Enter a label (1–60 characters)."
+ADMIN_ONLY = "Only an admin can manage members."
+OWNER_ONLY = "Only the token owner or an admin can revoke it."
+
+
+def _shared(request: Request) -> bool:
+    return request.app.state.settings.identity_header is not None
 
 
 def current_user(request: Request) -> tuple[str, str | None]:
     member = request.state.member
-    request.state.user_from_header = member is not None
-    if member is not None:
+    request.state.user_from_header = _shared(request)
+    if request.state.user_from_header:
+        if member is None:
+            raise HTTPException(401, "sign in required")
         return member["id"], member["name"]
     user_id = request.cookies.get("vf_id")
     if not user_id or user_id == "agent" or not USER_ID.fullmatch(user_id):
@@ -72,7 +85,7 @@ def _with_id_cookie(request: Request, response):
     return response
 
 
-def _page(request: Request, user: tuple[str, str | None], name: str, ctx: dict):
+def _page(request: Request, user: tuple[str, str | None], name: str, ctx: dict, status=200):
     url = request.url.remove_query_params("name_error")
     ctx = ctx | {
         "user_name": user[1],
@@ -80,7 +93,8 @@ def _page(request: Request, user: tuple[str, str | None], name: str, ctx: dict):
         "here": url.path + (f"?{url.query}" if url.query else ""),
         "name_error": "name_error" in request.query_params,
     }
-    return _with_id_cookie(request, templates.TemplateResponse(request, name, ctx))
+    response = templates.TemplateResponse(request, name, ctx, status_code=status)
+    return _with_id_cookie(request, response)
 
 
 def _partial(request: Request, names: list[str], ctx: dict, headers: dict | None = None):
@@ -147,10 +161,12 @@ def _sign_refusal(request: Request, report: sqlite3.Row, user_id: str) -> str | 
 
 
 def _can_moderate(
-    member: sqlite3.Row | None, user_id: str, root: sqlite3.Row, report: sqlite3.Row
+    shared: bool, member: sqlite3.Row | None, user_id: str, root: sqlite3.Row, report: sqlite3.Row
 ) -> bool:
+    if shared and member is None:
+        return False
     return rules.can_moderate(
-        shared=member is not None,
+        shared=shared,
         user_id=user_id,
         role=member["role"] if member is not None else None,
         root_author_id=root["author_id"],
@@ -169,6 +185,7 @@ def report_context(
     version: int,
     user_id: str,
     member: sqlite3.Row | None,
+    shared: bool,
 ) -> dict:
     id = report["id"]
     current = db.latest_version(conn, id)
@@ -206,12 +223,12 @@ def report_context(
         "my_verdict": rules.latest_verdicts(verdicts, current).get(user_id),
         "user_id": user_id,
         "can_moderate": {
-            t.root["id"] for t in threads if _can_moderate(member, user_id, t.root, report)
+            t.root["id"] for t in threads if _can_moderate(shared, member, user_id, t.root, report)
         },
         "resolvers": {
             t.root["id"]: _resolver_name(conn, t.root["resolved_by"])
             for t in threads
-            if member is not None and t.root["resolved_by"]
+            if shared and t.root["resolved_by"]
         },
     }
 
@@ -220,7 +237,7 @@ def _thread_response(
     request, conn, report, user_id, comment_id, reset_form=False, version=None, error=None
 ):
     shown = version if version is not None else db.latest_version(conn, report["id"])
-    ctx = report_context(conn, report, shown, user_id, request.state.member)
+    ctx = report_context(conn, report, shown, user_id, request.state.member, _shared(request))
     ctx["thread"] = next(
         t for t in ctx["threads"] if comment_id in (t.root["id"], *(r["id"] for r in t.replies))
     )
@@ -238,11 +255,11 @@ def _moderation_refusal(request, conn, report, user_id, cid):
     root = db.thread_root(conn, report["id"], cid)
     if root is None:
         raise HTTPException(404, "comment not found")
-    if _can_moderate(request.state.member, user_id, root, report):
+    if _can_moderate(_shared(request), request.state.member, user_id, root, report):
         return None
     if not request.headers.get("HX-Request"):
-        raise HTTPException(403, MODERATION)
-    return _thread_response(request, conn, report, user_id, cid, error=MODERATION)
+        raise HTTPException(403, rules.MODERATION)
+    return _thread_response(request, conn, report, user_id, cid, error=rules.MODERATION)
 
 
 def _landing_scope(scope: str, user_id: str) -> dict:
@@ -379,7 +396,9 @@ def project_page(
 @router.get("/r/{id}")
 def report_page(id: str, request: Request, conn: Conn, user: User):
     report = _require_report(conn, id)
-    ctx = report_context(conn, report, db.latest_version(conn, id), user[0], request.state.member)
+    ctx = report_context(
+        conn, report, db.latest_version(conn, id), user[0], request.state.member, _shared(request)
+    )
     ctx["sign_refusal"] = _sign_refusal(request, report, user[0])
     return _page(request, user, "report.html", ctx)
 
@@ -389,7 +408,7 @@ def report_version_page(id: str, n: int, request: Request, conn: Conn, user: Use
     report = _require_report(conn, id)
     if db.get_version(conn, id, n) is None:
         raise HTTPException(404, "version not found")
-    ctx = report_context(conn, report, n, user[0], request.state.member)
+    ctx = report_context(conn, report, n, user[0], request.state.member, _shared(request))
     return _page(request, user, "report.html", ctx)
 
 
@@ -566,14 +585,14 @@ def post_verdict(
     except db.StaleVersion as stale:
         return _stale(request, id, stale.latest)
     except db.VerdictRefused as refused:
-        ctx = report_context(conn, report, version, user_id, request.state.member)
+        ctx = report_context(conn, report, version, user_id, request.state.member, _shared(request))
         return _partial(
             request, ["_verdict.html"], ctx | {"error": str(refused), "summary": summary}
         )
     settings = request.app.state.settings
     background.add_task(notify.send, settings, notify.verdict_text(report, row, settings.base_url))
-    ctx = report_context(conn, report, version, user_id, request.state.member) | {"oob": True}
-    return _partial(request, ["_verdict.html", "_sidebar.html"], ctx)
+    ctx = report_context(conn, report, version, user_id, request.state.member, _shared(request))
+    return _partial(request, ["_verdict.html", "_sidebar.html"], ctx | {"oob": True})
 
 
 @router.post("/r/{id}/sign")
@@ -602,14 +621,14 @@ def sign(
         settings = request.app.state.settings
         text = notify.ready_for_review_text(report, version, name, settings.base_url)
         background.add_task(notify.send, settings, text)
-    ctx = report_context(conn, report, version, user_id, request.state.member)
+    ctx = report_context(conn, report, version, user_id, request.state.member, _shared(request))
     ctx |= {"oob": True, "verdict_oob": True}
     return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html"], ctx)
 
 
 @router.post("/me")
 def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str, Form()] = "/"):
-    if request.state.member is not None:
+    if _shared(request):
         raise HTTPException(403, "identity is set by the proxy")
     name = name.strip()
     if not next.startswith("/") or next.startswith(("//", "/\\")):
@@ -621,3 +640,108 @@ def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str
         "vf_name", url_quote(name), max_age=YEAR, samesite="lax", secure=_secure(request)
     )
     return response
+
+
+def _access(
+    request: Request, conn: sqlite3.Connection, user, *, error=None, token=None, status=200
+):
+    member = request.state.member
+    ctx = {"shared": _shared(request), "error": error, "new_token": token, "roles": db.ROLES}
+    if member is not None:
+        ctx |= {"tokens": db.list_tokens(conn, member["id"]), "is_admin": member["role"] == "admin"}
+        if ctx["is_admin"]:
+            ctx |= {"users": db.list_users(conn), "all_tokens": db.list_tokens(conn)}
+    return _page(request, user, "access.html", ctx, status)
+
+
+def _denied(request: Request, message: str):
+    return templates.TemplateResponse(request, "denied.html", {"message": message}, status_code=403)
+
+
+def access_member(request: Request) -> sqlite3.Row:
+    if not _shared(request):
+        raise HTTPException(404, "not found")
+    return request.state.member
+
+
+Member = Annotated[sqlite3.Row, Depends(access_member)]
+
+
+@router.get("/access")
+def access_page(request: Request, conn: Conn, user: User):
+    return _access(request, conn, user)
+
+
+@router.post("/access/users")
+def add_member(
+    request: Request,
+    conn: Conn,
+    user: User,
+    member: Member,
+    id: Annotated[str, Form()] = "",
+    name: Annotated[str, Form()] = "",
+    role: Annotated[Literal["admin", "member"], Form()] = "member",
+):
+    if member["role"] != "admin":
+        return _denied(request, ADMIN_ONLY)
+    id, name = id.strip(), name.strip()
+    if not (1 <= len(id) <= 200 and 1 <= len(name) <= 60):
+        return _access(request, conn, user, error=MEMBER_INPUT, status=422)
+    try:
+        db.add_user(conn, id=id, name=name, role=role)
+    except ValueError:
+        return _access(request, conn, user, error=MEMBER_EXISTS, status=409)
+    log.info("access action=add_user actor=%s target=%s role=%s", user[0], id, role)
+    return RedirectResponse("/access", 303)
+
+
+@router.post("/access/users/{id:path}")
+def update_member(
+    id: str,
+    request: Request,
+    conn: Conn,
+    user: User,
+    member: Member,
+    role: Annotated[Literal["admin", "member"] | None, Form()] = None,
+    active: Annotated[Literal["0", "1"] | None, Form()] = None,
+):
+    if member["role"] != "admin":
+        return _denied(request, ADMIN_ONLY)
+    try:
+        row = db.update_user(conn, id, role=role, active=None if active is None else active == "1")
+    except db.LastAdmin:
+        return _access(request, conn, user, error=LAST_ADMIN, status=409)
+    except ValueError:
+        raise HTTPException(404, "member not found") from None
+    log.info(
+        "access action=update_user actor=%s target=%s role=%s active=%s",
+        user[0],
+        id,
+        row["role"],
+        row["active"],
+    )
+    return RedirectResponse("/access", 303)
+
+
+@router.post("/access/tokens")
+def new_token(
+    request: Request, conn: Conn, user: User, member: Member, label: Annotated[str, Form()] = ""
+):
+    label = label.strip()
+    if not 1 <= len(label) <= 60:
+        return _access(request, conn, user, error=LABEL_INPUT, status=422)
+    token, row = db.create_token(conn, owner_id=member["id"], label=label)
+    log.info("access action=create_token actor=%s target=%s", user[0], row["id"])
+    return _access(request, conn, user, token=token)
+
+
+@router.post("/access/tokens/{token_id}/revoke")
+def revoke_token(token_id: str, request: Request, conn: Conn, user: User, member: Member):
+    token = db.get_token(conn, token_id)
+    if token is None:
+        raise HTTPException(404, "token not found")
+    if token["owner_id"] != member["id"] and member["role"] != "admin":
+        return _denied(request, OWNER_ONLY)
+    if db.revoke_token(conn, token_id):
+        log.info("access action=revoke_token actor=%s target=%s", user[0], token_id)
+    return RedirectResponse("/access", 303)
