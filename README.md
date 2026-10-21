@@ -311,7 +311,7 @@ export VERIFAIR_BOOTSTRAP_ADMIN_ID=jane@example.com
 uv run uvicorn verifair.asgi:app
 ```
 
-Startup fails when the database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set. It also fails when the id is not a plain id (no spaces, `/` or `\`).
+Startup fails when the database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set. It also fails when the id is not a plain id (no spaces, `/` or `\`, and not `agent`).
 
 A request without the header gets 401. A signed-in person who is not an active member gets 403 with a note to ask an admin. `/healthz` and `/static/` stay public. `/api/` uses tokens. Every other page, including `/docs` and `/openapi.json`, needs membership.
 
@@ -324,7 +324,7 @@ A request without the header gets 401. A signed-in person who is not an active m
 | Comment, reply, reopen a thread | Yes | Yes | Comment and reply on the owner's reports |
 | Sign a version | Own reports | Own reports | No |
 | Approve or request changes | Reports someone else signed | Same as a member | No |
-| Resolve a thread or change its blocking flag | Threads they started, and agent threads on their own reports | Any thread | Agent threads on the owner's reports |
+| Resolve a thread or change its blocking flag | Threads they started, and agent threads on their own reports | Any thread | Resolve agent threads on the owner's reports |
 | Create and revoke agent tokens | Own tokens | Own tokens, and revoke anyone's | No |
 | Add members, change roles, deactivate | No | Yes | No |
 
@@ -353,13 +353,15 @@ The token owner owns every report the token pushes. Report ids are chosen by the
 
 ### Moderation
 
-Anyone can reply to a thread or reopen it. Only these people can resolve a thread or change its blocking flag:
+In shared mode, anyone can reply to a thread or reopen it. Only these people can resolve a thread or change its blocking flag:
 
 - the person who started the thread,
 - an admin,
 - the report owner, when the agent started the thread.
 
 The buttons are hidden for everyone else, and a direct request gets 403 `Only the person who started this thread or an admin can do that.` A resolved thread shows who resolved it.
+
+In local mode, anyone can resolve any thread.
 
 ### Moving an existing deployment to shared mode
 

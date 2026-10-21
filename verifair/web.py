@@ -55,7 +55,7 @@ OWNER_ONLY = "Only the token owner or an admin can revoke it."
 
 
 def plain_id(value: str) -> bool:
-    return PLAIN_ID.fullmatch(value) is not None and value not in (".", "..")
+    return PLAIN_ID.fullmatch(value) is not None and value not in (".", "..", "agent")
 
 
 def _shared(request: Request) -> bool:

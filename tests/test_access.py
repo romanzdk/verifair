@@ -299,7 +299,19 @@ def test_browser_check_refusals_on_access_keep_the_security_headers(
 
 @pytest.mark.parametrize(
     "id",
-    ["../tokens/x/revoke", "a/b", "a\\b", "a\nb", "a\x00b", "a\x7fb", "a b", "a\tb", ".", ".."],
+    [
+        "../tokens/x/revoke",
+        "a/b",
+        "a\\b",
+        "a\nb",
+        "a\x00b",
+        "a\x7fb",
+        "a b",
+        "a\tb",
+        ".",
+        "..",
+        "agent",
+    ],
 )
 def test_add_member_refuses_ids_that_are_not_plain(shared_client, conn, id):
     r = shared_client.post("/access/users", data={"id": id, "name": "X"}, headers=ADMIN)

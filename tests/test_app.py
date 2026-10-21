@@ -76,7 +76,9 @@ def test_bootstrap_admin_id_is_stripped(monkeypatch, tmp_path):
     assert client.get("/access").status_code == 200
 
 
-@pytest.mark.parametrize("value", ["jane doe@example.com", "a/b", "a\\b", ".", "..", "a\nb"])
+@pytest.mark.parametrize(
+    "value", ["jane doe@example.com", "a/b", "a\\b", ".", "..", "a\nb", "agent"]
+)
 def test_bootstrap_admin_id_must_be_plain(shared_settings, value):
     with pytest.raises(RuntimeError) as error:
         create_app(replace(shared_settings, bootstrap_admin_id=value))
