@@ -4,6 +4,7 @@ from verifair.db import add_comment, connect, init_schema, push_report
 from verifair.render import (
     Section,
     build_threads,
+    find_anchor,
     normalize,
     slugify,
     split_sections,
@@ -199,18 +200,21 @@ def _comments(conn):
     return conn.execute("SELECT * FROM comments ORDER BY created_at, id").fetchall()
 
 
-def test_report_template_has_seven_sections_and_no_html_comments():
+def test_report_template_has_ten_sections_and_no_html_comments():
     from pathlib import Path
 
     body = (Path(__file__).parents[1] / "docs" / "report-template.md").read_text()
     sections = split_sections(body)
     assert [s.heading for s in sections] == [
         "Intent",
+        "Judge this",
         "Design",
         "Edge cases",
         "Verification",
+        "Not verified / assumptions",
+        "Rollback",
+        "Security impact",
         "Agent reviews",
-        "Judge this",
         "Links",
     ]
     assert all("&lt;!--" not in s.html and s.html.startswith("<blockquote>") for s in sections)
@@ -225,3 +229,72 @@ def test_section_less_threads_are_general_not_orphaned(conn):
     assert [t.root["id"] for t in grouped["vf_general"]] == [general["id"]]
     assert [t.root["id"] for t in grouped[None]] == [orphan["id"]]
     assert grouped["vf_general"][0].found is True
+
+
+def _quote_comment(conn, section, quote, prefix=None, suffix=None):
+    add_comment(
+        conn,
+        report_id="r",
+        version=1,
+        author_id="u",
+        author_name="U",
+        body="b",
+        section=section,
+        quote=quote,
+        prefix=prefix,
+        suffix=suffix,
+    )
+
+
+def test_find_anchor_scores_prefix_and_suffix():
+    text = "the price is 5. later the price is 6."
+    assert find_anchor(text, "the price is", None, None) == 0
+    assert find_anchor(text, "the price is", "5. later ", " 6.") == text.rindex("the price")
+    assert find_anchor(text, "the price is", "", " 5.") == 0
+    assert find_anchor(text, "missing", "", "") is None
+
+
+def test_duplicate_quote_picks_occurrence_by_prefix_and_suffix(conn):
+    sections = split_sections("## A\nthe price is 5. later the price is 6.")
+    _quote_comment(conn, "A", "the price is", prefix="is 5. later ", suffix=" 6.")
+    (thread,) = build_threads(_comments(conn), sections, 1)
+    assert (thread.found, thread.moved) == (True, False)
+    assert thread.match_start == sections[0].text.rindex("the price")
+
+
+def test_duplicate_heading_with_quote_in_both_prefers_better_context(conn):
+    sections = split_sections("## Notes\nalpha same thing\n## Notes\nbeta same thing")
+    _quote_comment(conn, "Notes", "same thing", prefix="beta ")
+    (thread,) = build_threads(_comments(conn), sections, 1)
+    assert (thread.section_slug, thread.match_start) == ("notes-2", 5)
+
+
+def test_renamed_heading_keeps_thread_found_and_moved(conn):
+    sections = split_sections("## Intro\nhello\n## New name\nkeep this line")
+    _quote_comment(conn, "Old name", "this line")
+    (thread,) = build_threads(_comments(conn), sections, 1)
+    assert (thread.section_slug, thread.found, thread.moved) == ("new-name", True, True)
+    assert thread.match_start == 5
+
+
+def test_quote_moved_out_of_its_section_is_found_elsewhere(conn):
+    sections = split_sections("## A\nnothing here\n## B\nthe moved text")
+    _quote_comment(conn, "A", "moved text")
+    (thread,) = build_threads(_comments(conn), sections, 1)
+    assert (thread.section_slug, thread.found, thread.moved) == ("b", True, True)
+
+
+def test_quote_across_table_cells_matches_without_whitespace(conn):
+    sections = split_sections("## A\n|Price|Qty|\n|-|-|\n|10|20|\n")
+    assert sections[0].text == "Price Qty 10 20"
+    _quote_comment(conn, "A", "Qty10")
+    (thread,) = build_threads(_comments(conn), sections, 1)
+    assert (thread.found, thread.moved, thread.match_start) == (True, False, 6)
+
+
+def test_section_level_and_orphan_threads_have_no_match_start(conn):
+    _quote_comment(conn, "A", None)
+    _quote_comment(conn, "A", "gone")
+    plain, orphan = build_threads(_comments(conn), [_section("A", "x")], 1)
+    assert (plain.found, plain.match_start, plain.moved) == (True, None, False)
+    assert (orphan.found, orphan.match_start, orphan.moved) == (False, None, False)

@@ -951,3 +951,28 @@ def test_api_non_blocking_thread_shows_suggestion_tag(client):
     page = client.get("/r/prorate").text
     assert 'class="badge tag-suggestion">Suggestion' in page
     assert 'class="badge tag-blocking"' not in page
+
+
+def test_comment_stores_prefix_suffix_and_marks_the_chosen_occurrence(client):
+    push(client, body="## Intent\nthe fee is 5. later the fee is 6.")
+    client.cookies.set("vf_name", "Alice")
+    page = client.get("/r/prorate").text
+    assert 'name="prefix" value=""' in page and 'name="suffix" value=""' in page
+    data = {"version": 1, "section": "Intent", "quote": "the fee is", "body": "Which?"}
+    r = client.post("/r/prorate/comments", data=data | {"prefix": "5. later ", "suffix": " 6."})
+    assert 'data-match-start="20"' in r.text
+    [thread] = api_threads(client)
+    assert (thread["prefix"], thread["suffix"]) == ("5. later ", " 6.")
+    too_long = client.post("/r/prorate/comments", data=data | {"prefix": "p" * 65})
+    assert too_long.status_code == 422
+
+
+def test_moved_thread_shows_where_it_came_from(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    data = {"version": 1, "section": "Intent", "quote": "Full new price.", "body": "Why?"}
+    client.post("/r/prorate/comments", data=data)
+    push(client, id="prorate", body="## Goal\nFull new price.")
+    page = client.get("/r/prorate").text
+    assert 'moved from "Intent"' in page and 'data-match-start="0"' in page
+    assert 'data-found="true" data-section-slug="goal"' in page

@@ -271,6 +271,8 @@ def post_comment(
     section: Anchor,
     body: Body,
     quote: Annotated[str | None, Form(max_length=2000)] = None,
+    prefix: Annotated[str | None, Form(max_length=64)] = None,
+    suffix: Annotated[str | None, Form(max_length=64)] = None,
     blocking: Annotated[Literal["0", "1"], Form()] = "1",
 ):
     report = _require_report(conn, id)
@@ -290,6 +292,8 @@ def post_comment(
             section=section,
             quote=quote or None,
             blocking=blocking == "1",
+            prefix=prefix or None,
+            suffix=suffix or None,
         )
     except db.StaleVersion as stale:
         return _stale(request, id, stale.latest)

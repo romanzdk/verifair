@@ -10,7 +10,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstra
 
 from verifair import db, notify
 from verifair.deps import get_conn
-from verifair.render import Section, build_threads, split_sections
+from verifair.render import Section, build_threads, normalize, occurrences, split_sections
 from verifair.rules import compute_status
 
 
@@ -42,6 +42,7 @@ def _not_blank(text: str) -> str:
 HttpUrl = Annotated[str, AfterValidator(_http_url)]
 Author = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
 Anchor = Annotated[str, Field(max_length=2000)]
+Context = Annotated[str, Field(max_length=64)]
 SLUG = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
 
 
@@ -76,6 +77,8 @@ class CommentIn(BaseModel):
     parent_id: int | None = None
     section: Anchor | None = None
     quote: Anchor | None = None
+    prefix: Context | None = None
+    suffix: Context | None = None
     blocking: bool = True
 
 
@@ -104,6 +107,8 @@ def _comment_json(row: sqlite3.Row, resolved: bool | None = None) -> dict:
         "created_at": row["created_at"],
         "blocking": bool(row["blocking"]),
         "resolved": row["resolved_at"] is not None if resolved is None else resolved,
+        "prefix": row["prefix"],
+        "suffix": row["suffix"],
     }
 
 
@@ -187,7 +192,12 @@ def get_comments(id: str, conn: Conn, open: bool = False):
     result = []
     for t in threads:
         resolved = t.root["resolved_at"] is not None
-        anchor = {"stale": t.stale, "found": t.found if t.root["quote"] else True}
+        anchor = {
+            "stale": t.stale,
+            "found": t.found if t.root["quote"] else True,
+            "moved": t.moved,
+            "match_start": t.match_start,
+        }
         result.append(
             _comment_json(t.root)
             | anchor
@@ -206,9 +216,16 @@ def post_comment(
     if body.parent_id is None and body.quote is not None and body.section is None:
         raise HTTPException(422, "quote requires section")
     if body.parent_id is None and body.section is not None:
-        headings = list(dict.fromkeys(s.heading for s in _current_sections(conn, id)))
+        sections = _current_sections(conn, id)
+        headings = list(dict.fromkeys(s.heading for s in sections))
         if body.section not in headings:
             return JSONResponse({"detail": "unknown section", "sections": headings}, 422)
+        quote = normalize(body.quote or "")
+        if quote and not (body.prefix or body.suffix):
+            same = [s for s in sections if s.heading == body.section]
+            hits = sum(len(occurrences(s.text, quote)) for s in same)
+            if hits > 1:
+                raise HTTPException(422, "ambiguous quote")
     try:
         row = db.add_comment(
             conn,
@@ -221,6 +238,8 @@ def post_comment(
             section=body.section,
             quote=body.quote,
             blocking=body.blocking,
+            prefix=body.prefix,
+            suffix=body.suffix,
         )
     except ValueError:
         raise HTTPException(404, "parent not found") from None

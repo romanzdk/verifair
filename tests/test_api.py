@@ -75,6 +75,8 @@ def test_comment_roundtrip_and_open_filter(client):
         "created_at": root.json()["created_at"],
         "blocking": True,
         "resolved": False,
+        "prefix": None,
+        "suffix": None,
     }
     reply = client.post(
         "/api/reports/prorate/comments", json={"body": "Because.", "parent_id": cid}, headers=H
@@ -85,11 +87,9 @@ def test_comment_roundtrip_and_open_filter(client):
     threads = client.get("/api/reports/prorate/comments", headers=H).json()["threads"]
     assert len(threads) == 1
     t = threads[0]
-    assert {k: v for k, v in t.items() if k != "replies"} == root.json() | {
-        "stale": False,
-        "found": True,
-    }
-    assert t["replies"] == [reply.json() | {"stale": False, "found": True}]
+    anchor = {"stale": False, "found": True, "moved": False, "match_start": 0}
+    assert {k: v for k, v in t.items() if k != "replies"} == root.json() | anchor
+    assert t["replies"] == [reply.json() | anchor]
 
     done = client.post(f"/api/reports/prorate/comments/{cid}/resolve", headers=H)
     assert (done.status_code, done.json()) == (200, {"resolved": True})
@@ -439,3 +439,32 @@ def test_comment_blocking_roundtrip(client):
     assert reply["blocking"] is False
     threads = client.get(url, headers=H).json()["threads"]
     assert [t["blocking"] for t in threads] == [True, False]
+
+
+DUP = "## Intent\nthe fee is 5. later the fee is 6.\n\n## Edge cases\nFirst day."
+
+
+def test_ambiguous_quote_without_context_422(client):
+    push(client, body=DUP)
+    r = _comment(client, section="Intent", quote="the fee is")
+    assert (r.status_code, r.json()) == (422, {"detail": "ambiguous quote"})
+    assert client.get("/api/reports/prorate/comments", headers=H).json() == {"threads": []}
+    assert _comment(client, section="Edge cases", quote="First day").status_code == 201
+
+
+def test_prefix_suffix_pick_occurrence_and_roundtrip(client):
+    push(client, body=DUP)
+    r = _comment(client, section="Intent", quote="the fee is", prefix="5. later ", suffix=" 6.")
+    assert r.status_code == 201
+    assert (r.json()["prefix"], r.json()["suffix"]) == ("5. later ", " 6.")
+    [t] = client.get("/api/reports/prorate/comments", headers=H).json()["threads"]
+    assert (t["found"], t["moved"], t["match_start"]) == (True, False, 20)
+    assert _comment(client, section="Intent", quote="x", prefix="p" * 65).status_code == 422
+
+
+def test_thread_moved_after_heading_rename(client):
+    push(client)
+    _comment(client, section="Intent", quote="Full new price.")
+    push(client, id="prorate", body="## Goal\nFull new price.\n\n## Edge cases\nFirst day.")
+    [t] = client.get("/api/reports/prorate/comments", headers=H).json()["threads"]
+    assert (t["found"], t["moved"], t["match_start"]) == (True, True, 0)

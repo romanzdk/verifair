@@ -1,6 +1,7 @@
 const popover = document.getElementById("vf_popover");
 const QUOTE_PREVIEW_MAX = 300;
 const QUOTE_MAX = 2000;
+const CONTEXT = 32;
 let pending = null;
 
 function sectionOf(node) {
@@ -8,11 +9,29 @@ function sectionOf(node) {
   return el && el.closest("section .content") ? el.closest("section") : null;
 }
 
-function openForm(section, quote) {
+function collapse(text) {
+  return text.replace(/\s+/g, " ");
+}
+
+function context(section, range, quote) {
+  const content = section.querySelector(".content");
+  if (!range || !content) return ["", ""];
+  const text = indexText(content).text;
+  const before = document.createRange();
+  before.setStart(content, 0);
+  before.setEnd(range.startContainer, range.startOffset);
+  const lead = range.toString().match(/^\s*/)[0];
+  const at = collapse(before.toString() + lead).trimStart().length;
+  const end = at + collapse(quote).length;
+  return [text.slice(Math.max(0, at - CONTEXT), at), text.slice(end, end + CONTEXT)];
+}
+
+function openForm(section, quote, range) {
   const form = section.querySelector("form.cform");
   if (!form) return;
   quote = quote.slice(0, QUOTE_MAX);
   form.quote.value = quote;
+  [form.prefix.value, form.suffix.value] = context(section, range, quote);
   const preview = form.querySelector(".q");
   const shown = quote.length > QUOTE_PREVIEW_MAX ? `${quote.slice(0, QUOTE_PREVIEW_MAX)}…` : quote;
   preview.textContent = quote ? `"${shown}"` : "";
@@ -41,14 +60,14 @@ document.addEventListener("mouseup", (event) => {
     popover.hidden = true;
     return;
   }
-  pending = { section, text };
+  pending = { section, text, range: selection.getRangeAt(0).cloneRange() };
   placePopover(selection.getRangeAt(0).getBoundingClientRect());
 });
 
 popover?.querySelector("button").addEventListener("click", () => {
   popover.hidden = true;
   window.getSelection().removeAllRanges();
-  if (pending) openForm(pending.section, pending.text);
+  if (pending) openForm(pending.section, pending.text, pending.range);
 });
 
 document.addEventListener("click", (event) => {
@@ -58,7 +77,8 @@ document.addEventListener("click", (event) => {
   if (cancel) cancel.closest("form").hidden = true;
 });
 
-// Mirrors render.normalize on the server: text nodes joined, whitespace runs collapsed.
+// Mirrors render.normalize on the server: text nodes joined, whitespace runs collapsed, so
+// offsets line up with the server's match_start.
 function indexText(root) {
   const chars = [];
   const points = [];
@@ -68,7 +88,7 @@ function indexText(root) {
     for (let i = 0; i < node.data.length; i++) {
       let ch = node.data[i];
       if (/\s/.test(ch)) {
-        if (chars[chars.length - 1] === " ") continue;
+        if (!chars.length || chars[chars.length - 1] === " ") continue;
         ch = " ";
       }
       chars.push(ch);
@@ -78,14 +98,32 @@ function indexText(root) {
   return { text: chars.join(""), points };
 }
 
-function findRange(root, quote) {
-  const needle = quote.replace(/\s+/g, " ").trim();
+// The server may have matched with whitespace ignored (e.g. across table cells), so the quote is
+// compared to the text at matchStart without spaces.
+function lastIndexAt(text, at, quote) {
+  const bare = quote.replace(/\s/g, "");
+  let seen = 0;
+  for (let i = at; bare && i < text.length; i++) {
+    if (text[i] === " ") continue;
+    if (text[i] !== bare[seen]) return -1;
+    if (++seen === bare.length) return i;
+  }
+  return -1;
+}
+
+function findRange(root, quote, matchStart) {
+  const needle = collapse(quote).trim();
   if (!needle) return null;
   const { text, points } = indexText(root);
-  const at = text.indexOf(needle);
-  if (at < 0) return null;
+  let at = matchStart === undefined ? -1 : Number(matchStart);
+  let last = at >= 0 ? lastIndexAt(text, at, needle) : -1;
+  if (last < 0) {
+    at = text.indexOf(needle);
+    if (at < 0) return null;
+    last = at + needle.length - 1;
+  }
   const [startNode, startOffset] = points[at];
-  const [endNode, endOffset] = points[at + needle.length - 1];
+  const [endNode, endOffset] = points[last];
   const range = document.createRange();
   range.setStart(startNode, startOffset);
   range.setEnd(endNode, endOffset + 1);
@@ -106,7 +144,7 @@ function highlight() {
   const spanning = [];
   document.querySelectorAll('.thread[data-quote][data-found="true"]').forEach((thread) => {
     const content = document.querySelector(`#${CSS.escape(thread.dataset.sectionSlug)} .content`);
-    const range = content && findRange(content, thread.dataset.quote);
+    const range = content && findRange(content, thread.dataset.quote, thread.dataset.matchStart);
     if (!range) return;
     if (range.startContainer.parentNode === range.endContainer.parentNode) {
       const mark = document.createElement("mark");

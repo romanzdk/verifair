@@ -79,6 +79,8 @@ def test_reply_inherits_anchor_and_resolve_root_only(conn):
         body="?",
         section="Intent",
         quote="full new price",
+        prefix="the ",
+        suffix=" now",
     )
     reply = add_comment(
         conn,
@@ -90,6 +92,7 @@ def test_reply_inherits_anchor_and_resolve_root_only(conn):
         parent_id=root["id"],
     )
     assert (reply["section"], reply["quote"]) == ("Intent", "full new price")
+    assert (reply["prefix"], reply["suffix"]) == ("the ", " now")
     assert len(list_comments(conn, "r1", open_only=True)) == 2
     assert resolve_thread(conn, "r1", reply["id"]) == root["id"]
     assert list_comments(conn, "r1", open_only=True) == []

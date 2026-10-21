@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS comments (
     body TEXT NOT NULL,
     created_at TEXT NOT NULL,
     resolved_at TEXT,
-    blocking INTEGER NOT NULL DEFAULT 1
+    blocking INTEGER NOT NULL DEFAULT 1,
+    prefix TEXT,
+    suffix TEXT
 );
 CREATE TABLE IF NOT EXISTS verdicts (
     id INTEGER PRIMARY KEY,
@@ -127,6 +129,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "reports", "session_url", "TEXT")
     _ensure_column(conn, "versions", "commit", "TEXT")
     _ensure_column(conn, "comments", "blocking", "INTEGER NOT NULL DEFAULT 1")
+    _ensure_column(conn, "comments", "prefix", "TEXT")
+    _ensure_column(conn, "comments", "suffix", "TEXT")
 
 
 def _unique_id(conn: sqlite3.Connection, base: str) -> str:
@@ -250,6 +254,8 @@ def add_comment(
     quote: str | None = None,
     expected_version: int | None = None,
     blocking: bool = True,
+    prefix: str | None = None,
+    suffix: str | None = None,
 ) -> sqlite3.Row:
     with _write(conn):
         _check_version(conn, report_id, expected_version)
@@ -261,13 +267,15 @@ def add_comment(
                 raise ValueError(f"parent comment {parent_id} not found on report {report_id!r}")
             parent_id = parent["parent_id"] or parent["id"]
             version, section, quote = parent["version"], parent["section"], parent["quote"]
+            prefix, suffix = parent["prefix"], parent["suffix"]
             blocking = bool(
                 conn.execute("SELECT blocking FROM comments WHERE id=?", (parent_id,)).fetchone()[0]
             )
             reopen_thread(conn, report_id, parent_id)
         cur = conn.execute(
             "INSERT INTO comments (report_id, version, parent_id, section, quote, author_id,"
-            " author_name, body, created_at, blocking) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " author_name, body, created_at, blocking, prefix, suffix)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 report_id,
                 version,
@@ -279,6 +287,8 @@ def add_comment(
                 body,
                 _now(),
                 int(blocking),
+                prefix,
+                suffix,
             ),
         )
     log.info(

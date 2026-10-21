@@ -20,9 +20,9 @@
   {% endif %}
 </details>
 {% else %}
-<div class="thread" id="vf_t{{ root.id }}" data-quote="{{ root.quote or '' }}" data-found="{{ 'true' if thread.found and root.quote else 'false' }}" data-section-slug="{{ thread.section_slug or '' }}">
+<div class="thread" id="vf_t{{ root.id }}" data-quote="{{ root.quote or '' }}" data-found="{{ 'true' if thread.found and root.quote else 'false' }}" data-section-slug="{{ thread.section_slug or '' }}"{% if thread.match_start is not none %} data-match-start="{{ thread.match_start }}"{% endif %}>
   {{ tag }}
-  {% if root.quote %}<div class="q">"{{ root.quote }}"{% if thread.stale %} <span class="stale">on v{{ root.version }}</span>{% endif %}</div>
+  {% if root.quote %}<div class="q">"{{ root.quote }}"{% if thread.stale %} <span class="stale">on v{{ root.version }}</span>{% endif %}{% if thread.moved %} <span class="stale">moved from "{{ root.section }}"</span>{% endif %}</div>
   {% elif thread.stale %}<div class="q"><span class="stale">on v{{ root.version }}</span></div>{% endif %}
   {{ messages() }}
   {% if is_current %}
