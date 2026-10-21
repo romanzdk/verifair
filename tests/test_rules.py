@@ -4,6 +4,7 @@ from verifair.db import add_comment, add_verdict, connect, init_schema, push_rep
 from verifair.render import build_threads
 from verifair.rules import (
     can_approve,
+    can_moderate,
     can_request_changes,
     compute_status,
     latest_verdicts,
@@ -174,3 +175,40 @@ def test_can_approve_needs_no_open_blocking_thread(conn):
     assert can_approve(_threads(conn))
     _comment(conn, "alice", parent_id=root["id"])
     assert not can_approve(_threads(conn))
+
+
+@pytest.mark.parametrize(
+    ("shared", "user_id", "role", "root_author_id", "allowed"),
+    [
+        (False, "anyone00", None, "alice@example.com", True),
+        (False, "anyone00", None, "agent", True),
+        (True, "alice@example.com", "member", "alice@example.com", True),
+        (True, "carol@example.com", "member", "alice@example.com", False),
+        (True, "admin@example.com", "admin", "alice@example.com", True),
+        (True, "admin@example.com", "admin", "agent", True),
+        (True, "owner@example.com", "member", "agent", True),
+        (True, "carol@example.com", "member", "agent", False),
+        (True, "owner@example.com", "member", "alice@example.com", False),
+    ],
+)
+def test_can_moderate(shared, user_id, role, root_author_id, allowed):
+    assert (
+        can_moderate(
+            shared=shared,
+            user_id=user_id,
+            role=role,
+            root_author_id=root_author_id,
+            report_author_id="owner@example.com",
+        )
+        is allowed
+    )
+
+
+def test_can_moderate_agent_thread_without_report_owner():
+    assert not can_moderate(
+        shared=True,
+        user_id="carol@example.com",
+        role="member",
+        root_author_id="agent",
+        report_author_id=None,
+    )

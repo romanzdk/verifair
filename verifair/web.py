@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from verifair import db, notify, rules
+from verifair.api import MODERATION
 from verifair.deps import get_conn
 from verifair.render import build_threads, split_sections, threads_by_section
 
@@ -145,8 +146,29 @@ def _sign_refusal(request: Request, report: sqlite3.Row, user_id: str) -> str | 
     return None
 
 
+def _can_moderate(
+    member: sqlite3.Row | None, user_id: str, root: sqlite3.Row, report: sqlite3.Row
+) -> bool:
+    return rules.can_moderate(
+        shared=member is not None,
+        user_id=user_id,
+        role=member["role"] if member is not None else None,
+        root_author_id=root["author_id"],
+        report_author_id=report["author_id"],
+    )
+
+
+def _resolver_name(conn: sqlite3.Connection, user_id: str) -> str:
+    user = db.get_user(conn, user_id)
+    return user["name"] if user else user_id
+
+
 def report_context(
-    conn: sqlite3.Connection, report: sqlite3.Row, version: int, user_id: str
+    conn: sqlite3.Connection,
+    report: sqlite3.Row,
+    version: int,
+    user_id: str,
+    member: sqlite3.Row | None,
 ) -> dict:
     id = report["id"]
     current = db.latest_version(conn, id)
@@ -183,22 +205,44 @@ def report_context(
         "links": _links(report),
         "my_verdict": rules.latest_verdicts(verdicts, current).get(user_id),
         "user_id": user_id,
+        "can_moderate": {
+            t.root["id"] for t in threads if _can_moderate(member, user_id, t.root, report)
+        },
+        "resolvers": {
+            t.root["id"]: _resolver_name(conn, t.root["resolved_by"])
+            for t in threads
+            if member is not None and t.root["resolved_by"]
+        },
     }
 
 
-def _thread_response(request, conn, report, user_id, comment_id, reset_form=False, version=None):
+def _thread_response(
+    request, conn, report, user_id, comment_id, reset_form=False, version=None, error=None
+):
     shown = version if version is not None else db.latest_version(conn, report["id"])
-    ctx = report_context(conn, report, shown, user_id)
+    ctx = report_context(conn, report, shown, user_id, request.state.member)
     ctx["thread"] = next(
         t for t in ctx["threads"] if comment_id in (t.root["id"], *(r["id"] for r in t.replies))
     )
     ctx["oob"] = True
+    ctx["thread_error"] = error
     names = ["_thread.html", "_sidebar.html"]
     section = next((s for s in ctx["sections"] if s.slug == ctx["thread"].section_slug), None)
     if reset_form and section:
         ctx["s"] = section
         names.append("_cform.html")
     return _partial(request, names, ctx)
+
+
+def _moderation_refusal(request, conn, report, user_id, cid):
+    root = db.thread_root(conn, report["id"], cid)
+    if root is None:
+        raise HTTPException(404, "comment not found")
+    if _can_moderate(request.state.member, user_id, root, report):
+        return None
+    if not request.headers.get("HX-Request"):
+        raise HTTPException(403, MODERATION)
+    return _thread_response(request, conn, report, user_id, cid, error=MODERATION)
 
 
 def _landing_scope(scope: str, user_id: str) -> dict:
@@ -335,7 +379,7 @@ def project_page(
 @router.get("/r/{id}")
 def report_page(id: str, request: Request, conn: Conn, user: User):
     report = _require_report(conn, id)
-    ctx = report_context(conn, report, db.latest_version(conn, id), user[0])
+    ctx = report_context(conn, report, db.latest_version(conn, id), user[0], request.state.member)
     ctx["sign_refusal"] = _sign_refusal(request, report, user[0])
     return _page(request, user, "report.html", ctx)
 
@@ -345,7 +389,8 @@ def report_version_page(id: str, n: int, request: Request, conn: Conn, user: Use
     report = _require_report(conn, id)
     if db.get_version(conn, id, n) is None:
         raise HTTPException(404, "version not found")
-    return _page(request, user, "report.html", report_context(conn, report, n, user[0]))
+    ctx = report_context(conn, report, n, user[0], request.state.member)
+    return _page(request, user, "report.html", ctx)
 
 
 @router.post("/r/{id}/comments")
@@ -431,7 +476,10 @@ def resolve(id: str, cid: int, request: Request, conn: Conn, user: User):
     report = _require_report(conn, id)
     if not user[1]:
         return _name_prompt(request, f"/r/{id}", f"#vf_t{cid}")
-    root_id = db.resolve_thread(conn, id, cid)
+    refusal = _moderation_refusal(request, conn, report, user[0], cid)
+    if refusal:
+        return refusal
+    root_id = db.resolve_thread(conn, id, cid, by=user[0])
     if root_id is None:
         raise HTTPException(404, "comment not found")
     return _thread_response(request, conn, report, user[0], root_id)
@@ -460,6 +508,9 @@ def set_blocking(
     report = _require_report(conn, id)
     if not user[1]:
         return _name_prompt(request, f"/r/{id}", f"#vf_t{cid}")
+    refusal = _moderation_refusal(request, conn, report, user[0], cid)
+    if refusal:
+        return refusal
     try:
         changed = db.set_blocking(conn, id, cid, blocking == "1", expected_version=version)
     except db.StaleVersion as stale:
@@ -515,13 +566,13 @@ def post_verdict(
     except db.StaleVersion as stale:
         return _stale(request, id, stale.latest)
     except db.VerdictRefused as refused:
-        ctx = report_context(conn, report, version, user_id)
+        ctx = report_context(conn, report, version, user_id, request.state.member)
         return _partial(
             request, ["_verdict.html"], ctx | {"error": str(refused), "summary": summary}
         )
     settings = request.app.state.settings
     background.add_task(notify.send, settings, notify.verdict_text(report, row, settings.base_url))
-    ctx = report_context(conn, report, version, user_id) | {"oob": True}
+    ctx = report_context(conn, report, version, user_id, request.state.member) | {"oob": True}
     return _partial(request, ["_verdict.html", "_sidebar.html"], ctx)
 
 
@@ -551,7 +602,8 @@ def sign(
         settings = request.app.state.settings
         text = notify.ready_for_review_text(report, version, name, settings.base_url)
         background.add_task(notify.send, settings, text)
-    ctx = report_context(conn, report, version, user_id) | {"oob": True, "verdict_oob": True}
+    ctx = report_context(conn, report, version, user_id, request.state.member)
+    ctx |= {"oob": True, "verdict_oob": True}
     return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html"], ctx)
 
 

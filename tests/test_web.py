@@ -1280,3 +1280,174 @@ def test_blocking_toggle_preserves_draft_verdict_form(client):
     assert 'id="vf_verdict"' not in response.text
     assert 'name="summary"' not in response.text
     assert "You approved v1" in _approve(client).text
+
+
+MODERATION_COPY = "Only the person who started this thread or an admin can do that."
+
+
+@pytest.fixture
+def moderation(shared_client, shared_settings, as_user):
+    from verifair import db
+
+    people = {
+        "admin": {"X-Forwarded-Email": "admin@example.com"},
+        "owner": as_user("owner@example.com", name="Olga Owner"),
+        "carol": as_user("carol@example.com", name="Carol Creator"),
+        "dave": as_user("dave@example.com", name="Dave Other"),
+    }
+    conn = db.connect(shared_settings.db_path)
+    db.push_report(
+        conn,
+        project="p",
+        title="T",
+        risk="low",
+        body="## A\nx",
+        id="r",
+        author_id="owner@example.com",
+    )
+    human, agent = (
+        db.add_comment(
+            conn,
+            report_id="r",
+            version=1,
+            author_id=author,
+            author_name=author,
+            body="Why?",
+            section="A",
+        )["id"]
+        for author in ("carol@example.com", "agent")
+    )
+    conn.close()
+    return people, human, agent
+
+
+def _moderation_state(shared_settings, cid):
+    from verifair import db
+
+    conn = db.connect(shared_settings.db_path)
+    row = conn.execute(
+        "SELECT resolved_at IS NOT NULL, resolved_by, blocking FROM comments WHERE id=?", (cid,)
+    ).fetchone()
+    conn.close()
+    return tuple(row)
+
+
+@pytest.mark.parametrize(
+    ("who", "human_ok", "agent_ok"),
+    [("carol", True, False), ("owner", False, True), ("admin", True, True), ("dave", False, False)],
+)
+def test_shared_mode_moderation_buttons_only_for_creator_admin_or_report_owner(
+    shared_client, moderation, who, human_ok, agent_ok
+):
+    people, human, agent = moderation
+    page = shared_client.get("/r/r", headers=people[who]).text
+    for cid, ok in ((human, human_ok), (agent, agent_ok)):
+        assert (f'id="vf_resolve_{cid}"' in page) is ok
+        assert (f'id="vf_blocking_{cid}"' in page) is ok
+        assert f'id="vf_reply_{cid}"' in page
+
+
+def test_shared_mode_moderation_refused_for_other_member(
+    shared_client, shared_settings, moderation
+):
+    people, human, agent = moderation
+    dave = people["dave"]
+    for cid in (human, agent):
+        for path, data in [
+            (f"/r/r/comments/{cid}/resolve", None),
+            (f"/r/r/comments/{cid}/blocking", {"version": 1, "blocking": "0"}),
+        ]:
+            r = shared_client.post(path, data=data, headers=dave)
+            assert (r.status_code, r.json()) == (403, {"detail": MODERATION_COPY}), path
+            r = shared_client.post(path, data=data, headers=dave | {"HX-Request": "true"})
+            assert r.status_code == 200, path
+            assert f'<p class="error" role="alert">{MODERATION_COPY}</p>' in r.text
+            assert f'id="vf_t{cid}"' in r.text and f'id="vf_reply_{cid}"' in r.text
+            assert f'id="vf_resolve_{cid}"' not in r.text
+    assert _moderation_state(shared_settings, human) == (0, None, 1)
+    assert _moderation_state(shared_settings, agent) == (0, None, 1)
+    assert shared_client.post("/r/r/comments/999/resolve", headers=dave).status_code == 404
+
+
+def test_shared_mode_refusal_on_resolved_thread_opens_the_card(shared_client, moderation):
+    people, human, _ = moderation
+    shared_client.post(f"/r/r/comments/{human}/resolve", headers=people["carol"])
+    r = shared_client.post(
+        f"/r/r/comments/{human}/blocking",
+        data={"version": 1, "blocking": "0"},
+        headers=people["dave"] | {"HX-Request": "true"},
+    )
+    assert (
+        f'<details class="thread resolved" id="vf_t{human}" data-section-slug="a" open>' in r.text
+    )
+    assert f'<p class="error" role="alert">{MODERATION_COPY}</p>' in r.text
+
+
+def test_shared_mode_creator_admin_and_report_owner_can_moderate(
+    shared_client, shared_settings, moderation
+):
+    people, human, agent = moderation
+    r = shared_client.post(
+        f"/r/r/comments/{human}/blocking",
+        data={"version": 1, "blocking": "0"},
+        headers=people["admin"],
+    )
+    assert r.status_code == 200 and "Mark blocking" in r.text
+    r = shared_client.post(f"/r/r/comments/{human}/resolve", headers=people["carol"])
+    assert r.status_code == 200 and 'class="thread resolved"' in r.text
+    r = shared_client.post(f"/r/r/comments/{agent}/resolve", headers=people["owner"])
+    assert r.status_code == 200 and 'class="thread resolved"' in r.text
+    assert _moderation_state(shared_settings, human) == (1, "carol@example.com", 0)
+    assert _moderation_state(shared_settings, agent) == (1, "owner@example.com", 1)
+
+    r = shared_client.post(f"/r/r/comments/{agent}/reopen", headers=people["dave"])
+    assert r.status_code == 200 and 'class="thread resolved"' not in r.text
+    assert _moderation_state(shared_settings, agent) == (0, None, 1)
+
+
+def test_resolved_summary_names_who_resolved(shared_client, shared_settings, moderation):
+    from verifair import db
+
+    people, human, agent = moderation
+    conn = db.connect(shared_settings.db_path)
+    token, _ = db.create_token(conn, owner_id="owner@example.com", label="agent")
+    conn.close()
+    shared_client.post(f"/r/r/comments/{human}/resolve", headers=people["carol"])
+    r = shared_client.post(
+        f"/api/reports/r/comments/{agent}/resolve", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r.json() == {"resolved": True}
+    page = shared_client.get("/r/r", headers=people["dave"]).text
+    assert "Why? · resolved by <b>Carol Creator</b></summary>" in page
+    assert "Why? · resolved by <b>agent</b></summary>" in page
+
+
+def test_local_mode_anyone_moderates_and_resolver_is_not_shown(client):
+    push(client)
+    cid = _open_thread(client)
+    page = client.get("/r/prorate").text
+    assert f'id="vf_resolve_{cid}"' in page and f'id="vf_blocking_{cid}"' in page
+    r = client.post(f"/r/prorate/comments/{cid}/resolve")
+    assert r.status_code == 200 and 'class="thread resolved"' in r.text
+    assert "resolved by" not in r.text and "resolved by" not in client.get("/r/prorate").text
+
+
+def test_thread_markup_for_allowed_users_matches_local_mode(shared_settings, moderation):
+    from verifair import db, web
+
+    _, human, agent = moderation
+    conn = db.connect(shared_settings.db_path)
+    report = db.get_report(conn, "r")
+    template = web.templates.get_template("_thread.html")
+
+    def threads(user_id):
+        member = db.get_user(conn, user_id)
+        ctx = web.report_context(conn, report, 1, user_id, member)
+        return {t.root["id"]: template.render(ctx | {"thread": t}) for t in ctx["threads"]}
+
+    local = threads("someone0")
+    assert all(f'id="vf_resolve_{cid}"' in html for cid, html in local.items())
+    assert threads("admin@example.com") == local
+    assert threads("carol@example.com")[human] == local[human]
+    assert threads("owner@example.com")[agent] == local[agent]
+    conn.close()

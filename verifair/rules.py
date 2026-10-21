@@ -88,3 +88,19 @@ def can_request_changes(threads: list[Thread], reviewer_id: str, summary: str) -
     return bool(summary.strip()) or any(
         t.root["author_id"] == reviewer_id for t in _open_blocking(threads)
     )
+
+
+def can_moderate(
+    *,
+    shared: bool,
+    user_id: str,
+    role: str | None,
+    root_author_id: str,
+    report_author_id: str | None,
+) -> bool:
+    return (
+        not shared
+        or user_id == root_author_id
+        or role == "admin"
+        or (root_author_id == "agent" and user_id == report_author_id)
+    )

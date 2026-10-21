@@ -10,14 +10,17 @@
 {% endmacro %}
 {% set tag %}<span class="badge tag-{{ 'blocking' if thread.blocking else 'suggestion' }}">{{ "Blocking" if thread.blocking else "Suggestion" }}</span>{% endset %}
 {% if root.resolved_at %}
-<details class="thread resolved" id="vf_t{{ root.id }}" data-section-slug="{{ thread.section_slug or '' }}">
-  <summary><span class="ok">✓</span> Resolved · {{ tag }} <b>{{ root.author_name }}</b>: {{ root.body|truncate(80) }}{% if thread.replies %} · {{ thread.replies|length }} repl{{ "ies" if thread.replies|length != 1 else "y" }}{% endif %}</summary>
+<details class="thread resolved" id="vf_t{{ root.id }}" data-section-slug="{{ thread.section_slug or '' }}"{% if thread_error %} open{% endif %}>
+  <summary><span class="ok">✓</span> Resolved · {{ tag }} <b>{{ root.author_name }}</b>: {{ root.body|truncate(80) }}{% if thread.replies %} · {{ thread.replies|length }} repl{{ "ies" if thread.replies|length != 1 else "y" }}{% endif %}{% if root.id in resolvers %} · resolved by <b>{{ resolvers[root.id] }}</b>{% endif %}</summary>
   {{ messages() }}
   {% if is_current %}
   <div class="tact">
     <button type="button" class="btn" id="vf_reopen_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/reopen" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">Reopen</button>
   </div>
   {% endif %}
+  {%- if thread_error %}
+  <p class="error" role="alert">{{ thread_error }}</p>
+  {%- endif %}
 </details>
 {% else %}
 <div class="thread" id="vf_t{{ root.id }}" data-quote="{{ root.quote or '' }}" data-found="{{ 'true' if thread.found and root.quote else 'false' }}" data-section-slug="{{ thread.section_slug or '' }}"{% if thread.match_start is not none %} data-match-start="{{ thread.match_start }}"{% endif %}>
@@ -32,9 +35,14 @@
       <textarea name="body" required maxlength="20000" placeholder="Reply" aria-label="Reply" rows="1"></textarea>
       <button class="btn">Reply</button>
     </form>
+    {%- if root.id in can_moderate %}
     <button type="button" class="btn" id="vf_resolve_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/resolve" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML" hx-confirm="Resolve this thread? You can reopen it later.">Resolve</button>
     <button type="button" class="btn" id="vf_blocking_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/blocking" hx-vals='{"blocking": "{{ 0 if thread.blocking else 1 }}", "version": "{{ version }}"}' hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">{{ "Mark non-blocking" if thread.blocking else "Mark blocking" }}</button>
+    {%- endif %}
   </div>
   {% endif %}
+  {%- if thread_error %}
+  <p class="error" role="alert">{{ thread_error }}</p>
+  {%- endif %}
 </div>
 {% endif %}
