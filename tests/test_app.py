@@ -56,10 +56,33 @@ def test_local_mode_startup_needs_no_users(settings):
     conn.close()
 
 
-def test_empty_bootstrap_admin_id_is_none(monkeypatch):
+@pytest.mark.parametrize("value", ["", " \n"])
+def test_empty_bootstrap_admin_id_is_none(monkeypatch, value):
     monkeypatch.setenv("VERIFAIR_API_TOKEN", "t")
-    monkeypatch.setenv("VERIFAIR_BOOTSTRAP_ADMIN_ID", "")
+    monkeypatch.setenv("VERIFAIR_BOOTSTRAP_ADMIN_ID", value)
     assert load_settings().bootstrap_admin_id is None
+
+
+def test_bootstrap_admin_id_is_stripped(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.delenv("VERIFAIR_API_TOKEN", raising=False)
+    monkeypatch.setenv("VERIFAIR_DB_PATH", str(tmp_path / "strip.db"))
+    monkeypatch.setenv("VERIFAIR_IDENTITY_HEADER", "X-Forwarded-Email")
+    monkeypatch.setenv("VERIFAIR_BOOTSTRAP_ADMIN_ID", " admin@example.com\n")
+    s = load_settings()
+    assert s.bootstrap_admin_id == "admin@example.com"
+    client = TestClient(create_app(s), headers={"X-Forwarded-Email": "admin@example.com"})
+    assert client.get("/access").status_code == 200
+
+
+@pytest.mark.parametrize("value", ["jane doe@example.com", "a/b", "a\\b", ".", "..", "a\nb"])
+def test_bootstrap_admin_id_must_be_plain(shared_settings, value):
+    with pytest.raises(RuntimeError) as error:
+        create_app(replace(shared_settings, bootstrap_admin_id=value))
+    assert str(error.value) == (
+        "VERIFAIR_BOOTSTRAP_ADMIN_ID must be a plain id such as jane@example.com"
+    )
 
 
 def test_defaults(monkeypatch):

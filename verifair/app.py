@@ -39,6 +39,11 @@ async def _membership_denial(request: Request, settings: Settings):
 
 
 def create_app(settings: Settings) -> FastAPI:
+    admin_id = settings.bootstrap_admin_id
+    if settings.identity_header and admin_id and not web.plain_id(admin_id):
+        raise RuntimeError(
+            "VERIFAIR_BOOTSTRAP_ADMIN_ID must be a plain id such as jane@example.com"
+        )
     conn = db.connect(settings.db_path)
     try:
         db.init_schema(conn)

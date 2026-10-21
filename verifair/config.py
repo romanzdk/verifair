@@ -34,5 +34,5 @@ def load_settings() -> Settings:
             os.environ.get("VERIFAIR_REQUIRED_SECTIONS", DEFAULT_REQUIRED_SECTIONS)
         ),
         identity_header=identity_header,
-        bootstrap_admin_id=os.environ.get("VERIFAIR_BOOTSTRAP_ADMIN_ID") or None,
+        bootstrap_admin_id=os.environ.get("VERIFAIR_BOOTSTRAP_ADMIN_ID", "").strip() or None,
     )

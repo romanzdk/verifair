@@ -54,6 +54,10 @@ ADMIN_ONLY = "Only an admin can manage members."
 OWNER_ONLY = "Only the token owner or an admin can revoke it."
 
 
+def plain_id(value: str) -> bool:
+    return PLAIN_ID.fullmatch(value) is not None and value not in (".", "..")
+
+
 def _shared(request: Request) -> bool:
     return request.app.state.settings.identity_header is not None
 
@@ -691,7 +695,7 @@ def add_member(
     id, name = id.strip(), name.strip()
     if not (1 <= len(id) <= 200 and 1 <= len(name) <= 60):
         return _access(request, conn, user, error=MEMBER_INPUT, status=422)
-    if not PLAIN_ID.fullmatch(id) or id in (".", ".."):
+    if not plain_id(id):
         return _access(request, conn, user, error=MEMBER_PLAIN, status=422)
     try:
         db.add_user(conn, id=id, name=name, role=role)
