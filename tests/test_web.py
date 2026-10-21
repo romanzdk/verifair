@@ -1,3 +1,5 @@
+import re
+
 H = {"Authorization": "Bearer t"}
 SAMPLE = "## Intent\nFull new price.\n\n## Edge cases\nChange on the first day."
 
@@ -215,3 +217,10 @@ def test_name_form_next_keeps_query(client):
     push(client)
     r = client.get("/p/billing-service?tab=approved")
     assert 'name="next" value="/p/billing-service?tab=approved"' in r.text
+
+
+def test_comment_time_is_labelled_utc(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    r = client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
+    assert re.search(r'class="when">[^<]* \d\d:\d\d UTC<', r.text)
