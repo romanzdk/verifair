@@ -1,0 +1,7 @@
+<form class="verdict" id="verdict" hx-post="{{ url }}/verdict" hx-target="this" hx-swap="outerHTML">
+  {% if my_verdict %}<p class="mine">{{ "You approved" if my_verdict.verdict == "approve" else "You requested changes on" }} v{{ current_version }}</p>{% endif %}
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <textarea name="summary" placeholder="Summary for the author (optional)">{{ summary or "" }}</textarea>
+  <button class="btn" name="verdict" value="request_changes">Request changes</button>
+  <button class="btn p" name="verdict" value="approve">Approve</button>
+</form>

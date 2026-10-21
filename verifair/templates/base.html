@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}verifair{% endblock %}</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="topbar">
+  <a class="logo" href="/">veri<span>fair</span></a>
+  <div class="crumb">{% block crumb %}<b>Projects</b>{% endblock %}</div>
+  <details class="me">
+    <summary>{{ user_name or "Set your name" }} ▾</summary>
+    <form method="post" action="/me" class="me-form">
+      <input name="name" value="{{ user_name or '' }}" maxlength="60" required placeholder="Your name" aria-label="Your name">
+      <input type="hidden" name="next" value="{{ request.url.path }}">
+      <button class="btn p">Save</button>
+    </form>
+  </details>
+</div>
+{% block content %}{% endblock %}
+</body>
+</html>

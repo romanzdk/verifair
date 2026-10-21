@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ report.title }} · verifair{% endblock %}
+{% block crumb %}<a href="/"><b>Projects</b></a><i>›</i><a href="/p/{{ report.project|urlencode }}"><b>{{ report.project }}</b></a><i>›</i>{{ report.title }}{% endblock %}
+{% block content %}
+{% if not is_current %}
+<div class="banner">Viewing v{{ version }} · current is v{{ current_version }} · <a href="{{ url }}">open current</a></div>
+{% endif %}
+<header class="head">
+  <h1>{{ report.title }}</h1>
+  <div class="meta">
+    <span id="status-badge" class="badge b-{{ status }}">{{ STATUS_LABELS[status] }}</span>
+    <span class="badge r-{{ report.risk }}">Risk: {{ report.risk }}</span>
+    <span>by <b>{{ report.author }}</b></span>
+    <span>v{{ version }} · {{ version_date|date }}</span>
+    <span id="open-count">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
+    {% if ticket %}<a class="ext" href="{{ report.ticket_url }}">{{ ticket }}</a>{% endif %}
+  </div>
+</header>
+<div class="body">
+  <main class="main">
+    {% for s in sections %}
+    <section id="{{ s.slug }}" data-section="{{ s.heading }}">
+      <h2><span class="num">{{ loop.index }}</span>{{ s.heading }}{% if is_current %} <button type="button" class="cc" data-comment-section>💬 comment</button>{% endif %}</h2>
+      <div class="content">{{ s.html|safe }}</div>
+      <div class="threads" id="threads-{{ s.slug }}">
+        {% for thread in threads_by_section.get(s.slug, []) %}{% include "_thread.html" %}{% endfor %}
+      </div>
+      {% if is_current %}
+      <form class="cform" id="cform-{{ s.slug }}" hidden hx-post="{{ url }}/comments" hx-target="#threads-{{ s.slug }}" hx-swap="beforeend" hx-on::after-request="if (event.detail.successful) { this.reset(); this.hidden = true }">
+        <input type="hidden" name="section" value="{{ s.heading }}">
+        <input type="hidden" name="quote" value="">
+        <div class="q" hidden></div>
+        <textarea name="body" required placeholder="Comment on {{ s.heading }}"></textarea>
+        <div class="tact">
+          <button class="btn p">Comment</button>
+          <button type="button" class="btn" data-cancel>Cancel</button>
+        </div>
+      </form>
+      {% endif %}
+    </section>
+    {% endfor %}
+    {% if threads_by_section.get(None) %}
+    <section id="earlier-versions" class="earlier">
+      <h2>Earlier versions</h2>
+      <p class="dismiss">Threads on sections that are no longer in this version.</p>
+      <div class="threads" id="threads-earlier">
+        {% for thread in threads_by_section[None] %}{% include "_thread.html" %}{% endfor %}
+      </div>
+    </section>
+    {% endif %}
+    {% if links %}
+    <p class="links">Links: {% for label, href in links %}<a href="{{ href }}">{{ label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+    {% endif %}
+  </main>
+  {% include "_sidebar.html" %}
+</div>
+{% if is_current %}
+{% include "_verdict.html" %}
+<div id="popover" class="pop" hidden><button type="button">💬 Comment on selection</button></div>
+{% endif %}
+{% endblock %}

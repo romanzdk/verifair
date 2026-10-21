@@ -1,0 +1,21 @@
+<aside class="side" id="sidebar"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <h4>On this page</h4>
+  <ul>
+    {% for s in sections %}<li><a href="#{{ s.slug }}">{{ loop.index }} {{ s.heading }}</a>{% if open_by_section[s.slug] %} <span class="n">{{ open_by_section[s.slug] }}</span>{% endif %}</li>{% endfor %}
+    {% if threads_by_section.get(None) %}<li><a href="#earlier-versions">Earlier versions</a>{% if open_by_section[None] %} <span class="n">{{ open_by_section[None] }}</span>{% endif %}</li>{% endif %}
+  </ul>
+  <h4>Reviewers</h4>
+  {% for r in reviewers %}
+  <div class="rev"><span class="av">{{ r.name[:1]|upper }}</span>{{ r.name }} · {% if r.verdict %}<span class="badge {{ 'b-approved' if r.verdict == 'approve' else 'b-changes_requested' }}">{{ r.label }}</span>{% else %}{{ r.label }}{% endif %}</div>
+  {% else %}
+  <p class="dismiss">Nobody yet.</p>
+  {% endfor %}
+  <h4 class="gap">Versions</h4>
+  <ul>
+    {% for v in versions %}<li{% if v.version == version %} class="on"{% endif %}><a href="{{ url }}{% if v.version != current_version %}/v/{{ v.version }}{% endif %}">v{{ v.version }} · {{ v.created_at|date }}</a></li>{% endfor %}
+  </ul>
+</aside>
+{% if oob %}
+<span id="status-badge" class="badge b-{{ status }}" hx-swap-oob="true">{{ STATUS_LABELS[status] }}</span>
+<span id="open-count" hx-swap-oob="true">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
+{% endif %}
