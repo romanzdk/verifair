@@ -34,8 +34,13 @@ def test_content_before_first_heading_is_intro():
     assert secs[0].text == "preamble"
 
 
-def test_duplicate_headings_get_unique_slugs():
-    assert [s.slug for s in split_sections("## A\nx\n## A\ny\n## A\nz")] == ["a", "a-2", "a-3"]
+def test_duplicate_headings_get_unique_slugs(conn):
+    sections = split_sections("## A\nx\n## A\ny\n## A\nz")
+    assert [s.slug for s in sections] == ["a", "a-2", "a-3"]
+    add_comment(
+        conn, report_id="r", version=1, author_id="u", author_name="U", body="b", section="A"
+    )
+    assert build_threads(_comments(conn), sections, 1)[0].section_slug == "a"
 
 
 def test_heading_inside_fenced_code_is_not_a_section():
@@ -66,6 +71,21 @@ def test_thread_found_normalises_whitespace_and_marks_stale(conn):
     assert thread.section_slug == "price"
     assert thread.found is True
     assert thread.stale is True
+
+
+def test_quote_spanning_inline_markup_is_found(conn):
+    sections = split_sections("## A\nprice is **5**. See `x`, ok.")
+    add_comment(
+        conn,
+        report_id="r",
+        version=1,
+        author_id="u",
+        author_name="U",
+        body="b",
+        section="A",
+        quote="price is 5. See x, ok.",
+    )
+    assert build_threads(_comments(conn), sections, 1)[0].found is True
 
 
 def test_thread_quote_missing_from_section_is_not_found(conn):

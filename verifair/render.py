@@ -41,7 +41,7 @@ def normalize(text: str) -> str:
 def _html_to_text(html: str) -> str:
     extractor = _TextExtractor()
     extractor.feed(html)
-    return normalize(" ".join(extractor.parts))
+    return normalize("".join(extractor.parts))
 
 
 def _split_raw(body: str) -> list[tuple[str, list[str]]]:
@@ -80,7 +80,9 @@ def split_sections(body: str) -> list[Section]:
 def build_threads(
     comments: list[sqlite3.Row], sections: list[Section], current_version: int
 ) -> list[Thread]:
-    by_heading = {s.heading: s for s in sections}
+    by_heading: dict[str, Section] = {}
+    for s in sections:
+        by_heading.setdefault(s.heading, s)
     replies: dict[int, list[sqlite3.Row]] = {}
     for c in comments:
         if c["parent_id"] is not None:
