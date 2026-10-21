@@ -1,9 +1,15 @@
+import sqlite3
+from typing import Annotated
+
 import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 
 from verifair.db import (
     ProjectMismatch,
     add_comment,
     connect,
+    get_conn,
     get_report,
     init_schema,
     list_comments,
@@ -71,6 +77,7 @@ def test_reply_inherits_anchor_and_resolve_root_only(conn):
         parent_id=root["id"],
     )
     assert (reply["section"], reply["quote"]) == ("Intent", "full new price")
+    assert len(list_comments(conn, "r1", open_only=True)) == 2
     assert resolve_thread(conn, "r1", reply["id"]) is False
     assert resolve_thread(conn, "r1", root["id"]) is True
     assert list_comments(conn, "r1", open_only=True) == []
@@ -101,3 +108,22 @@ def test_list_projects_distinct_sorted(conn):
     for project in ("zeta", "alpha", "zeta"):
         push_report(conn, project=project, title="T", risk="low", body="b")
     assert list_projects(conn) == ["alpha", "zeta"]
+
+
+def test_get_conn_route_write_is_visible_to_other_connection(settings):
+    app = FastAPI()
+    app.state.settings = settings
+    init = connect(settings.db_path)
+    init_schema(init)
+    init.close()
+
+    @app.post("/push")
+    def push(conn: Annotated[sqlite3.Connection, Depends(get_conn)]):
+        return push_report(conn, project="p", title="T", risk="low", body="b")
+
+    assert TestClient(app).post("/push").json() == ["t", 1]
+    other = connect(settings.db_path)
+    try:
+        assert get_report(other, "t")["project"] == "p"
+    finally:
+        other.close()

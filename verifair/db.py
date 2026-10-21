@@ -76,7 +76,6 @@ def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
     conn = connect(request.app.state.settings.db_path)
     try:
         yield conn
-        conn.commit()
     finally:
         conn.close()
 
@@ -129,6 +128,7 @@ def push_report(
         "INSERT INTO versions (report_id, version, body, created_at) VALUES (?, ?, ?, ?)",
         (id, version, body, now),
     )
+    conn.commit()
     return id, version
 
 
@@ -194,6 +194,7 @@ def add_comment(
         " author_name, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (report_id, version, parent_id, section, quote, author_id, author_name, body, _now()),
     )
+    conn.commit()
     return conn.execute("SELECT * FROM comments WHERE id=?", (cur.lastrowid,)).fetchone()
 
 
@@ -214,6 +215,7 @@ def resolve_thread(conn: sqlite3.Connection, report_id: str, comment_id: int) ->
         "UPDATE comments SET resolved_at=? WHERE id=? AND report_id=? AND parent_id IS NULL",
         (_now(), comment_id, report_id),
     )
+    conn.commit()
     return cur.rowcount > 0
 
 
@@ -232,6 +234,7 @@ def add_verdict(
         " created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (report_id, version, reviewer_id, reviewer_name, verdict, summary, _now()),
     )
+    conn.commit()
     return conn.execute("SELECT * FROM verdicts WHERE id=?", (cur.lastrowid,)).fetchone()
 
 
