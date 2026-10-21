@@ -4,6 +4,14 @@ verifair is a small web service where agents push markdown change-review reports
 
 ![verifair report page](docs/screenshot.png)
 
+## How it works
+
+1. The agent pushes a report. It is a draft and its status is `unsigned`. The team is not told to review it yet.
+2. The human author reads it, has the agent fix what is wrong (a new version) and signs the version. Signing says: I read this and I stand behind it. The team now gets a "ready for review" message.
+3. Reviewers select text and comment. A comment is a blocking thread by default, or a non-blocking suggestion. The agent can read and answer threads through the API.
+4. A reviewer approves or requests changes. The person who signed cannot approve.
+5. A new version has no signature, so it goes back to `unsigned`. Signatures and verdicts are kept per version.
+
 ## Run it
 
 ```bash
@@ -12,7 +20,7 @@ export VERIFAIR_API_TOKEN=change-me
 uv run uvicorn verifair.asgi:app
 ```
 
-Open http://localhost:8000. Reviewers set a display name (kept in a cookie), select text to comment, and approve or request changes.
+Open http://localhost:8000. Users set a display name (kept in a cookie). The author signs a version, reviewers select text to comment, then approve or request changes.
 
 ## Push a report
 
@@ -28,7 +36,10 @@ curl -sS --fail-with-body -X POST http://localhost:8000/api/reports \
     "body": "## Intent\nCharge upgrades by remaining days.\n\n## Verification\nUnit tests pass.\n\n## Rollback\nRevert the merge request.\n\n## Security impact\nNone.",
     "ticket_url": "https://example.com/tickets/BILL-412",
     "links": [{"label": "Merge request", "url": "https://example.com/code/merge_requests/231"}],
-    "author": "agent"
+    "author": "Alice",
+    "agent": "claude",
+    "model": "opus",
+    "commit": "a1b2c3d"
   }'
 ```
 
@@ -45,9 +56,12 @@ The commands below use the report `id` as `$ID`.
 - Required: `project`, `title` (1 to 200 characters), `risk` (`low`, `medium` or `high`) and `body` (markdown).
 - `project` and `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`: letters, digits, `.`, `_` and `-`, starting with a letter or digit, up to 100 characters.
 - `ticket_url`, `session_url` and `links[].url` must start with `http://` or `https://`.
+- Optional `author` (up to 60 characters): the human who owns the report and should sign it. The default is `agent`, which means anyone with a name may sign.
 - Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
 - The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as an H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
 - Unknown JSON keys are rejected with 422.
+
+A push sends a "draft" message to Slack (if configured). The "ready for review" message is sent when the version is signed.
 
 Report markdown: raw HTML is shown as text, not rendered, and `javascript:` links are dropped. Use plain markdown only.
 
@@ -70,7 +84,7 @@ VERIFAIR_API_TOKEN=change-me VERIFAIR_URL=https://verifair.example.com VERIFAIR_
   "risk": "high",
   "ticket_url": "https://example.com/tickets/BILL-412",
   "links": [{"label": "Merge request", "url": "https://example.com/code/merge_requests/231"}],
-  "author": "agent",
+  "author": "Alice",
   "agent": "claude",
   "model": "opus",
   "session_url": "https://example.com/sessions/42",
@@ -178,7 +192,50 @@ An unknown section also lists the valid headings: `{"detail": "unknown section",
 
 ## Report template
 
-[docs/report-template.md](docs/report-template.md) is the layout agents should follow. It has seven sections, each with a one-line hint shown as a quote: `Intent`, `Design`, `Edge cases`, `Verification`, `Agent reviews`, `Judge this`, `Links`.
+[docs/report-template.md](docs/report-template.md) is the layout agents should follow. Each section has a one-line hint shown as a quote. What the human must decide comes first, the evidence after.
+
+| Section | Why it is there |
+| --- | --- |
+| `Intent` | The problem, the ticket and what is out of scope. |
+| `Judge this` | The questions only a human can answer, so reviewers know where to look. |
+| `Design` | How it works, and one option that was rejected. |
+| `Edge cases` | One row per worry, with the check that proves it. |
+| `Verification` | What each check proves, the command, the result (✅, ⚠️ or ❌, with a reason for anything not run), a link, and whether it fails if the change is reverted. |
+| `Not verified / assumptions` | What was not checked or was taken on trust. |
+| `Rollback` | How to undo the change. |
+| `Security impact` | What it touches that matters for security, or `None` with the reason. |
+| `Agent reviews` | What the agent reviewers found, how bad it was, what was done and why. |
+| `Links` | Ticket, deploy, notebook, and the code last. |
+
+### Required sections
+
+A push is refused with 422 if the body lacks a required H2 heading. The list comes from `VERIFAIR_REQUIRED_SECTIONS`. The default is `Verification,Rollback,Security impact`. Set it to an empty string to turn the check off.
+
+### Provenance
+
+`agent`, `model`, `session_url` and `commit` tell the reader who wrote the report and what it describes. The page shows who wrote it and the commit next to each version. Agents should also add a trailer to their own commits:
+
+```
+Assisted-by: AGENT:MODEL
+```
+
+For example `Assisted-by: claude:opus`. Agents do not add `Signed-off-by`. Only a human does that.
+
+## Signing
+
+- A version must be signed before anyone can approve or request changes on it. Until then the status is `unsigned`.
+- The first signature on a version is kept. Signing again does nothing.
+- Without `VERIFAIR_IDENTITY_HEADER`, anyone who has set a name can sign. The name is only a cookie, so this is a convenience, not a control.
+- With `VERIFAIR_IDENTITY_HEADER`, a report whose `author` is a person can only be signed by that person, so `author` must equal the header value (for example the email). A report whose `author` is `agent` can be signed by anyone.
+- The person who signed a version cannot approve it or request changes on it. Someone else has to.
+- Only with the identity header behind an auth proxy is signing a real control. See Deploying.
+
+## Blocking threads
+
+- A new thread is blocking by default. A reviewer can tick "Non-blocking (suggestion)" when writing it, and switch a thread between blocking and non-blocking later.
+- Approve is refused while any blocking thread is open. Resolve the thread or mark it non-blocking first.
+- Request changes needs a summary, or an open blocking thread of your own.
+- The sidebar counts open blocking threads and suggestions.
 
 ## Docker
 
@@ -199,6 +256,14 @@ The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind
 - Back up with `sqlite3 /data/verifair.db ".backup /backup/verifair.db"`, not `cp`, which can copy a half-written file.
 - Run one replica only.
 - The image trusts `X-Forwarded-*` headers from any address. Set `FORWARDED_ALLOW_IPS` to your proxy's IP.
+
+## Related projects
+
+verifair reviews the change report, not the diff.
+
+- Tools that review code feed its "Agent reviews" section: CodeRabbit, Greptile, Qodo, Devin Review, Claude Code Review.
+- Tools that review plans before the work starts sit earlier in the flow: Kiro, [Plannotator](https://github.com/backnotprop/plannotator).
+- [rcliao/comments](https://github.com/rcliao/comments) is the closest one: markdown review with a human-only verdict for agents. verifair adds the evidence template, versions, signing, a web UI for a team, and an API for agents to read and answer comments.
 
 ## License
 

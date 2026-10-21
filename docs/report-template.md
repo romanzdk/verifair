@@ -5,6 +5,12 @@ Customers who upgrade mid-month are charged the full new price today. Finance wa
 
 **Out of scope:** downgrades (stay end-of-cycle), annual plans.
 
+## Judge this
+> The questions only a human can answer: product intent, trade-offs, risk you accept.
+
+- Is "first day" the day the cycle starts, or the day after the previous invoice?
+- Is rounding once at the end acceptable to Finance, or should each line round?
+
 ## Design
 > How it works in a few lines, plus one alternative you rejected and why.
 
@@ -24,27 +30,41 @@ Customers who upgrade mid-month are charged the full new price today. Finance wa
 | Currency rounding | Round half-even to cents, once, at the end | golden file |
 
 ## Verification
-> Evidence, not claims: each check, how to reproduce it, and the result.
+> Evidence, not claims: what each check proves, the command, the result (✅ passed, ⚠️ not run or partial, ❌ failed; give a reason for anything but ✅), a link to the run, and whether it fails if the change is reverted.
 
-| Check | How to reproduce | Result |
-| --- | --- | --- |
-| Unit and integration tests | `pytest` ([CI job #8812](https://example.com/ci/8812)) | 212 passed |
-| Golden invoices, 40 real customers | [notebook](https://example.com/notebooks/proration-golden) | 40/40 match the Finance sheet |
-| Deployed to staging | [staging](https://example.com/staging/plan-change), upgraded test account #771 | invoice line 13.33 EUR |
-| Error logs on staging, 2h | [log query](https://example.com/logs?q=plan-change) | none new |
+| Proves | Command | Result | Link | Fails on revert |
+| --- | --- | --- | --- | --- |
+| Proration math for all edge cases | `pytest tests/test_pricing.py` | ✅ 212 passed | [CI job #8812](https://example.com/ci/8812) | yes |
+| Retried request does not prorate twice | `pytest tests/test_plan_change.py::test_retry` | ✅ passed | [CI job #8812](https://example.com/ci/8812) | yes |
+| 40 real customers match the Finance sheet | notebook, run all cells | ✅ 40/40 match | [notebook](https://example.com/notebooks/proration-golden) | no, it reads past invoices |
+| Upgrade works on staging | upgrade test account #771 in the UI | ✅ invoice line 13.33 EUR | [staging](https://example.com/staging/plan-change) | yes |
+| No new errors after deploy | log query, last 2h | ⚠️ 40 minutes only, staging was redeployed | [log query](https://example.com/logs?q=plan-change) | no |
+
+## Not verified / assumptions
+> What you did not check and what you took on trust, so the reviewer can decide whether to trust it too.
+
+- Annual plans were not tested. We assume they never reach the plan-change handler.
+- Not run against production data volumes. The function is pure, so we expect no change in speed.
+- Assumes the billing cycle dates in the database are always in the customer's local time zone.
+
+## Rollback
+> How to undo this change and what it leaves behind.
+
+Revert merge request !231 and redeploy. No schema change and no data migration. Invoices already issued with a prorated line stay as they are.
+
+## Security impact
+> What the change touches that matters for security, or "None" with the reason.
+
+None. The change only reads prices and dates that the handler already loads. It adds no input from users, no new endpoint and no new permission.
 
 ## Agent reviews
-> What the agent reviewers found: what was fixed, and what was dismissed with the reason.
+> What the agent reviewers found and what you did with each finding.
 
-- Fixed: proration used a fixed 30-day month. It now uses the real cycle length.
-- Fixed: the handler could prorate twice on a retried request. It is now idempotent per change id.
-- Dismissed: "add a proration table". Rejected in Design, the invoice line is the source of truth.
-
-## Judge this
-> The questions only a human can answer: product intent, trade-offs, risk you accept.
-
-- Is "first day" the day the cycle starts, or the day after the previous invoice?
-- Is rounding once at the end acceptable to Finance, or should each line round?
+| Finding | Severity | Disposition | Reason |
+| --- | --- | --- | --- |
+| Proration used a fixed 30-day month | high | fixed | Now uses the real cycle length |
+| Handler could prorate twice on a retried request | high | fixed | Now idempotent per change id |
+| "Add a proration table" | low | dismissed | Rejected in Design, the invoice line is the source of truth |
 
 ## Links
 > Ticket, deploy, notebook, then the code last.
