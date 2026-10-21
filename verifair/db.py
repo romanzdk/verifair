@@ -19,13 +19,17 @@ CREATE TABLE IF NOT EXISTS reports (
     links TEXT NOT NULL DEFAULT '[]',
     author TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    agent TEXT,
+    model TEXT,
+    session_url TEXT
 );
 CREATE TABLE IF NOT EXISTS versions (
     report_id TEXT NOT NULL REFERENCES reports(id),
     version INTEGER NOT NULL,
     body TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    "commit" TEXT,
     PRIMARY KEY (report_id, version)
 );
 CREATE TABLE IF NOT EXISTS comments (
@@ -39,7 +43,8 @@ CREATE TABLE IF NOT EXISTS comments (
     author_name TEXT NOT NULL,
     body TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    resolved_at TEXT
+    resolved_at TEXT,
+    blocking INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS verdicts (
     id INTEGER PRIMARY KEY,
@@ -50,6 +55,14 @@ CREATE TABLE IF NOT EXISTS verdicts (
     verdict TEXT NOT NULL CHECK (verdict IN ('approve', 'request_changes')),
     summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS signatures (
+    report_id TEXT NOT NULL REFERENCES reports(id),
+    version INTEGER NOT NULL,
+    signer_id TEXT NOT NULL,
+    signer_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (report_id, version)
 );
 CREATE INDEX IF NOT EXISTS comments_report_parent ON comments(report_id, parent_id);
 CREATE INDEX IF NOT EXISTS verdicts_report ON verdicts(report_id);
@@ -98,8 +111,18 @@ def _check_version(conn: sqlite3.Connection, report_id: str, expected: int | Non
         raise StaleVersion(latest)
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    if column not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+        conn.execute(f'ALTER TABLE {table} ADD COLUMN "{column}" {decl}')
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _ensure_column(conn, "reports", "agent", "TEXT")
+    _ensure_column(conn, "reports", "model", "TEXT")
+    _ensure_column(conn, "reports", "session_url", "TEXT")
+    _ensure_column(conn, "versions", "commit", "TEXT")
+    _ensure_column(conn, "comments", "blocking", "INTEGER NOT NULL DEFAULT 1")
 
 
 def _unique_id(conn: sqlite3.Connection, base: str) -> str:
@@ -121,6 +144,10 @@ def push_report(
     ticket_url: str | None = None,
     links: list[str] | None = None,
     author: str = "agent",
+    agent: str | None = None,
+    model: str | None = None,
+    session_url: str | None = None,
+    commit: str | None = None,
 ) -> tuple[str, int]:
     now = _now()
     links_json = json.dumps(links or [])
@@ -134,21 +161,36 @@ def push_report(
                 raise ProjectMismatch(f"report {id!r} belongs to project {existing['project']!r}")
             version = latest_version(conn, id) + 1
             conn.execute(
-                "UPDATE reports SET title=?, risk=?, ticket_url=?, links=?, author=?, updated_at=?"
-                " WHERE id=?",
-                (title, risk, ticket_url, links_json, author, now, id),
+                "UPDATE reports SET title=?, risk=?, ticket_url=?, links=?, author=?, updated_at=?,"
+                " agent=?, model=?, session_url=? WHERE id=?",
+                (title, risk, ticket_url, links_json, author, now, agent, model, session_url, id),
             )
         else:
             id = id or _unique_id(conn, slugify(title))
             version = 1
             conn.execute(
                 "INSERT INTO reports (id, project, title, risk, ticket_url, links, author,"
-                " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (id, project, title, risk, ticket_url, links_json, author, now, now),
+                " created_at, updated_at, agent, model, session_url)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    id,
+                    project,
+                    title,
+                    risk,
+                    ticket_url,
+                    links_json,
+                    author,
+                    now,
+                    now,
+                    agent,
+                    model,
+                    session_url,
+                ),
             )
         conn.execute(
-            "INSERT INTO versions (report_id, version, body, created_at) VALUES (?, ?, ?, ?)",
-            (id, version, body, now),
+            'INSERT INTO versions (report_id, version, body, created_at, "commit")'
+            " VALUES (?, ?, ?, ?, ?)",
+            (id, version, body, now, commit),
         )
     log.info("report pushed id=%s project=%s version=%d", id, project, version)
     return id, version
@@ -203,6 +245,7 @@ def add_comment(
     section: str | None = None,
     quote: str | None = None,
     expected_version: int | None = None,
+    blocking: bool = True,
 ) -> sqlite3.Row:
     with _write(conn):
         _check_version(conn, report_id, expected_version)
@@ -214,11 +257,25 @@ def add_comment(
                 raise ValueError(f"parent comment {parent_id} not found on report {report_id!r}")
             parent_id = parent["parent_id"] or parent["id"]
             version, section, quote = parent["version"], parent["section"], parent["quote"]
+            blocking = bool(
+                conn.execute("SELECT blocking FROM comments WHERE id=?", (parent_id,)).fetchone()[0]
+            )
             reopen_thread(conn, report_id, parent_id)
         cur = conn.execute(
             "INSERT INTO comments (report_id, version, parent_id, section, quote, author_id,"
-            " author_name, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (report_id, version, parent_id, section, quote, author_id, author_name, body, _now()),
+            " author_name, body, created_at, blocking) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                report_id,
+                version,
+                parent_id,
+                section,
+                quote,
+                author_id,
+                author_name,
+                body,
+                _now(),
+                int(blocking),
+            ),
         )
     log.info(
         "comment added id=%d report=%s version=%d parent=%s author_id=%s",
@@ -299,3 +356,34 @@ def list_verdicts(conn: sqlite3.Connection, report_id: str) -> list[sqlite3.Row]
     return conn.execute(
         "SELECT * FROM verdicts WHERE report_id=? ORDER BY id", (report_id,)
     ).fetchall()
+
+
+def set_blocking(conn: sqlite3.Connection, report_id: str, comment_id: int, blocking: bool) -> bool:
+    with _write(conn):
+        cur = conn.execute(
+            "UPDATE comments SET blocking=? WHERE id=? AND report_id=? AND parent_id IS NULL",
+            (int(blocking), comment_id, report_id),
+        )
+    return cur.rowcount > 0
+
+
+def sign_version(
+    conn: sqlite3.Connection, *, report_id: str, version: int, signer_id: str, signer_name: str
+) -> sqlite3.Row:
+    with _write(conn):
+        _check_version(conn, report_id, version)
+        conn.execute(
+            "INSERT OR REPLACE INTO signatures (report_id, version, signer_id, signer_name,"
+            " created_at) VALUES (?, ?, ?, ?, ?)",
+            (report_id, version, signer_id, signer_name, _now()),
+        )
+    log.info(
+        "version signed report=%s version=%d signer_id=%s", report_id, version, _short(signer_id)
+    )
+    return get_signature(conn, report_id, version)
+
+
+def get_signature(conn: sqlite3.Connection, report_id: str, version: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM signatures WHERE report_id=? AND version=?", (report_id, version)
+    ).fetchone()

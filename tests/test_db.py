@@ -16,6 +16,8 @@ from verifair.db import (
     add_verdict,
     connect,
     get_report,
+    get_signature,
+    get_version,
     init_schema,
     list_comments,
     list_projects,
@@ -24,6 +26,8 @@ from verifair.db import (
     push_report,
     reopen_thread,
     resolve_thread,
+    set_blocking,
+    sign_version,
 )
 from verifair.deps import get_conn
 
@@ -269,3 +273,125 @@ def test_info_logs_do_not_print_full_user_ids(conn, caplog):
     )
     assert "SeCrEtId12" not in caplog.text and "ReViEwEr99" not in caplog.text
     assert "author_id=SeCr…" in caplog.text and "reviewer_id=ReVi…" in caplog.text
+
+
+V1_SCHEMA = """
+CREATE TABLE reports (
+    id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL,
+    risk TEXT NOT NULL CHECK (risk IN ('low', 'medium', 'high')), ticket_url TEXT,
+    links TEXT NOT NULL DEFAULT '[]', author TEXT NOT NULL, created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE versions (
+    report_id TEXT NOT NULL REFERENCES reports(id), version INTEGER NOT NULL,
+    body TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (report_id, version)
+);
+CREATE TABLE comments (
+    id INTEGER PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id),
+    version INTEGER NOT NULL, parent_id INTEGER REFERENCES comments(id), section TEXT,
+    quote TEXT, author_id TEXT NOT NULL, author_name TEXT NOT NULL, body TEXT NOT NULL,
+    created_at TEXT NOT NULL, resolved_at TEXT
+);
+CREATE TABLE verdicts (
+    id INTEGER PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id),
+    version INTEGER NOT NULL, reviewer_id TEXT NOT NULL, reviewer_name TEXT NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('approve', 'request_changes')),
+    summary TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+);
+"""
+
+
+def _columns(c, table):
+    return {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
+
+
+def test_init_schema_migrates_v1_database(tmp_path):
+    c = connect(str(tmp_path / "old.db"))
+    c.executescript(V1_SCHEMA)
+    c.execute("INSERT INTO reports VALUES ('r0', 'p', 'T', 'low', NULL, '[]', 'a', 'now', 'now')")
+    c.execute("INSERT INTO versions VALUES ('r0', 1, 'b', 'now')")
+    c.execute(
+        "INSERT INTO comments (report_id, version, author_id, author_name, body, created_at)"
+        " VALUES ('r0', 1, 'u', 'U', 'hi', 'now')"
+    )
+    init_schema(c)
+    init_schema(c)
+    assert {"agent", "model", "session_url"} <= _columns(c, "reports")
+    assert "commit" in _columns(c, "versions")
+    assert "blocking" in _columns(c, "comments")
+    assert c.execute("SELECT blocking FROM comments").fetchone()[0] == 1
+    push_report(
+        c, project="p", title="T", risk="low", body="b2", id="r0", agent="x", commit="abc1234"
+    )
+    assert get_version(c, "r0", 2)["commit"] == "abc1234"
+    assert get_version(c, "r0", 1)["commit"] is None
+    assert get_report(c, "r0")["agent"] == "x"
+    c.close()
+
+
+def test_push_stores_provenance_and_overwrites_on_new_version(conn):
+    push_report(
+        conn,
+        project="p",
+        title="T",
+        risk="low",
+        body="v1",
+        id="r1",
+        agent="a1",
+        model="m1",
+        session_url="http://s/1",
+        commit="c1",
+    )
+    push_report(
+        conn,
+        project="p",
+        title="T",
+        risk="low",
+        body="v2",
+        id="r1",
+        agent="a2",
+        model="m2",
+        session_url="http://s/2",
+        commit="c2",
+    )
+    r = get_report(conn, "r1")
+    assert (r["agent"], r["model"], r["session_url"]) == ("a2", "m2", "http://s/2")
+    assert [v["commit"] for v in list_versions(conn, "r1")] == ["c1", "c2"]
+
+
+def test_sign_version_stores_and_resigning_replaces(conn):
+    push_report(conn, project="p", title="T", risk="low", body="v1", id="r1")
+    assert get_signature(conn, "r1", 1) is None
+    sign_version(conn, report_id="r1", version=1, signer_id="u1", signer_name="Ann")
+    sig = sign_version(conn, report_id="r1", version=1, signer_id="u2", signer_name="Bob")
+    assert (sig["signer_id"], sig["signer_name"]) == ("u2", "Bob")
+    assert get_signature(conn, "r1", 1)["signer_name"] == "Bob"
+
+
+def test_sign_version_refuses_stale_version(conn):
+    push_report(conn, project="p", title="T", risk="low", body="v1", id="r1")
+    push_report(conn, project="p", title="T", risk="low", body="v2", id="r1")
+    with pytest.raises(StaleVersion) as exc:
+        sign_version(conn, report_id="r1", version=1, signer_id="u1", signer_name="Ann")
+    assert exc.value.latest == 2
+    assert get_signature(conn, "r1", 1) is None
+
+
+def test_comment_blocking_defaults_true_and_replies_copy_root(conn):
+    push_report(conn, project="p", title="T", risk="low", body="v1", id="r1")
+    kw = {"report_id": "r1", "version": 1, "author_id": "u", "author_name": "U"}
+    blocking = add_comment(conn, body="a", **kw)
+    soft = add_comment(conn, body="b", blocking=False, **kw)
+    reply = add_comment(conn, body="c", parent_id=soft["id"], **kw)
+    assert (blocking["blocking"], soft["blocking"], reply["blocking"]) == (1, 0, 0)
+
+
+def test_set_blocking_root_only(conn):
+    push_report(conn, project="p", title="T", risk="low", body="v1", id="r1")
+    kw = {"report_id": "r1", "version": 1, "author_id": "u", "author_name": "U"}
+    root = add_comment(conn, body="a", **kw)
+    reply = add_comment(conn, body="b", parent_id=root["id"], **kw)
+    assert set_blocking(conn, "r1", reply["id"], False) is False
+    assert set_blocking(conn, "r1", 999, False) is False
+    assert set_blocking(conn, "r1", root["id"], False) is True
+    assert [c["blocking"] for c in list_comments(conn, "r1")] == [0, 1]
