@@ -65,10 +65,25 @@ def test_send_posts_text(monkeypatch):
     assert calls == [("https://hooks.example/x", {"json": {"text": "hi"}, "timeout": 5})]
 
 
-def test_send_swallows_http_errors(monkeypatch, caplog):
+@pytest.mark.parametrize("error", [httpx.HTTPError("boom"), httpx.InvalidURL("bad")])
+def test_send_swallows_errors_without_logging_url(monkeypatch, caplog, error):
     def fail(*a, **k):
-        raise httpx.HTTPError("boom")
+        raise error
 
     monkeypatch.setattr(httpx, "post", fail)
-    notify.send(make_settings("https://hooks.example/x"), "hi")
-    assert "boom" in caplog.text
+    notify.send(make_settings("https://hooks.example/secret-xyz"), "hi")
+    assert type(error).__name__ in caplog.text
+    assert "secret-xyz" not in caplog.text
+    assert "boom" not in caplog.text
+
+
+def test_send_logs_status_code_not_url(monkeypatch, caplog):
+    url = "https://hooks.example/secret-xyz"
+
+    def respond(*a, **k):
+        return httpx.Response(404, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", respond)
+    notify.send(make_settings(url), "hi")
+    assert "HTTPStatusError 404" in caplog.text
+    assert "secret-xyz" not in caplog.text

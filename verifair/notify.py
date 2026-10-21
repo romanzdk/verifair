@@ -37,5 +37,6 @@ def send(settings: Settings, text: str) -> None:
         return
     try:
         httpx.post(settings.slack_webhook_url, json={"text": text}, timeout=5).raise_for_status()
-    except httpx.HTTPError as exc:
-        log.warning("slack notification failed: %s", exc)
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", "")
+        log.warning("slack notification failed: %s %s", type(exc).__name__, status)
