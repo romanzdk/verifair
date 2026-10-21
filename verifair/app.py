@@ -8,7 +8,10 @@ from fastapi.staticfiles import StaticFiles
 from verifair import api, db, web
 from verifair.config import Settings
 
-CSP = "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'"
+CSP = (
+    "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
+    " frame-ancestors 'none'"
+)
 
 
 def _cross_origin(request: Request) -> bool:
@@ -38,6 +41,7 @@ def create_app(settings: Settings) -> FastAPI:
         if request.method == "POST" and not is_api and _cross_origin(request):
             return PlainTextResponse("cross-origin request refused", 403)
         response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
         if response.headers.get("content-type", "").startswith("text/html"):
             response.headers["Content-Security-Policy"] = CSP
         return response

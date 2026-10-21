@@ -32,6 +32,14 @@
       {% endif %}
     </section>
     {% endfor %}
+    {% if threads_by_section.get("vf_general") %}
+    <section id="vf_general" class="general">
+      <h2>General comments</h2>
+      <div class="threads" id="vf_threads_general">
+        {% for thread in threads_by_section["vf_general"] %}{% include "_thread.html" %}{% endfor %}
+      </div>
+    </section>
+    {% endif %}
     {% if threads_by_section.get(None) %}
     <section id="vf_earlier" class="earlier">
       <h2>Earlier versions</h2>

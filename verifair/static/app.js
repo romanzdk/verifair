@@ -1,5 +1,6 @@
 const popover = document.getElementById("vf_popover");
 const QUOTE_PREVIEW_MAX = 300;
+const QUOTE_MAX = 2000;
 let pending = null;
 
 function sectionOf(node) {
@@ -10,6 +11,7 @@ function sectionOf(node) {
 function openForm(section, quote) {
   const form = section.querySelector("form.cform");
   if (!form) return;
+  quote = quote.slice(0, QUOTE_MAX);
   form.quote.value = quote;
   const preview = form.querySelector(".q");
   const shown = quote.length > QUOTE_PREVIEW_MAX ? `${quote.slice(0, QUOTE_PREVIEW_MAX)}…` : quote;
@@ -120,33 +122,52 @@ function highlight() {
 }
 
 function errorAnchor(event) {
-  const elt = event.detail.elt;
-  return elt.closest("form") || elt;
+  // When the swap removes the source element, htmx re-fires afterRequest on an ancestor and
+  // detail.elt points there; requestConfig.elt is still the element that sent the request.
+  const elt = event.detail.requestConfig?.elt || event.detail.elt;
+  const anchor = elt.closest("form") || elt;
+  if (!anchor.isConnected) return anchor.id ? document.getElementById(anchor.id) : null;
+  return anchor === document.body ? document.querySelector("main") || anchor : anchor;
+}
+
+function holdsError(anchor) {
+  return anchor.matches(".verdict, main, body");
 }
 
 function clearRequestError(anchor) {
-  const previous = anchor.matches(".verdict")
-    ? anchor.querySelector("p.vf-req-error")
+  const previous = holdsError(anchor)
+    ? anchor.querySelector(":scope > p.vf-req-error")
     : anchor.nextElementSibling;
   if (previous?.matches("p.vf-req-error")) previous.remove();
 }
 
-function showRequestError(event, reason) {
+function errorCopy(status) {
+  if (status === 422) return "Check the text and try again.";
+  if (status === 404) return "This item no longer exists. Reload the page.";
+  return `Something went wrong (${status}). Reload and try again.`;
+}
+
+function showRequestError(event, message) {
   const anchor = errorAnchor(event);
+  if (!anchor) return;
   clearRequestError(anchor);
   const line = document.createElement("p");
   line.className = "error vf-req-error";
   line.setAttribute("role", "alert");
-  line.textContent = `Something went wrong: ${reason}. Reload and try again.`;
+  line.textContent = message;
   // The verdict bar is position: fixed, so a line after it would be hidden under it.
   if (anchor.matches(".verdict")) anchor.prepend(line);
+  else if (holdsError(anchor)) anchor.append(line);
   else anchor.after(line);
 }
 
 highlight();
 document.body.addEventListener("htmx:afterSwap", highlight);
-document.body.addEventListener("htmx:responseError", (event) => showRequestError(event, event.detail.xhr.status));
-document.body.addEventListener("htmx:sendError", (event) => showRequestError(event, "network error"));
+document.body.addEventListener("htmx:responseError", (event) => showRequestError(event, errorCopy(event.detail.xhr.status)));
+document.body.addEventListener("htmx:sendError", (event) =>
+  showRequestError(event, "Connection lost. Your text is still here, try again."),
+);
 document.body.addEventListener("htmx:afterRequest", (event) => {
-  if (event.detail.successful && event.detail.elt.isConnected) clearRequestError(errorAnchor(event));
+  const anchor = event.detail.successful && errorAnchor(event);
+  if (anchor) clearRequestError(anchor);
 });

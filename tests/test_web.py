@@ -296,18 +296,18 @@ def test_set_name_invalid_keeps_query_and_shows_error_in_menu(client):
 
 def test_request_changes_gate_counts_own_thread_carried_from_older_version(client):
     push(client)
-    client.cookies.set("vf_id", "alice")
+    client.cookies.set("vf_id", "alice000")
     client.cookies.set("vf_name", "Alice")
     client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     push(client, id="prorate", body="## Intent\nChanged.")
 
-    client.cookies.set("vf_id", "bob")
+    client.cookies.set("vf_id", "bob00000")
     client.cookies.set("vf_name", "Bob")
     refused = client.post("/r/prorate/verdict", data={"version": 2, "verdict": "request_changes"})
     assert REFUSED_COPY in refused.text
     assert client.get("/api/reports/prorate", headers=H).json()["verdicts"] == []
 
-    client.cookies.set("vf_id", "alice")
+    client.cookies.set("vf_id", "alice000")
     client.cookies.set("vf_name", "Alice")
     allowed = client.post("/r/prorate/verdict", data={"version": 2, "verdict": "request_changes"})
     assert "You requested changes on v2" in allowed.text
@@ -400,7 +400,10 @@ def test_resolve_needs_confirm_and_reply_reopens(client):
     client.cookies.set("vf_name", "Alice")
     client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     cid = api_threads(client)[0]["id"]
-    assert 'hx-confirm="Resolve this thread?"' in client.get("/r/prorate").text
+    assert (
+        'hx-confirm="Resolve this thread? You can reopen it later."'
+        in client.get("/r/prorate").text
+    )
     client.post(f"/r/prorate/comments/{cid}/resolve")
     again = client.post(f"/r/prorate/comments/{cid}/resolve")
     assert again.status_code == 200 and 'class="thread resolved"' in again.text
@@ -446,6 +449,105 @@ def test_report_page_a11y_attributes(client):
     assert 'aria-label="Comment on Intent"' in page and 'aria-label="Comment on Edge cases"' in page
     assert 'aria-label="Reply"' in page and 'aria-label="Summary for the author"' in page
     assert 'aria-live="polite"' in page
-    assert 'aria-label="1 open thread"' in page
+    assert '<span class="n" role="img" aria-label="1 open thread">1</span>' in page
     assert page.count('hx-disabled-elt="find button"') == 3
     assert 'hx-disabled-elt="#vf_verdict button"' in page
+
+
+@pytest.mark.parametrize("bad", ["agent", "short", "x" * 17, "bad id!!", "a.b.c.d.e"])
+def test_invalid_or_agent_id_cookie_is_replaced(client, bad):
+    push(client)
+    client.cookies.set("vf_id", bad)
+    client.cookies.set("vf_name", "Mallory")
+    r = client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Hi"})
+    assert r.cookies["vf_id"] != bad
+    [thread] = api_threads(client)
+    assert thread["author_id"] == r.cookies["vf_id"] and thread["author_type"] == "human"
+
+
+def test_valid_id_cookie_is_kept(client):
+    push(client)
+    client.cookies.set("vf_id", "Ab_-1234")
+    assert "vf_id" not in client.get("/r/prorate").cookies
+
+
+def test_general_and_orphaned_threads_render_in_their_own_blocks(client):
+    push(client)
+    client.post("/api/reports/prorate/comments", json={"body": "General note"}, headers=H)
+    client.post(
+        "/api/reports/prorate/comments",
+        json={"body": "Gone note", "section": "Edge cases"},
+        headers=H,
+    )
+    push(client, id="prorate", body="## Intent\nFull new price.")
+    page = client.get("/r/prorate").text
+    general = page.index('id="vf_general"')
+    earlier = page.index('id="vf_earlier"')
+    assert page.index('id="intent"') < general < page.index("General note") < earlier
+    assert earlier < page.index("Gone note")
+    assert "General comments" in page
+    assert 'href="#vf_general"' in page and 'href="#vf_earlier"' in page
+
+
+def _resolved_thread(client, body="Why?"):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": body})
+    cid = api_threads(client)[0]["id"]
+    client.post(f"/r/prorate/comments/{cid}/reply", data={"version": 1, "body": "A reply"})
+    client.post(f"/r/prorate/comments/{cid}/resolve")
+    return cid
+
+
+def test_resolved_thread_expands_and_can_be_reopened(client):
+    long_body = "word " * 40
+    cid = _resolved_thread(client, long_body)
+    page = client.get("/r/prorate").text
+    assert f'<details class="thread resolved" id="vf_t{cid}"' in page
+    assert long_body.strip() in page and "A reply" in page
+    assert (
+        f'hx-post="/r/prorate/comments/{cid}/reopen" hx-target="#vf_t{cid}" hx-swap="outerHTML"'
+        in page
+    )
+    r = client.post(f"/r/prorate/comments/{cid}/reopen")
+    assert r.status_code == 200
+    assert 'class="thread resolved"' not in r.text and f'id="vf_t{cid}"' in r.text
+    assert api_threads(client)[0]["resolved"] is False
+    assert client.post("/r/prorate/comments/999/reopen").status_code == 404
+
+
+def test_reopen_without_name_prompts_and_keeps_thread_resolved(client):
+    cid = _resolved_thread(client)
+    client.cookies.delete("vf_name")
+    r = client.post(
+        f"/r/prorate/comments/{cid}/reopen",
+        headers={"HX-Request": "true", "HX-Trigger": f"vf_reopen_{cid}"},
+    )
+    assert 'class="name-prompt"' in r.text
+    assert r.headers["HX-Retarget"] == f"#vf_t{cid}"
+    assert api_threads(client)[0]["resolved"] is True
+
+
+def test_verdict_messages_are_alerts(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    refused = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "request_changes"})
+    assert f'<p class="error" role="alert">{REFUSED_COPY}</p>' in refused.text
+    done = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
+    assert '<p class="mine" role="alert">You approved v1</p>' in done.text
+
+
+def test_app_js_caps_quote_and_maps_error_copy():
+    from pathlib import Path
+
+    import verifair
+
+    js = (Path(verifair.__file__).parent / "static" / "app.js").read_text()
+    assert "quote.slice(0, QUOTE_MAX)" in js and "const QUOTE_MAX = 2000;" in js
+    for copy in [
+        "Check the text and try again.",
+        "This item no longer exists. Reload the page.",
+        "Connection lost. Your text is still here, try again.",
+        "Something went wrong (${status}). Reload and try again.",
+    ]:
+        assert copy in js

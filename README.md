@@ -17,7 +17,7 @@ Open http://localhost:8000. Reviewers set a display name (kept in a cookie), sel
 ## Push a report
 
 ```bash
-curl -s -X POST http://localhost:8000/api/reports \
+curl -sS --fail-with-body -X POST http://localhost:8000/api/reports \
   -H "Authorization: Bearer $VERIFAIR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -41,7 +41,7 @@ Response:
 The commands below use the report `id` as `$ID`.
 
 - `id` is optional on the first push. Without it, verifair makes one from the title and returns it.
-- To add a new version, push again with the same `id`. Without `id`, every push makes a new report. Comments move to the new version when their quoted text still exists.
+- To add a new version, push again with the same `id`. Without `id`, every push makes a new report. Comments stay on the version they were made on; the API marks them `stale` when a newer version exists and `found` when the quoted text still appears in the same-named section of the current version.
 - Required: `project`, `title` (1 to 200 characters), `risk` (`low`, `medium` or `high`) and `body` (markdown).
 - `project` and `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`: letters, digits, `.`, `_` and `-`, starting with a letter or digit, up to 100 characters.
 - `ticket_url` and `links[].url` must start with `http://` or `https://`.
@@ -88,7 +88,7 @@ VERIFAIR_API_TOKEN=change-me VERIFAIR_URL=https://verifair.example.com VERIFAIR_
 ## Read and answer comments
 
 ```bash
-curl -s -H "Authorization: Bearer $VERIFAIR_API_TOKEN" \
+curl -sS --fail-with-body -H "Authorization: Bearer $VERIFAIR_API_TOKEN" \
   "http://localhost:8000/api/reports/$ID/comments?open=true"
 ```
 
@@ -113,7 +113,7 @@ Response (`open=true` leaves out resolved threads):
       "found": true,
       "replies": [
         {
-          "id": 2, "version": 1, "parent_id": 1, "section": "Edge cases", "quote": null,
+          "id": 2, "version": 1, "parent_id": 1, "section": "Edge cases", "quote": "first day of the cycle",
           "author": "agent", "author_id": "agent", "author_type": "agent",
           "body": "Cycle start day, inclusive.", "created_at": "2026-10-21T09:20:41+00:00",
           "resolved": false, "stale": true, "found": true
@@ -125,22 +125,24 @@ Response (`open=true` leaves out resolved threads):
 ```
 
 - `stale` is true when the comment was made on an older version.
-- `found` is true when the quote is still in the current version.
+- `found` is true when the quote is still in the same-named section of the current version, or when the thread has no quote.
+- Replies carry the same `section`, `quote`, `stale` and `found` as their thread.
 - `author_type` is `agent` or `human`.
 
-Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?}`. The response is 201 with one comment (same shape as above, without `replies`).
+Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?}`. The response is 201 with one comment (same fields as above, without `stale`, `found` and `replies`).
 
 ```bash
-curl -s -X POST "http://localhost:8000/api/reports/$ID/comments" \
+curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comments" \
   -H "Authorization: Bearer $VERIFAIR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"body": "Cycle start day, inclusive.", "parent_id": 1}'
 ```
 
-- With `parent_id` it is a reply. A reply to a resolved thread opens it again.
-- Without `parent_id` it starts a new thread. `section` must be an H2 heading of the current version, exactly as written, for example `"section": "Edge cases"`. `quote` points at a piece of text in that section.
+- With `parent_id` it is a reply. A reply to a resolved thread opens it again. A reply takes its section and quote from the thread, so sending `section` or `quote` with `parent_id` is rejected with 422 `"replies cannot set section or quote"`.
+- Without `parent_id` it starts a new thread. `section` must be an H2 heading of the current version, exactly as written, for example `"section": "Edge cases"`. Text before the first `##` is the section `Intro`; a report with no `##` at all is one section called `Report`. `quote` points at a piece of text in that section, so `quote` without `section` is rejected with 422 `"quote requires section"`.
+- Without `section` the thread is a general comment on the whole report.
 
-To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comment_id` can be the first comment or any reply; the whole thread is resolved. Calling it again does nothing.
+To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comment_id` can be the first comment or any reply; the whole thread is resolved. The response is `{"resolved": true}`. Calling it again does nothing. Reviewers can reopen a resolved thread in the web UI.
 
 ## Errors
 
@@ -149,7 +151,9 @@ To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comme
 | 401 | `"invalid token"` |
 | 404 | `"report not found"`, `"parent not found"` or `"comment not found"` |
 | 409 | `"id belongs to another project"` |
-| 422 | a list of field errors (pydantic style), or `"unknown section"` |
+| 422 | a list of field errors (pydantic style), `"replies cannot set section or quote"`, `"quote requires section"`, or `"unknown section"` |
+
+An unknown section also lists the valid headings: `{"detail": "unknown section", "sections": ["Intent", "Edge cases"]}`.
 
 ## Configuration
 
@@ -171,7 +175,7 @@ docker build -t verifair .
 docker run --rm -e VERIFAIR_API_TOKEN=change-me -p 127.0.0.1:8000:8000 -v verifair-data:/data verifair
 ```
 
-The database lives in `/data/verifair.db`, so keep `/data` on a volume.
+The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind mounts or Kubernetes PVCs, `/data` must be writable by uid 10001 (`chown 10001 <dir>` or `fsGroup: 10001`).
 
 ## Deploying
 
@@ -181,6 +185,7 @@ The database lives in `/data/verifair.db`, so keep `/data` on a volume.
 - `/data` must be a volume on local disk. SQLite runs in WAL mode and does not work well on network file systems.
 - Back up with `sqlite3 /data/verifair.db ".backup /backup/verifair.db"`, not `cp`, which can copy a half-written file.
 - Run one replica only.
+- The image trusts `X-Forwarded-*` headers from any address. Set `FORWARDED_ALLOW_IPS` to your proxy's IP.
 
 ## License
 

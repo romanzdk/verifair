@@ -1,7 +1,7 @@
 <form class="verdict" id="vf_verdict" hx-post="{{ url }}/verdict" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="#vf_verdict button">
   <div class="vmsg" aria-live="polite">
-    {% if my_verdict %}<p class="mine">{{ "You approved" if my_verdict.verdict == "approve" else "You requested changes on" }} v{{ current_version }}</p>{% endif %}
-    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    {% if my_verdict %}<p class="mine" role="alert">{{ "You approved" if my_verdict.verdict == "approve" else "You requested changes on" }} v{{ current_version }}</p>{% endif %}
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   </div>
   <input type="hidden" name="version" value="{{ version }}">
   <textarea name="summary" maxlength="2000" placeholder="Summary for the author (optional)" aria-label="Summary for the author">{{ summary or "" }}</textarea>

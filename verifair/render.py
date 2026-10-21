@@ -6,6 +6,9 @@ from html.parser import HTMLParser
 
 from markdown_it import MarkdownIt
 
+# slugify never makes "_", so this cannot collide with a section slug
+GENERAL = "vf_general"
+
 _md = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable("table")
 
 
@@ -100,13 +103,14 @@ def build_threads(
         candidates = by_heading.get(root["section"], [])
         quote = normalize(root["quote"] or "")
         section = next((s for s in candidates if quote in normalize(s.text)), None)
-        found = section is not None
+        general = root["section"] is None
+        found = section is not None or (general and not quote)
         section = section or next(iter(candidates), None)
         threads.append(
             Thread(
                 root=root,
                 replies=sorted(replies.get(root["id"], []), key=lambda r: r["id"]),
-                section_slug=section.slug if section else None,
+                section_slug=section.slug if section else GENERAL if general else None,
                 found=found,
                 stale=root["version"] != current_version,
             )

@@ -86,7 +86,11 @@ def test_html_responses_carry_csp(client):
     client.post("/api/reports", json=REPORT, headers=H)
     page = client.get("/r/t")
     assert page.headers["content-security-policy"] == (
-        "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'"
+        "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
+        " frame-ancestors 'none'"
     )
     assert "hx-on" not in page.text
     assert "content-security-policy" not in client.get("/healthz").headers
+    for path in ["/r/t", "/healthz", "/static/app.js", "/api/reports/t"]:
+        r = client.get(path, headers=H)
+        assert r.headers["x-content-type-options"] == "nosniff", path

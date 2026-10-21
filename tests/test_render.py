@@ -214,3 +214,14 @@ def test_report_template_has_seven_sections_and_no_html_comments():
         "Links",
     ]
     assert all("&lt;!--" not in s.html and s.html.startswith("<blockquote>") for s in sections)
+
+
+def test_section_less_threads_are_general_not_orphaned(conn):
+    kwargs = {"report_id": "r", "version": 1, "author_id": "u", "author_name": "U"}
+    general = add_comment(conn, body="g", **kwargs)
+    orphan = add_comment(conn, body="o", section="Removed", **kwargs)
+    threads = build_threads(_comments(conn), [_section("Price", "x")], 1)
+    grouped = threads_by_section(threads)
+    assert [t.root["id"] for t in grouped["vf_general"]] == [general["id"]]
+    assert [t.root["id"] for t in grouped[None]] == [orphan["id"]]
+    assert grouped["vf_general"][0].found is True

@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
 
 from verifair import db, notify
@@ -53,7 +54,9 @@ class Link(BaseModel):
 class ReportIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     project: str = Field(pattern=SLUG)
-    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    title: Annotated[
+        str, StringConstraints(strip_whitespace=True, max_length=200), AfterValidator(_not_blank)
+    ]
     risk: Literal["low", "medium", "high"]
     body: Annotated[str, AfterValidator(_not_blank)]
     id: str | None = Field(default=None, pattern=SLUG)
@@ -164,13 +167,11 @@ def get_comments(id: str, conn: Conn, open: bool = False):
     result = []
     for t in threads:
         resolved = t.root["resolved_at"] is not None
+        anchor = {"stale": t.stale, "found": t.found if t.root["quote"] else True}
         result.append(
             _comment_json(t.root)
-            | {
-                "stale": t.stale,
-                "found": t.found if t.root["quote"] else True,
-                "replies": [_comment_json(r, resolved) for r in t.replies],
-            }
+            | anchor
+            | {"replies": [_comment_json(r, resolved) | anchor for r in t.replies]}
         )
     return {"threads": result}
 
@@ -180,9 +181,14 @@ def post_comment(
     id: str, body: CommentIn, request: Request, conn: Conn, background: BackgroundTasks
 ):
     report = _require_report(conn, id)
+    if body.parent_id is not None and (body.section is not None or body.quote is not None):
+        raise HTTPException(422, "replies cannot set section or quote")
+    if body.parent_id is None and body.quote is not None and body.section is None:
+        raise HTTPException(422, "quote requires section")
     if body.parent_id is None and body.section is not None:
-        if body.section not in {s.heading for s in _current_sections(conn, id)}:
-            raise HTTPException(422, "unknown section")
+        headings = list(dict.fromkeys(s.heading for s in _current_sections(conn, id)))
+        if body.section not in headings:
+            return JSONResponse({"detail": "unknown section", "sections": headings}, 422)
     try:
         row = db.add_comment(
             conn,

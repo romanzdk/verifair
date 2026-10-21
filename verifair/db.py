@@ -67,6 +67,10 @@ class StaleVersion(Exception):
         self.latest = latest
 
 
+def _short(user_id: str) -> str:
+    return f"{user_id[:4]}…"
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -210,7 +214,7 @@ def add_comment(
                 raise ValueError(f"parent comment {parent_id} not found on report {report_id!r}")
             parent_id = parent["parent_id"] or parent["id"]
             version, section, quote = parent["version"], parent["section"], parent["quote"]
-            conn.execute("UPDATE comments SET resolved_at=NULL WHERE id=?", (parent_id,))
+            reopen_thread(conn, report_id, parent_id)
         cur = conn.execute(
             "INSERT INTO comments (report_id, version, parent_id, section, quote, author_id,"
             " author_name, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -222,7 +226,7 @@ def add_comment(
         report_id,
         version,
         parent_id,
-        author_id,
+        _short(author_id),
     )
     return conn.execute("SELECT * FROM comments WHERE id=?", (cur.lastrowid,)).fetchone()
 
@@ -254,6 +258,15 @@ def resolve_thread(conn: sqlite3.Connection, report_id: str, comment_id: int) ->
     return row[0]
 
 
+def reopen_thread(conn: sqlite3.Connection, report_id: str, comment_id: int) -> bool:
+    cur = conn.execute(
+        "UPDATE comments SET resolved_at=NULL WHERE report_id=? AND id ="
+        " (SELECT COALESCE(parent_id, id) FROM comments WHERE id=? AND report_id=?)",
+        (report_id, comment_id, report_id),
+    )
+    return cur.rowcount > 0
+
+
 def add_verdict(
     conn: sqlite3.Connection,
     *,
@@ -276,7 +289,7 @@ def add_verdict(
         "verdict added report=%s version=%d reviewer_id=%s verdict=%s",
         report_id,
         version,
-        reviewer_id,
+        _short(reviewer_id),
         verdict,
     )
     return conn.execute("SELECT * FROM verdicts WHERE id=?", (cur.lastrowid,)).fetchone()

@@ -1,4 +1,5 @@
 import json
+import re
 import secrets
 import sqlite3
 from collections import Counter
@@ -30,6 +31,7 @@ templates.env.globals["STATUS_LABELS"] = rules.STATUS_LABELS
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 YEAR = 365 * 24 * 3600
+USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
 TABS = ("awaiting_review", "changes_requested", "approved")
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 Body = Annotated[str, Form(max_length=20000)]
@@ -38,7 +40,7 @@ Anchor = Annotated[str, Form(max_length=2000)]
 
 def current_user(request: Request) -> tuple[str, str | None]:
     user_id = request.cookies.get("vf_id")
-    if not user_id:
+    if not user_id or user_id == "agent" or not USER_ID.fullmatch(user_id):
         # FastAPI drops cookies set on an injected Response when the route returns its own
         user_id = request.state.new_vf_id = secrets.token_urlsafe(8)
     name = request.cookies.get("vf_name")
@@ -149,9 +151,11 @@ def report_context(
     }
 
 
-def _thread_response(request, conn, report, user_id, root_id, reset_form=False):
+def _thread_response(request, conn, report, user_id, comment_id, reset_form=False):
     ctx = report_context(conn, report, db.latest_version(conn, report["id"]), user_id)
-    ctx["thread"] = next(t for t in ctx["threads"] if t.root["id"] == root_id)
+    ctx["thread"] = next(
+        t for t in ctx["threads"] if comment_id in (t.root["id"], *(r["id"] for r in t.replies))
+    )
     ctx["oob"] = True
     names = ["_thread.html", "_sidebar.html"]
     section = next((s for s in ctx["sections"] if s.slug == ctx["thread"].section_slug), None)
@@ -301,6 +305,16 @@ def resolve(id: str, cid: int, request: Request, conn: Conn, user: User):
     if root_id is None:
         raise HTTPException(404, "comment not found")
     return _thread_response(request, conn, report, user[0], root_id)
+
+
+@router.post("/r/{id}/comments/{cid}/reopen")
+def reopen(id: str, cid: int, request: Request, conn: Conn, user: User):
+    report = _require_report(conn, id)
+    if not user[1]:
+        return _name_prompt(request, f"/r/{id}", f"#vf_t{cid}")
+    if not db.reopen_thread(conn, id, cid):
+        raise HTTPException(404, "comment not found")
+    return _thread_response(request, conn, report, user[0], cid)
 
 
 @router.post("/r/{id}/verdict")

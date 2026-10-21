@@ -22,6 +22,7 @@ from verifair.db import (
     list_reports,
     list_versions,
     push_report,
+    reopen_thread,
     resolve_thread,
 )
 from verifair.deps import get_conn
@@ -239,3 +240,32 @@ def test_concurrent_pushes_of_same_id_get_versions_1_and_2(tmp_path, monkeypatch
     with ThreadPoolExecutor(2) as pool:
         results = list(pool.map(push, range(2)))
     assert sorted(results) == [("r1", 1), ("r1", 2)]
+
+
+def test_reopen_thread_by_root_or_reply(conn):
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    kw = {"report_id": "r1", "version": 1, "author_id": "u1", "author_name": "Alice"}
+    root = add_comment(conn, body="?", **kw)
+    reply = add_comment(conn, body="!", parent_id=root["id"], **kw)
+    resolve_thread(conn, "r1", root["id"])
+    assert reopen_thread(conn, "r1", reply["id"]) is True
+    assert _resolved_at(conn, root["id"]) is None
+    assert reopen_thread(conn, "r1", 999) is False
+    assert reopen_thread(conn, "other", root["id"]) is False
+
+
+def test_info_logs_do_not_print_full_user_ids(conn, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    kw = {"report_id": "r1", "version": 1, "author_name": "Alice", "body": "?"}
+    add_comment(conn, author_id="SeCrEtId12", **kw)
+    add_verdict(
+        conn,
+        report_id="r1",
+        version=1,
+        reviewer_id="ReViEwEr99",
+        reviewer_name="B",
+        verdict="approve",
+    )
+    assert "SeCrEtId12" not in caplog.text and "ReViEwEr99" not in caplog.text
+    assert "author_id=SeCr…" in caplog.text and "reviewer_id=ReVi…" in caplog.text
