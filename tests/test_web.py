@@ -626,3 +626,15 @@ def test_identity_header_configured_but_absent_uses_cookie(proxied, value):
     )
     assert r.status_code == 200
     assert api_threads(proxied)[0]["author"] == "Bob"
+
+
+def test_identity_header_is_capped_at_60_chars(proxied):
+    push(proxied)
+    page = proxied.get("/r/prorate", headers={"X-Forwarded-Email": "a" * 80 + "@example.com"})
+    assert f'<span class="me">{"a" * 60}</span>' in page.text
+
+
+def test_identity_header_agent_falls_back_to_cookie(proxied):
+    push(proxied)
+    page = proxied.get("/r/prorate", headers={"X-Forwarded-Email": "agent"})
+    assert "Set your name" in page.text and 'action="/me"' in page.text

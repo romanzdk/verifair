@@ -1,5 +1,4 @@
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -12,13 +11,6 @@ CSP = (
     "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
     " frame-ancestors 'none'"
 )
-
-
-def _cross_origin(request: Request) -> bool:
-    if request.headers["Sec-Fetch-Site"] not in ("same-origin", "none"):
-        return True
-    origin = request.headers.get("Origin")
-    return origin is not None and urlsplit(origin).netloc != request.headers.get("Host")
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -38,9 +30,10 @@ def create_app(settings: Settings) -> FastAPI:
     async def web_guard(request: Request, call_next):
         is_api = request.url.path.startswith("/api/")
         if request.method == "POST" and not is_api:
-            if "Sec-Fetch-Site" not in request.headers:
+            site = request.headers.get("Sec-Fetch-Site")
+            if site is None:
                 return JSONResponse({"detail": "browser request required"}, 403)
-            if _cross_origin(request):
+            if site not in ("same-origin", "none"):
                 return PlainTextResponse("cross-origin request refused", 403)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"

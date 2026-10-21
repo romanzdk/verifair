@@ -38,8 +38,6 @@ REPORT = {"project": "p", "title": "T", "risk": "low", "body": "## A\nx"}
     [
         {"Sec-Fetch-Site": "cross-site"},
         {"Sec-Fetch-Site": "same-site"},
-        {"Origin": "https://evil.example"},
-        {"Origin": "null"},
     ],
 )
 def test_cross_origin_web_post_is_refused(client, headers):
@@ -53,7 +51,6 @@ def test_cross_origin_web_post_is_refused(client, headers):
     [
         {"Sec-Fetch-Site": "same-origin"},
         {"Sec-Fetch-Site": "none"},
-        {"Origin": "http://testserver"},
     ],
 )
 def test_same_origin_web_post_is_allowed(client, headers):

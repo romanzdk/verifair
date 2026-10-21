@@ -41,9 +41,9 @@ Anchor = Annotated[str, Form(max_length=2000)]
 def _header_user(request: Request) -> tuple[str, str] | None:
     header = request.app.state.settings.identity_header
     value = request.headers.get(header, "").strip() if header else ""
-    if not value:
+    if not value or value == "agent":
         return None
-    return value, value.split("@")[0] or value
+    return value, (value.split("@")[0] or value)[:60]
 
 
 def current_user(request: Request) -> tuple[str, str | None]:
