@@ -1,10 +1,13 @@
 import sqlite3
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated
 
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
+from verifair import db
 from verifair.db import (
     ProjectMismatch,
     add_comment,
@@ -53,6 +56,7 @@ def test_push_existing_id_other_project_refused(conn):
     push_report(conn, project="p", title="T", risk="low", body="v1", id="r1")
     with pytest.raises(ProjectMismatch):
         push_report(conn, project="q", title="T", risk="low", body="v2", id="r1")
+    assert not conn.in_transaction
 
 
 def test_reply_inherits_anchor_and_resolve_root_only(conn):
@@ -127,3 +131,29 @@ def test_get_conn_route_write_is_visible_to_other_connection(settings):
         assert get_report(other, "t")["project"] == "p"
     finally:
         other.close()
+
+
+def test_concurrent_pushes_of_same_id_get_versions_1_and_2(tmp_path, monkeypatch):
+    path = str(tmp_path / "race.db")
+    init = connect(path)
+    init_schema(init)
+    init.close()
+    original = db.get_report
+
+    def slow_get_report(conn, id):
+        row = original(conn, id)
+        time.sleep(0.1)
+        return row
+
+    monkeypatch.setattr(db, "get_report", slow_get_report)
+
+    def push(_):
+        c = connect(path)
+        try:
+            return push_report(c, project="p", title="T", risk="low", body="b", id="r1")
+        finally:
+            c.close()
+
+    with ThreadPoolExecutor(2) as pool:
+        results = list(pool.map(push, range(2)))
+    assert sorted(results) == [("r1", 1), ("r1", 2)]
