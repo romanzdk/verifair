@@ -173,7 +173,7 @@ An unknown section also lists the valid headings: `{"detail": "unknown section",
 | `VERIFAIR_DB_PATH` | `./verifair.db` | SQLite file |
 | `VERIFAIR_BASE_URL` | `http://localhost:8000` | Used for links in API responses and notifications |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | Comma-separated H2 headings every pushed body must have; empty turns the check off |
-| `VERIFAIR_IDENTITY_HEADER` | unset | Name of a request header that carries the user identity (not used yet) |
+| `VERIFAIR_IDENTITY_HEADER` | unset | Name of a request header that carries the user identity (see Deploying) |
 | `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook for new reports, comments and verdicts |
 
 ## Report template
@@ -192,6 +192,7 @@ The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind
 ## Deploying
 
 - The web UI has no login. Anyone who can open it can comment and give verdicts. Run it on a private network or behind an auth proxy (SSO, basic auth). The Docker example above only listens on `127.0.0.1`.
+- To identify users from an auth proxy, set `VERIFAIR_IDENTITY_HEADER` to the header the proxy adds, for example `X-Forwarded-Email` with oauth2-proxy. The header value becomes the user id and the part before `@` the display name. The name prompt goes away, and signing and approvals are tied to that identity. The proxy must strip this header from client requests, or anyone can pose as anyone. Requests without the header fall back to the name cookie, so keep the app reachable only through the proxy.
 - Set `VERIFAIR_BASE_URL` to the public URL. It is used in notification links and in the push response.
 - Serve it at the root of a domain. Sub-paths (like `/verifair/`) are not supported.
 - `/data` must be a volume on local disk. SQLite runs in WAL mode and does not work well on network file systems.

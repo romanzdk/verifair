@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% set inline_name_prompt = is_current and not user_name %}
+{% set inline_name_prompt = is_current and not user_name and not user_from_header %}
 {% block title %}{{ report.title }} · verifair{% endblock %}
 {% block crumb %}<a href="/"><b>Projects</b></a><i>›</i><a href="/p/{{ report.project|urlencode }}"><b>{{ report.project }}</b></a><i>›</i>{{ report.title }}{% endblock %}
 {% block content %}

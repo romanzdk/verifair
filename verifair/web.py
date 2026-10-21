@@ -38,7 +38,19 @@ Body = Annotated[str, Form(max_length=20000)]
 Anchor = Annotated[str, Form(max_length=2000)]
 
 
+def _header_user(request: Request) -> tuple[str, str] | None:
+    header = request.app.state.settings.identity_header
+    value = request.headers.get(header, "").strip() if header else ""
+    if not value:
+        return None
+    return value, value.split("@")[0] or value
+
+
 def current_user(request: Request) -> tuple[str, str | None]:
+    from_header = _header_user(request)
+    request.state.user_from_header = from_header is not None
+    if from_header:
+        return from_header
     user_id = request.cookies.get("vf_id")
     if not user_id or user_id == "agent" or not USER_ID.fullmatch(user_id):
         # FastAPI drops cookies set on an injected Response when the route returns its own
@@ -67,6 +79,7 @@ def _page(request: Request, user: tuple[str, str | None], name: str, ctx: dict):
     url = request.url.remove_query_params("name_error")
     ctx = ctx | {
         "user_name": user[1],
+        "user_from_header": request.state.user_from_header,
         "here": url.path + (f"?{url.query}" if url.query else ""),
         "name_error": "name_error" in request.query_params,
     }
@@ -361,6 +374,8 @@ def post_verdict(
 
 @router.post("/me")
 def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str, Form()] = "/"):
+    if _header_user(request):
+        raise HTTPException(403, "identity is set by the proxy")
     name = name.strip()
     if not next.startswith("/") or next.startswith(("//", "/\\")):
         next = "/"

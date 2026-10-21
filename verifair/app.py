@@ -2,7 +2,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from verifair import api, db, web
@@ -15,9 +15,8 @@ CSP = (
 
 
 def _cross_origin(request: Request) -> bool:
-    site = request.headers.get("Sec-Fetch-Site")
-    if site is not None:
-        return site not in ("same-origin", "none")
+    if request.headers["Sec-Fetch-Site"] not in ("same-origin", "none"):
+        return True
     origin = request.headers.get("Origin")
     return origin is not None and urlsplit(origin).netloc != request.headers.get("Host")
 
@@ -38,8 +37,11 @@ def create_app(settings: Settings) -> FastAPI:
     @app.middleware("http")
     async def web_guard(request: Request, call_next):
         is_api = request.url.path.startswith("/api/")
-        if request.method == "POST" and not is_api and _cross_origin(request):
-            return PlainTextResponse("cross-origin request refused", 403)
+        if request.method == "POST" and not is_api:
+            if "Sec-Fetch-Site" not in request.headers:
+                return JSONResponse({"detail": "browser request required"}, 403)
+            if _cross_origin(request):
+                return PlainTextResponse("cross-origin request refused", 403)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         if response.headers.get("content-type", "").startswith("text/html"):

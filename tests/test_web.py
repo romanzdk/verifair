@@ -204,7 +204,7 @@ def test_web_posts_notify(tmp_path, monkeypatch):
     sent = []
     monkeypatch.setattr(notify, "send", lambda settings, text: sent.append(text))
     settings = Settings("t", str(tmp_path / "n.db"), "http://localhost:8000", "https://hooks/x")
-    client = TestClient(create_app(settings))
+    client = TestClient(create_app(settings), headers={"Sec-Fetch-Site": "same-origin"})
     push(client)
     client.cookies.set("vf_name", "Alice")
     client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
@@ -563,3 +563,66 @@ def test_app_js_caps_quote_and_maps_error_copy():
         "Something went wrong (${status}). Reload and try again.",
     ]:
         assert copy in js
+
+
+@pytest.fixture
+def proxied(settings):
+    from dataclasses import replace
+
+    from fastapi.testclient import TestClient
+
+    from verifair.app import create_app
+
+    app = create_app(replace(settings, identity_header="X-Forwarded-Email"))
+    return TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
+
+
+def test_identity_header_is_the_user(proxied):
+    push(proxied)
+    who = {"X-Forwarded-Email": "alice@example.com"}
+    page = proxied.get("/r/prorate", headers=who)
+    assert "Set your name" not in page.text and 'action="/me"' not in page.text
+    assert '<span class="me">alice</span>' in page.text
+    assert "set-cookie" not in page.headers
+
+    r = proxied.post(
+        "/r/prorate/comments",
+        data={"version": 1, "section": "Intent", "body": "Why?"},
+        headers=who,
+    )
+    assert r.status_code == 200 and "Set your name" not in r.text and "alice" in r.text
+    assert "set-cookie" not in r.headers
+    thread = api_threads(proxied)[0]
+    assert (thread["author_id"], thread["author"]) == ("alice@example.com", "alice")
+
+
+def test_identity_header_without_at_sign_is_used_whole(proxied):
+    push(proxied)
+    page = proxied.get("/r/prorate", headers={"X-Forwarded-Email": "svc-bot"})
+    assert '<span class="me">svc-bot</span>' in page.text
+
+
+def test_identity_header_blocks_set_name(proxied):
+    r = proxied.post(
+        "/me",
+        data={"name": "Mallory"},
+        headers={"X-Forwarded-Email": "alice@example.com"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 403 and "vf_name" not in r.cookies
+
+
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_identity_header_configured_but_absent_uses_cookie(proxied, value):
+    push(proxied)
+    headers = {} if value is None else {"X-Forwarded-Email": value}
+    page = proxied.get("/r/prorate", headers=headers)
+    assert "Set your name" in page.text and 'action="/me"' in page.text
+    proxied.post("/me", data={"name": "Bob"}, headers=headers)
+    r = proxied.post(
+        "/r/prorate/comments",
+        data={"version": 1, "section": "Intent", "body": "Why?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert api_threads(proxied)[0]["author"] == "Bob"

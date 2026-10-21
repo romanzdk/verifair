@@ -51,7 +51,6 @@ def test_cross_origin_web_post_is_refused(client, headers):
 @pytest.mark.parametrize(
     "headers",
     [
-        {},
         {"Sec-Fetch-Site": "same-origin"},
         {"Sec-Fetch-Site": "none"},
         {"Origin": "http://testserver"},
@@ -60,6 +59,18 @@ def test_cross_origin_web_post_is_refused(client, headers):
 def test_same_origin_web_post_is_allowed(client, headers):
     r = client.post("/me", data={"name": "Alice"}, headers=headers, follow_redirects=False)
     assert r.status_code == 303
+
+
+def test_web_post_without_sec_fetch_site_is_refused(settings):
+    from fastapi.testclient import TestClient
+
+    from verifair.app import create_app
+
+    curl = TestClient(create_app(settings))
+    r = curl.post("/me", data={"name": "Mallory"}, follow_redirects=False)
+    assert r.status_code == 403
+    assert r.json() == {"detail": "browser request required"}
+    assert "vf_name" not in r.cookies
 
 
 def test_api_post_is_exempt_from_origin_check(client):
@@ -75,7 +86,7 @@ def test_cookies_are_secure_only_behind_https(tmp_path):
 
     for base_url, secure in [("https://review.example.com", True), ("http://localhost", False)]:
         app = create_app(Settings("t", str(tmp_path / f"{secure}.db"), base_url, None))
-        client = TestClient(app, base_url=base_url)
+        client = TestClient(app, base_url=base_url, headers={"Sec-Fetch-Site": "same-origin"})
         client.post("/api/reports", json=REPORT, headers=H)
         page = client.get("/r/t").headers["set-cookie"]
         name = client.post("/me", data={"name": "A"}, follow_redirects=False).headers["set-cookie"]

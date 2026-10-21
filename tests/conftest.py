@@ -18,4 +18,4 @@ def settings(tmp_path):
 
 @pytest.fixture
 def client(settings):
-    return TestClient(create_app(settings))
+    return TestClient(create_app(settings), headers={"Sec-Fetch-Site": "same-origin"})
