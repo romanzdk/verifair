@@ -96,6 +96,7 @@ CREATE INDEX IF NOT EXISTS comments_report_parent ON comments(report_id, parent_
 CREATE INDEX IF NOT EXISTS verdicts_report ON verdicts(report_id);
 CREATE INDEX IF NOT EXISTS reports_project ON reports(project);
 CREATE INDEX IF NOT EXISTS review_requests_reviewer ON review_requests(reviewer_id);
+CREATE INDEX IF NOT EXISTS api_tokens_owner ON api_tokens(owner_id);
 """
 
 
@@ -593,6 +594,9 @@ def _digest(secret: str) -> str:
 def create_token(conn: sqlite3.Connection, *, owner_id: str, label: str) -> tuple[str, sqlite3.Row]:
     public_id, secret = secrets.token_hex(6), secrets.token_urlsafe(32)
     with _write(conn):
+        owner = get_user(conn, owner_id)
+        if owner is None or not owner["active"]:
+            raise ValueError("unknown or inactive owner")
         conn.execute(
             "INSERT INTO api_tokens (id, digest, owner_id, label, created_at)"
             " VALUES (?, ?, ?, ?, ?)",

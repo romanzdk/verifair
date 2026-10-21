@@ -687,3 +687,18 @@ def test_list_tokens_filters_by_owner_and_never_returns_digest(conn):
     assert {t["label"] for t in list_tokens(conn)} == {"ci", "laptop"}
     assert [t["label"] for t in list_tokens(conn, "m")] == ["laptop"]
     assert all("digest" not in t.keys() for t in list_tokens(conn))
+
+
+def test_create_token_refuses_unknown_or_inactive_owner(conn):
+    add_user(conn, id="m", name="M", role="member")
+    conn.execute("UPDATE users SET active=0 WHERE id='m'")
+    for owner_id in ["m", "nobody"]:
+        with pytest.raises(ValueError, match="unknown or inactive owner"):
+            create_token(conn, owner_id=owner_id, label="x")
+    assert list_tokens(conn) == []
+    assert not conn.in_transaction
+
+
+def test_api_tokens_owner_index_exists(conn):
+    indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert "api_tokens_owner" in indexes

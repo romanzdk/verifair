@@ -28,9 +28,9 @@ from verifair.rules import compute_status
 
 
 def require_token(request: Request) -> None:
-    expected = f"Bearer {request.app.state.settings.api_token}"
+    token = request.app.state.settings.api_token
     given = request.headers.get("Authorization", "")
-    if not secrets.compare_digest(given.encode(), expected.encode()):
+    if token is None or not secrets.compare_digest(given.encode(), f"Bearer {token}".encode()):
         raise HTTPException(401, "invalid token")
 
 

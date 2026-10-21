@@ -25,6 +25,20 @@ def test_requires_token(client):
     assert bad.status_code == 401
 
 
+def test_missing_shared_token_never_authenticates(settings):
+    from dataclasses import replace
+
+    from fastapi.testclient import TestClient
+
+    from verifair.app import create_app
+
+    shared = replace(settings, api_token=None, identity_header="X-Forwarded-Email")
+    client = TestClient(create_app(shared))
+    for headers in [{"Authorization": "Bearer None"}, {"Authorization": "Bearer "}, {}]:
+        r = client.get("/api/reports/x", headers=headers)
+        assert (r.status_code, r.json()) == (401, {"detail": "invalid token"}), headers
+
+
 def test_push_and_get_report(client):
     r = push(
         client, ticket_url="https://t/BILL-412", links=[{"label": "MR", "url": "https://mr/1"}]
