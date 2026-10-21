@@ -25,7 +25,7 @@ print(json.dumps({
     "risk": "high",
     "body": body,
     "ticket_url": "https://example.com/tickets/BILL-412",
-    "author": "Roman",
+    "author": "Alice",
     "agent": "example-agent",
     "model": "example-model-1",
     "commit": "a1b2c3d",

@@ -1,4 +1,13 @@
+import asyncio
+import sqlite3
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+
+import httpx
 import pytest
+
+from verifair import db
 
 H = {"Authorization": "Bearer t"}
 SAMPLE = "## Intent\nFull new price.\n\n## Edge cases\nFirst day."
@@ -294,12 +303,17 @@ def test_push_accepts_dotted_project_and_id(client):
     assert client.get("/p/my-service.v2").status_code == 200
 
 
-@pytest.mark.parametrize("anchor", [{"section": "Intent"}, {"quote": "Full"}])
-def test_reply_with_section_or_quote_422(client, anchor):
+@pytest.mark.parametrize(
+    "anchor", [{"section": "Intent"}, {"quote": "Full"}, {"prefix": "x"}, {"suffix": "x"}]
+)
+def test_reply_with_anchor_field_422(client, anchor):
     push(client)
     root = _comment(client).json()["id"]
     r = _comment(client, parent_id=root, **anchor)
-    assert (r.status_code, r.json()) == (422, {"detail": "replies cannot set section or quote"})
+    assert (r.status_code, r.json()) == (
+        422,
+        {"detail": "replies cannot set section, quote, prefix or suffix"},
+    )
     assert (
         client.get("/api/reports/prorate/comments", headers=H).json()["threads"][0]["replies"] == []
     )
@@ -468,3 +482,256 @@ def test_thread_moved_after_heading_rename(client):
     push(client, id="prorate", body="## Goal\nFull new price.\n\n## Edge cases\nFirst day.")
     [t] = client.get("/api/reports/prorate/comments", headers=H).json()["threads"]
     assert (t["found"], t["moved"], t["match_start"]) == (True, True, 0)
+
+
+def _wait(client, query="", **kw):
+    return client.get(f"/api/reports/prorate/wait?{query}", headers=H, **kw)
+
+
+def _later(settings, delay, action):
+    def run():
+        time.sleep(delay)
+        conn = db.connect(settings.db_path)
+        try:
+            action(conn)
+        finally:
+            conn.close()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    return thread
+
+
+def _verdict(conn):
+    db.add_verdict(
+        conn,
+        report_id="prorate",
+        version=1,
+        reviewer_id="bob00000",
+        reviewer_name="Bob",
+        verdict="request_changes",
+        summary="No.",
+    )
+
+
+def _root_comment(conn):
+    db.add_comment(
+        conn,
+        report_id="prorate",
+        version=1,
+        author_id="bob00000",
+        author_name="Bob",
+        body="Why?",
+    )
+
+
+def test_wait_returns_verdict_inserted_later(client, settings):
+    push(client)
+    thread = _later(settings, 0.6, _verdict)
+    start = time.monotonic()
+    r = _wait(client, "for=verdict&timeout=10")
+    thread.join()
+    assert time.monotonic() - start < 3
+    body = r.json()
+    assert (r.status_code, body["event"]) == (200, "verdict")
+    assert body["verdict"]["reviewer"] == "Bob"
+    assert body["verdict"]["verdict"] == "request_changes"
+    assert body["verdict"]["current"] is True
+    assert body["next_since"] == body["verdict"]["created_at"]
+
+
+def test_wait_returns_new_root_comment_but_not_reply(client, settings):
+    push(client)
+    root = _comment(client).json()
+    thread = _later(
+        settings,
+        0.6,
+        lambda c: db.add_comment(
+            c,
+            report_id="prorate",
+            version=1,
+            author_id="bob00000",
+            author_name="Bob",
+            body="reply",
+            parent_id=root["id"],
+        ),
+    )
+    r = _wait(client, params={"since": root["created_at"], "for": "comment", "timeout": 1})
+    thread.join()
+    assert r.json()["event"] == "timeout"
+    thread = _later(settings, 0.6, _root_comment)
+    r = _wait(client, "for=comment&timeout=10")
+    thread.join()
+    body = r.json()
+    assert (body["event"], body["comment"]["body"], body["comment"]["author_type"]) == (
+        "comment",
+        "Why?",
+        "human",
+    )
+    assert body["next_since"] == body["comment"]["created_at"]
+
+
+def test_wait_for_filters_event_kind(client, settings):
+    push(client)
+    thread = _later(settings, 0.3, _verdict)
+    r = _wait(client, "for=comment&timeout=1")
+    thread.join()
+    assert r.json()["event"] == "timeout"
+
+
+def test_wait_any_returns_existing_item_after_since(client):
+    push(client)
+    _comment(client)
+    r = _wait(client, "since=2000-01-01T00:00:00%2B00:00&timeout=1")
+    assert r.json()["event"] == "comment"
+
+
+def test_wait_since_filters_out_older_items(client):
+    push(client)
+    _comment(client)
+    r = _wait(client, "since=2999-01-01T00:00:00%2B00:00&timeout=1")
+    assert r.json()["event"] == "timeout"
+
+
+def test_wait_ignores_items_that_exist_when_it_starts(client):
+    push(client)
+    _comment(client)
+    r = _wait(client, "timeout=1")
+    assert r.json()["event"] == "timeout"
+
+
+def test_wait_timeout_returns_since(client):
+    push(client)
+    start = time.monotonic()
+    r = _wait(client, "timeout=1&since=2999-01-01T00:00:00%2B00:00")
+    assert time.monotonic() - start < 1.8
+    assert (r.status_code, r.json()) == (
+        200,
+        {
+            "event": "timeout",
+            "since": "2999-01-01T00:00:00+00:00",
+            "next_since": "2999-01-01T00:00:00+00:00",
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "query", ["for=nothing", "timeout=0", "timeout=56", "timeout=x", "since=yesterday"]
+)
+def test_wait_invalid_query_422(client, query):
+    push(client)
+    assert _wait(client, query).status_code == 422
+
+
+def test_wait_unknown_report_404(client):
+    r = client.get("/api/reports/nope/wait?timeout=1", headers=H)
+    assert r.status_code == 404
+
+
+def test_wait_requires_token(client):
+    push(client)
+    assert client.get("/api/reports/prorate/wait?timeout=1").status_code == 401
+
+
+@pytest.mark.parametrize("kind", ["verdict", "comment"])
+def test_wait_ignores_events_on_old_versions(client, settings, kind):
+    push(client)
+    conn = db.connect(settings.db_path)
+    try:
+        (_verdict if kind == "verdict" else _root_comment)(conn)
+    finally:
+        conn.close()
+    push(client, id="prorate")
+    assert (
+        _wait(client, f"for={kind}&since=2000-01-01T00:00:00Z&timeout=1").json()["event"]
+        == "timeout"
+    )
+
+
+def test_wait_tracks_new_current_version(client, settings):
+    push(client)
+
+    def update(conn):
+        db.push_report(
+            conn, id="prorate", project="billing-service", title="Updated", risk="high", body=SAMPLE
+        )
+        _verdict(conn)
+        db.add_comment(
+            conn,
+            report_id="prorate",
+            version=2,
+            author_id="bob",
+            author_name="Bob",
+            body="New version",
+        )
+
+    thread = _later(settings, 0.2, update)
+    response = _wait(client, "timeout=3")
+    thread.join()
+    assert response.json()["event"] == "comment"
+    assert response.json()["comment"]["version"] == 2
+
+
+def test_wait_does_not_starve_writer_requests(client):
+    push(client)
+
+    async def run():
+        transport = httpx.ASGITransport(app=client.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as http:
+            waiters = [
+                asyncio.create_task(http.get("/api/reports/prorate/wait?timeout=3", headers=H))
+                for _ in range(45)
+            ]
+            await asyncio.sleep(0.1)
+            start = time.monotonic()
+            written = await http.post(
+                "/api/reports/prorate/comments", headers=H, json={"body": "Concurrent"}
+            )
+            elapsed = time.monotonic() - start
+            responses = await asyncio.gather(*waiters)
+            assert written.status_code == 201
+            assert elapsed < 1.5
+            assert all(r.json()["event"] == "comment" for r in responses)
+
+    asyncio.run(run())
+
+
+def test_wait_since_compares_instants_and_excludes_equal_timestamp(client):
+    push(client)
+    root = _comment(client).json()
+    same_instant = (
+        datetime.fromisoformat(root["created_at"])
+        .astimezone(timezone(timedelta(hours=-5)))
+        .isoformat()
+    )
+    response = _wait(client, params={"since": same_instant, "timeout": 1})
+    assert response.json()["event"] == "timeout"
+
+
+def test_wait_closes_every_poll_connection(client, monkeypatch):
+    push(client)
+    connections = []
+    original_connect = db.connect
+
+    def track_connect(path):
+        conn = original_connect(path)
+        connections.append(conn)
+        return conn
+
+    monkeypatch.setattr(db, "connect", track_connect)
+    assert _wait(client, "timeout=0.1").json()["event"] == "timeout"
+    assert len(connections) >= 2
+    for conn in connections:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+            conn.execute("SELECT 1")
+
+
+def test_wait_without_since_detects_new_rows_in_the_same_second(client, settings, monkeypatch):
+    monkeypatch.setattr(db, "_now", lambda: "2000-01-01T00:00:00+00:00")
+    push(client)
+    _comment(client)
+    thread = _later(settings, 0.2, _root_comment)
+    response = _wait(client, "timeout=2")
+    thread.join()
+    assert response.json()["comment"]["body"] == "Why?"
+    assert response.json()["next_since"] == "2000-01-01T00:00:00+00:00"

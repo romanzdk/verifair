@@ -1,12 +1,17 @@
+import asyncio
 import json
 import secrets
 import sqlite3
+from contextlib import closing
+from datetime import UTC, datetime
+from time import monotonic
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from starlette.concurrency import run_in_threadpool
 
 from verifair import db, notify
 from verifair.deps import get_conn
@@ -112,6 +117,18 @@ def _comment_json(row: sqlite3.Row, resolved: bool | None = None) -> dict:
     }
 
 
+def _verdict_json(row: sqlite3.Row, current: int) -> dict:
+    return {
+        "reviewer": row["reviewer_name"],
+        "reviewer_id": row["reviewer_id"],
+        "verdict": row["verdict"],
+        "version": row["version"],
+        "summary": row["summary"],
+        "created_at": row["created_at"],
+        "current": row["version"] == current,
+    }
+
+
 @router.post("/reports", status_code=201)
 def push_report(body: ReportIn, request: Request, conn: Conn, background: BackgroundTasks):
     headings = {s.heading for s in split_sections(body.body)}
@@ -169,19 +186,73 @@ def get_report(id: str, conn: Conn):
             {"version": v["version"], "created_at": v["created_at"], "commit": v["commit"]}
             for v in db.list_versions(conn, id)
         ],
-        "verdicts": [
-            {
-                "reviewer": v["reviewer_name"],
-                "reviewer_id": v["reviewer_id"],
-                "verdict": v["verdict"],
-                "version": v["version"],
-                "summary": v["summary"],
-                "created_at": v["created_at"],
-                "current": v["version"] == current,
-            }
-            for v in verdicts
-        ],
+        "verdicts": [_verdict_json(v, current) for v in verdicts],
     }
+
+
+def _poll_wait(
+    path: str,
+    id: str,
+    kind: str,
+    since: datetime | None,
+    after: dict[str, int] | None,
+) -> tuple[dict | None, dict[str, int]]:
+    with closing(db.connect(path)) as conn:
+        conn.execute("BEGIN")
+        _require_report(conn, id)
+        current = db.latest_version(conn, id)
+        rows = {}
+        if kind in ("any", "verdict"):
+            rows["verdict"] = db.list_verdicts(conn, id)
+        if kind in ("any", "comment"):
+            rows["comment"] = db.list_comments(conn, id)
+        if since is None and after is None:
+            return None, {
+                event: max((r["id"] for r in items), default=0) for event, items in rows.items()
+            }
+        events = []
+        for event, items in rows.items():
+            for row in items:
+                if row["version"] != current or (
+                    event == "comment" and row["parent_id"] is not None
+                ):
+                    continue
+                created = datetime.fromisoformat(row["created_at"])
+                if since is not None:
+                    if created <= since:
+                        continue
+                elif row["id"] <= after[event]:
+                    continue
+                value = _verdict_json(row, current) if event == "verdict" else _comment_json(row)
+                events.append(
+                    (created, {"event": event, event: value, "next_since": row["created_at"]})
+                )
+        return min(events, key=lambda e: e[0])[1] if events else None, after or {}
+
+
+@router.get("/reports/{id}/wait")
+async def wait_for_event(
+    id: str,
+    request: Request,
+    kind: Annotated[Literal["verdict", "comment", "any"], Query(alias="for")] = "any",
+    since: datetime | None = None,
+    timeout: Annotated[float, Query(gt=0, le=55)] = 55,
+):
+    if since is not None:
+        since = since.replace(tzinfo=UTC) if since.tzinfo is None else since.astimezone(UTC)
+    cursor = (since or datetime.now(UTC)).isoformat()
+    deadline = monotonic() + timeout
+    after = None
+    while True:
+        event, after = await run_in_threadpool(
+            _poll_wait, request.app.state.settings.db_path, id, kind, since, after
+        )
+        if event is not None:
+            return {"since": cursor, **event}
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return {"event": "timeout", "since": cursor, "next_since": cursor}
+        await asyncio.sleep(min(0.5, remaining))
 
 
 @router.get("/reports/{id}/comments")
@@ -211,8 +282,10 @@ def post_comment(
     id: str, body: CommentIn, request: Request, conn: Conn, background: BackgroundTasks
 ):
     report = _require_report(conn, id)
-    if body.parent_id is not None and (body.section is not None or body.quote is not None):
-        raise HTTPException(422, "replies cannot set section or quote")
+    if body.parent_id is not None and any(
+        value is not None for value in (body.section, body.quote, body.prefix, body.suffix)
+    ):
+        raise HTTPException(422, "replies cannot set section, quote, prefix or suffix")
     if body.parent_id is None and body.quote is not None and body.section is None:
         raise HTTPException(422, "quote requires section")
     if body.parent_id is None and body.section is not None:

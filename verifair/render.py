@@ -91,8 +91,9 @@ def split_sections(body: str) -> list[Section]:
 
 
 def _score(text: str, start: int, quote: str, prefix: str, suffix: str) -> int:
-    before = len(commonprefix([text[:start][::-1], prefix[::-1]]))
-    return before + len(commonprefix([text[start + len(quote) :], suffix]))
+    before = len(commonprefix([text[max(0, start - len(prefix)) : start][::-1], prefix[::-1]]))
+    end = start + len(quote)
+    return before + len(commonprefix([text[end : end + len(suffix)], suffix]))
 
 
 def occurrences(text: str, quote: str) -> list[int]:

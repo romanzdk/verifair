@@ -3,6 +3,7 @@ import pytest
 from verifair.db import add_comment, connect, init_schema, push_report
 from verifair.render import (
     Section,
+    _score,
     build_threads,
     find_anchor,
     normalize,
@@ -298,3 +299,22 @@ def test_section_level_and_orphan_threads_have_no_match_start(conn):
     plain, orphan = build_threads(_comments(conn), [_section("A", "x")], 1)
     assert (plain.found, plain.match_start, plain.moved) == (True, None, False)
     assert (orphan.found, orphan.match_start, orphan.moved) == (False, None, False)
+
+
+def test_score_reads_only_as_much_text_as_the_context_is_long():
+    text = "x" * 100_000 + "the price is 5." + "y" * 100_000
+    start = text.index("the price")
+    assert _score(text, start, "the price is", "price: ", " 5.y") == 0 + 0 + 4
+    assert _score(text, start, "the price is", "xxx", " 5.yz") == 3 + 4
+
+
+def test_score_bounds_text_slices_to_context_lengths():
+    class TrackedText(str):
+        def __getitem__(self, key):
+            result = super().__getitem__(key)
+            if isinstance(key, slice):
+                assert len(result) <= 5
+            return result
+
+    text = TrackedText("x" * 100_000 + "the price is 5." + "y" * 100_000)
+    assert _score(text, 100_000, "the price is", "xxx", " 5.yz") == 7

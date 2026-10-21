@@ -52,7 +52,7 @@ Response:
 The commands below use the report `id` as `$ID`.
 
 - `id` is optional on the first push. Without it, verifair makes one from the title and returns it.
-- To add a new version, push again with the same `id`. Without `id`, every push makes a new report. Comments stay on the version they were made on; the API marks them `stale` when a newer version exists and `found` when the quoted text still appears in the same-named section of the current version.
+- To add a new version, push again with the same `id`. Without `id`, every push makes a new report. Comments stay on the version they were made on; the API marks them `stale` when a newer version exists and `found` when the quoted text can be located in the current version, including after a section rename or move.
 - Required: `project`, `title` (1 to 200 characters), `risk` (`low`, `medium` or `high`) and `body` (markdown).
 - `project` and `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`: letters, digits, `.`, `_` and `-`, starting with a letter or digit, up to 100 characters.
 - `ticket_url`, `session_url` and `links[].url` must start with `http://` or `https://`.
@@ -65,7 +65,7 @@ A push sends a "draft" message to Slack (if configured). The "ready for review" 
 
 Report markdown: raw HTML is shown as text, not rendered, and `javascript:` links are dropped. Use plain markdown only.
 
-`scripts/push-sample.sh` pushes the report template as a ready example with the fixed id `sample-prorate-mid-cycle`, so running it again adds a new version. It sends to `http://localhost:8000` unless you set `VERIFAIR_URL`. For any URL that is not localhost it also needs `VERIFAIR_ALLOW_REMOTE=1`:
+`scripts/push-sample.sh` pushes the report template as a draft example with the fixed id `sample-prorate-mid-cycle`, so running it again adds a new version. It sends to `http://localhost:8000` unless you set `VERIFAIR_URL`. For any URL that is not localhost it also needs `VERIFAIR_ALLOW_REMOTE=1`:
 
 ```bash
 VERIFAIR_API_TOKEN=change-me bash scripts/push-sample.sh
@@ -125,6 +125,8 @@ Response (`open=true` leaves out resolved threads):
       "parent_id": null,
       "section": "Edge cases",
       "quote": "first day of the cycle",
+      "prefix": null,
+      "suffix": null,
       "author": "Alice",
       "author_id": "4f0c1a",
       "author_type": "human",
@@ -134,12 +136,15 @@ Response (`open=true` leaves out resolved threads):
       "resolved": false,
       "stale": true,
       "found": true,
+      "moved": false,
+      "match_start": 0,
       "replies": [
         {
           "id": 2, "version": 1, "parent_id": 1, "section": "Edge cases", "quote": "first day of the cycle",
           "author": "agent", "author_id": "agent", "author_type": "agent",
           "body": "Cycle start day, inclusive.", "created_at": "2026-10-21T09:20:41+00:00",
-          "blocking": true, "resolved": false, "stale": true, "found": true
+          "blocking": true, "resolved": false, "stale": true, "found": true,
+          "prefix": null, "suffix": null, "moved": false, "match_start": 0
         }
       ]
     }
@@ -148,11 +153,13 @@ Response (`open=true` leaves out resolved threads):
 ```
 
 - `stale` is true when the comment was made on an older version.
-- `found` is true when the quote is still in the same-named section of the current version, or when the thread has no quote.
-- Replies carry the same `section`, `quote`, `stale` and `found` as their thread.
+- `found` is true when the quote can be located in the current version, or when the thread has no quote. Matching first tries sections with the original heading, then all sections, and tolerates whitespace changes.
+- `moved` is true when the quote was found in another section. `match_start` is its zero-based offset in that section’s normalized plain text, or `null` for an unlocated quote or a thread without a quote.
+- `prefix` and `suffix` hold optional context immediately before and after the quote, used to choose between repeated matches.
+- Replies carry the same anchor fields, `stale`, `found`, `moved` and `match_start` as their thread.
 - `author_type` is `agent` or `human`.
 
-Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?, blocking?}`. The response is 201 with one comment (same fields as above, without `stale`, `found` and `replies`).
+Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?, prefix?, suffix?, blocking?}`. The response is 201 with one comment (same fields as above, without `stale`, `found`, `moved`, `match_start` and `replies`).
 
 ```bash
 curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comments" \
@@ -161,12 +168,34 @@ curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comment
   -d '{"body": "Cycle start day, inclusive.", "parent_id": 1}'
 ```
 
-- With `parent_id` it is a reply. A reply to a resolved thread opens it again. A reply takes its section and quote from the thread, so sending `section` or `quote` with `parent_id` is rejected with 422 `"replies cannot set section or quote"`.
+- With `parent_id` it is a reply. A reply to a resolved thread opens it again. A reply inherits its anchor from the thread, so any non-null `section`, `quote`, `prefix` or `suffix` with `parent_id` is rejected with 422 `"replies cannot set section, quote, prefix or suffix"`.
 - Without `parent_id` it starts a new thread. `section` must be an H2 heading of the current version, exactly as written, for example `"section": "Edge cases"`. Text before the first `##` is the section `Intro`; a report with no `##` at all is one section called `Report`. `quote` points at a piece of text in that section, so `quote` without `section` is rejected with 422 `"quote requires section"`.
+- `section` and `quote` are limited to 2,000 characters each; `prefix` and `suffix` to 64 each. A quote repeated within the named section without nonempty context is rejected with 422 `"ambiguous quote"`. Add `prefix` or `suffix` to disambiguate it.
 - Without `section` the thread is a general comment on the whole report.
 - `blocking` defaults to `true`. Send `false` for a nit that should not hold up approval. Replies always take `blocking` from their thread.
 
 To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comment_id` can be the first comment or any reply; the whole thread is resolved. The response is `{"resolved": true}`. Calling it again does nothing. Reviewers can reopen a resolved thread in the web UI.
+
+## Wait for feedback
+
+`GET /api/reports/$ID/wait` waits for a verdict or a new root comment on the latest version. It checks the database every 0.5 seconds and returns one event. Replies, signatures, resolutions and version pushes are not events. Each check uses the latest version, so feedback on an older version is ignored even if it arrives during the wait.
+
+```bash
+curl -sS --fail-with-body --max-time 60 -G \
+  -H "Authorization: Bearer $VERIFAIR_API_TOKEN" \
+  --data-urlencode "for=verdict" \
+  --data-urlencode "since=2026-10-21T12:15:09+00:00" \
+  --data-urlencode "timeout=55" \
+  "http://localhost:8000/api/reports/$ID/wait"
+```
+
+- `for` is `verdict`, `comment` or `any` (the default).
+- `timeout` is seconds, greater than zero and at most 55; the default is 55. Fractions are accepted.
+- `since` is an ISO datetime. Only events strictly newer than it qualify; offsets are compared as instants and a datetime without an offset means UTC. Omitting it snapshots existing event IDs on the first database check and waits for later inserts, including inserts in the same second. Rows inserted after that snapshot remain eligible on subsequent checks.
+- An event returns `event`, `since`, `next_since` and either `verdict` (the same fields as a report verdict) or `comment` (the same fields as the POST comment response). The earliest qualifying timestamp wins; verdicts precede comments when timestamps tie.
+- A timeout returns `{"event": "timeout", "since": "...", "next_since": "..."}` with the same timestamp in both fields. `since` is the supplied instant normalized to UTC, or the UTC request start time when omitted. On an event, `next_since` is the event’s `created_at`.
+
+This endpoint signals feedback; it does not provide a lossless event stream. Stored event timestamps have second precision, so reusing `next_since` excludes other events from that same second. Read the report and comment endpoints after a signal to collect all feedback.
 
 ## Errors
 
@@ -175,7 +204,7 @@ To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comme
 | 401 | `"invalid token"` |
 | 404 | `"report not found"`, `"parent not found"` or `"comment not found"` |
 | 409 | `"id belongs to another project"` |
-| 422 | a list of field errors (pydantic style), `"replies cannot set section or quote"`, `"quote requires section"`, `"unknown section"` or `"missing sections"` |
+| 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"ambiguous quote"`, `"unknown section"` or `"missing sections"` |
 
 An unknown section also lists the valid headings: `{"detail": "unknown section", "sections": ["Intent", "Edge cases"]}`. Missing sections lists the required headings the body lacks, in the configured order.
 
@@ -188,7 +217,7 @@ An unknown section also lists the valid headings: `{"detail": "unknown section",
 | `VERIFAIR_BASE_URL` | `http://localhost:8000` | Used for links in API responses and notifications |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | Comma-separated H2 headings every pushed body must have; empty turns the check off |
 | `VERIFAIR_IDENTITY_HEADER` | unset | Name of a request header that carries the user identity (see Deploying) |
-| `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook for new reports, comments and verdicts |
+| `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook for draft reports, ready-for-review notifications, comments and verdicts |
 
 ## Report template
 
