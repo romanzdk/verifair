@@ -3,6 +3,7 @@ import re
 import pytest
 
 H = {"Authorization": "Bearer t"}
+REFUSED_COPY = "Add a summary or leave at least one open comment first."
 SAMPLE = "## Intent\nFull new price.\n\n## Edge cases\nChange on the first day."
 
 
@@ -111,7 +112,7 @@ def test_verdict_request_changes_refused_without_summary_or_thread(client):
     client.cookies.set("vf_name", "Alice")
     r = client.post("/r/prorate/verdict", data={"verdict": "request_changes", "summary": " "})
     assert r.status_code == 200
-    assert "Add a summary or leave at least one open comment first." in r.text
+    assert REFUSED_COPY in r.text
     g = client.get("/api/reports/prorate", headers=H).json()
     assert (g["status"], g["verdicts"]) == ("awaiting_review", [])
     assert client.post("/r/prorate/verdict", data={"verdict": "maybe"}).status_code == 422
@@ -260,3 +261,37 @@ def test_set_name_invalid_keeps_query_and_shows_error_in_menu(client):
     assert '<details class="me" open>' in page.text
     assert page.text.count("Enter a name (1–60 characters).") == 1
     assert f'name="next" value="{nxt}"' in page.text
+
+
+def test_request_changes_gate_counts_own_thread_carried_from_older_version(client):
+    push(client)
+    client.cookies.set("vf_id", "alice")
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
+    push(client, id="prorate", body="## Intent\nChanged.")
+
+    client.cookies.set("vf_id", "bob")
+    client.cookies.set("vf_name", "Bob")
+    refused = client.post("/r/prorate/verdict", data={"verdict": "request_changes"})
+    assert REFUSED_COPY in refused.text
+    assert client.get("/api/reports/prorate", headers=H).json()["verdicts"] == []
+
+    client.cookies.set("vf_id", "alice")
+    client.cookies.set("vf_name", "Alice")
+    allowed = client.post("/r/prorate/verdict", data={"verdict": "request_changes"})
+    assert "You requested changes on v2" in allowed.text
+    g = client.get("/api/reports/prorate", headers=H).json()
+    assert (g["status"], g["verdicts"][0]["version"]) == ("changes_requested", 2)
+
+
+def test_htmx_comment_without_name_retargets_form_and_stores_nothing(client):
+    push(client)
+    r = client.post(
+        "/r/prorate/comments",
+        data={"section": "Intent", "body": "Why?"},
+        headers={"HX-Request": "true", "HX-Trigger": "vf_cform_intent"},
+    )
+    assert r.headers["HX-Retarget"] == "#vf_cform_intent"
+    assert r.headers["HX-Reswap"] == "outerHTML"
+    assert 'class="name-prompt"' in r.text
+    assert api_threads(client) == []
