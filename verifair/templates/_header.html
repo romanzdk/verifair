@@ -1,0 +1,21 @@
+<header class="head" id="vf_header">
+  <h1>{{ report.title }}</h1>
+  <div class="meta">
+    <span id="vf_status" class="badge b-{{ status }}">{% if not is_current %}Current: {% endif %}{{ STATUS_LABELS[status] }}</span>
+    <span class="badge r-{{ report.risk }}">Risk: {{ report.risk }}</span>
+    <span>by <b>{{ report.author }}</b></span>
+    {% if report.agent or report.model %}<span>Written by <b>{{ report.agent or report.model }}</b>{% if report.agent and report.model %} ({{ report.model }}){% endif %}</span>{% endif %}
+    {% if report.session_url %}<a class="ext" href="{{ report.session_url }}">session</a>{% endif %}
+    <span>v{{ version }} · {{ version_date|date }}</span>
+    <span id="vf_open">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
+    {% if ticket %}<a class="ext" href="{{ report.ticket_url }}">{{ ticket }}</a>{% endif %}
+    {% if is_current %}
+    {% if signature %}<span>Signed by <b>{{ signature.signer_name }}</b> · {{ signature.created_at|date }}</span>
+    {% elif sign_refusal %}<span>{{ sign_refusal }}</span>
+    {% elif user_name %}<form class="sign" id="vf_sign" hx-post="{{ url }}/sign" hx-target="#vf_header" hx-swap="outerHTML" hx-disabled-elt="find button">
+      <input type="hidden" name="version" value="{{ version }}">
+      <button class="btn p">Sign this version</button>
+    </form>{% endif %}
+    {% endif %}
+  </div>
+</header>

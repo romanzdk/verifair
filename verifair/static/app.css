@@ -82,13 +82,14 @@ textarea { resize: vertical; }
 .banner { padding: 8px 20px; background: var(--warning-surface); color: var(--warning-foreground); font-size: 13px; }
 .head { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
 .head h1 { margin: 0 0 8px; font-size: 20px; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.sign { display: contents; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px; color: var(--muted-foreground); align-items: center; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--secondary); }
 .b-awaiting_review { background: var(--warning-surface); color: var(--warning-foreground); }
 .b-changes_requested, .r-high { background: var(--destructive-surface); color: var(--destructive); }
 .b-approved { background: var(--success-surface); color: var(--success-foreground); }
 .r-medium { background: var(--warning-surface); color: var(--warning-foreground); }
-.r-low, .b-stale { background: var(--secondary); color: var(--muted-foreground); }
+.r-low, .b-stale, .b-unsigned { background: var(--secondary); color: var(--muted-foreground); }
 
 .body { display: grid; grid-template-columns: minmax(0, 1fr) 220px; max-width: 1180px; }
 .main { padding: 18px 20px 0; border-right: 1px solid var(--border); min-width: 0; }
@@ -169,7 +170,7 @@ body > .name-prompt { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; 
 
 .list { padding: 14px 20px; max-width: 1000px; }
 .row { display: grid; grid-template-columns: 1fr 90px 120px 140px; gap: 10px; padding: 9px 6px; border-bottom: 1px solid var(--border); align-items: center; font-size: 13px; }
-.row-index { grid-template-columns: 1fr repeat(3, 140px); }
+.row-index { grid-template-columns: 1fr repeat(4, 120px); }
 .row.h { color: var(--muted-foreground); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
 .row .t { font-weight: 500; color: var(--foreground); }
 .row .s { color: var(--muted-foreground); font-size: 12px; }
@@ -186,7 +187,7 @@ body > .name-prompt { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; 
   .verdict textarea { flex-basis: 100%; }
   .row { grid-template-columns: 1fr 1fr; }
   .row.h:not(.row-index) { display: none; }
-  .row-index { grid-template-columns: 1fr repeat(3, 64px); }
+  .row-index { grid-template-columns: 1fr repeat(4, 56px); }
   .row-index.h { font-size: 10px; letter-spacing: 0; }
 }
 .verdict .vmsg { flex-basis: 100%; }

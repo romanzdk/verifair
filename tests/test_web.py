@@ -18,12 +18,17 @@ def push(client, **overrides):
     return client.post("/api/reports", json=payload | overrides, headers=H)
 
 
-def sign(settings, id="prorate", version=1):
-    from verifair import db
+def sign(client, id="prorate", version=1):
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    r = client.post(f"/r/{id}/sign", data={"version": version})
+    client.cookies.set("vf_id", "review00")
+    client.cookies.delete("vf_name")
+    return r
 
-    conn = db.connect(settings.db_path)
-    db.sign_version(conn, report_id=id, version=version, signer_id="s1", signer_name="Signer")
-    conn.close()
+
+def api_report(client, id="prorate"):
+    return client.get(f"/api/reports/{id}", headers=H).json()
 
 
 def api_threads(client, id="prorate"):
@@ -41,12 +46,19 @@ def test_index_lists_projects_with_counts(client):
 def test_project_page_tabs_and_unknown_404(client):
     push(client)
     push(client, title="Retry webhooks", risk="low", ticket_url=None)
+    push(client, title="Unsigned one", ticket_url=None)
+    sign(client)
+    sign(client, "retry-webhooks")
     client.cookies.set("vf_name", "Alice")
     client.post("/r/retry-webhooks/verdict", data={"version": 1, "verdict": "approve"})
 
     r = client.get("/p/billing-service")
     assert r.status_code == 200
     assert "Awaiting review · 1" in r.text and "Approved · 1" in r.text
+    assert r.text.index("Unsigned · 1") < r.text.index("Awaiting review · 1")
+    assert "Unsigned one" not in r.text
+    unsigned = client.get("/p/billing-service?tab=unsigned")
+    assert "Unsigned one" in unsigned.text and "Prorate" not in unsigned.text
     assert "Prorate" in r.text and "BILL-412" in r.text and "Retry webhooks" not in r.text
 
     approved = client.get("/p/billing-service?tab=approved")
@@ -55,7 +67,7 @@ def test_project_page_tabs_and_unknown_404(client):
     assert "Retry webhooks" in everything.text and "Prorate" in everything.text
 
     assert client.get("/p/nope").status_code == 404
-    assert "All · 2" in r.text
+    assert "All · 3" in r.text
     bogus = client.get("/p/billing-service?tab=bogus")
     assert (
         bogus.status_code == 200 and "Prorate" in bogus.text and "Retry webhooks" not in bogus.text
@@ -75,7 +87,7 @@ def test_report_page_renders_sections_nav_links_and_sets_id_cookie(client):
     )
     assert r.text.index("BILL-412") < r.text.index("https://x/mr/1")
     assert 'href="#edge-cases"' in r.text
-    assert 'class="badge b-awaiting_review"' in r.text and "Risk: high" in r.text
+    assert 'class="badge b-unsigned"' in r.text and "Risk: high" in r.text
     assert client.get("/r/nope").status_code == 404
 
 
@@ -129,9 +141,9 @@ def test_comment_reply_resolve_via_htmx(client):
     assert client.post("/r/prorate/comments/999/resolve").status_code == 404
 
 
-def test_verdict_request_changes_refused_without_summary_or_thread(client, settings):
+def test_verdict_request_changes_refused_without_summary_or_thread(client):
     push(client)
-    sign(settings)
+    sign(client)
     client.cookies.set("vf_name", "Alice")
     r = client.post(
         "/r/prorate/verdict", data={"version": 1, "verdict": "request_changes", "summary": " "}
@@ -146,9 +158,9 @@ def test_verdict_request_changes_refused_without_summary_or_thread(client, setti
     )
 
 
-def test_verdict_request_changes_allowed_with_summary(client, settings):
+def test_verdict_request_changes_allowed_with_summary(client):
     push(client)
-    sign(settings)
+    sign(client)
     client.cookies.set("vf_name", "Alice")
     r = client.post(
         "/r/prorate/verdict",
@@ -158,9 +170,9 @@ def test_verdict_request_changes_allowed_with_summary(client, settings):
     assert client.get("/api/reports/prorate", headers=H).json()["status"] == "changes_requested"
 
 
-def test_verdict_approve_changes_status_and_sidebar(client, settings):
+def test_verdict_approve_changes_status_and_sidebar(client):
     push(client)
-    sign(settings)
+    sign(client)
     client.cookies.set("vf_name", "Alice")
     r = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
     assert r.status_code == 200
@@ -206,11 +218,16 @@ def test_web_posts_notify(tmp_path, monkeypatch):
     settings = Settings("t", str(tmp_path / "n.db"), "http://localhost:8000", "https://hooks/x")
     client = TestClient(create_app(settings), headers={"Sec-Fetch-Site": "same-origin"})
     push(client)
+    assert sent[0] == "Draft report v1 in billing-service: Prorate http://localhost:8000/r/prorate"
+    sign(client)
+    assert sent[1] == (
+        "Ready for review: Prorate v1 (risk high), signed by Signer http://localhost:8000/r/prorate"
+    )
     client.cookies.set("vf_name", "Alice")
     client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve", "summary": "Fine."})
-    assert sent[1].startswith("Alice commented on Prorate › Intent: Why?")
-    assert sent[2].startswith("Alice approved Prorate v1: Fine.")
+    assert sent[2].startswith("Alice commented on Prorate › Intent: Why?")
+    assert sent[3].startswith("Alice approved Prorate v1: Fine.")
 
 
 def test_set_name(client):
@@ -305,13 +322,13 @@ def test_set_name_invalid_keeps_query_and_shows_error_in_menu(client):
     assert f'name="next" value="{nxt}"' in page.text
 
 
-def test_request_changes_gate_counts_own_thread_carried_from_older_version(client, settings):
+def test_request_changes_gate_counts_own_thread_carried_from_older_version(client):
     push(client)
     client.cookies.set("vf_id", "alice000")
     client.cookies.set("vf_name", "Alice")
     client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     push(client, id="prorate", body="## Intent\nChanged.")
-    sign(settings, version=2)
+    sign(client, version=2)
 
     client.cookies.set("vf_id", "bob00000")
     client.cookies.set("vf_name", "Bob")
@@ -377,7 +394,7 @@ def test_forms_carry_the_page_version(client):
     client.cookies.set("vf_name", "Alice")
     client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     page = client.get("/r/prorate").text
-    assert page.count('<input type="hidden" name="version" value="1">') == 4
+    assert page.count('<input type="hidden" name="version" value="1">') == 5
     missing = client.post("/r/prorate/verdict", data={"verdict": "approve"})
     assert missing.status_code == 422
 
@@ -440,6 +457,7 @@ def test_resolve_without_name_retargets_thread_card(client):
 
 def test_sidebar_marks_stale_verdicts_and_shows_summary(client):
     push(client)
+    sign(client)
     client.cookies.set("vf_name", "Alice")
     client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve", "summary": "Fine."})
     current = client.get("/r/prorate").text
@@ -449,8 +467,8 @@ def test_sidebar_marks_stale_verdicts_and_shows_summary(client):
     assert 'class="badge b-approved b-stale"' in page and "approved v1" in page
     assert "Fine." in page
     old = client.get("/r/prorate/v/1").text
-    assert ">Current: Awaiting review<" in old
-    assert ">Awaiting review<" in page and "Current: " not in page
+    assert ">Current: Unsigned<" in old
+    assert ">Unsigned<" in page and "Current: " not in page
 
 
 def test_report_page_a11y_attributes(client):
@@ -462,7 +480,7 @@ def test_report_page_a11y_attributes(client):
     assert 'aria-label="Reply"' in page and 'aria-label="Summary for the author"' in page
     assert 'aria-live="polite"' in page
     assert '<span class="n" role="img" aria-label="1 open thread">1</span>' in page
-    assert page.count('hx-disabled-elt="find button"') == 3
+    assert page.count('hx-disabled-elt="find button"') == 4
     assert 'hx-disabled-elt="#vf_verdict button"' in page
 
 
@@ -542,6 +560,7 @@ def test_reopen_without_name_prompts_and_keeps_thread_resolved(client):
 
 def test_verdict_messages_are_alerts(client):
     push(client)
+    sign(client)
     client.cookies.set("vf_name", "Alice")
     refused = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "request_changes"})
     assert f'<p class="error" role="alert">{REFUSED_COPY}</p>' in refused.text
@@ -638,3 +657,147 @@ def test_identity_header_agent_falls_back_to_cookie(proxied):
     push(proxied)
     page = proxied.get("/r/prorate", headers={"X-Forwarded-Email": "agent"})
     assert "Set your name" in page.text and 'action="/me"' in page.text
+
+
+UNSIGNED_COPY = "The author has not signed this version yet."
+SELF_COPY = "You signed this report. Someone else has to approve it."
+
+
+def test_sign_moves_unsigned_to_awaiting_review(client):
+    push(client)
+    assert api_report(client)["status"] == "unsigned"
+    assert "Sign this version" not in client.get("/r/prorate").text
+    client.cookies.set("vf_name", "Signer")
+    page = client.get("/r/prorate").text
+    assert 'id="vf_header"' in page and "Sign this version" in page
+    assert 'hx-post="/r/prorate/sign"' in page
+
+    r = sign(client)
+    assert r.status_code == 200
+    assert r.text.startswith('<header class="head" id="vf_header">')
+    assert "Signed by <b>Signer</b>" in r.text and "Sign this version" not in r.text
+    assert '<aside class="side" id="vf_sidebar" hx-swap-oob="true">' in r.text
+    assert 'hx-disabled-elt="#vf_verdict button" hx-swap-oob="true">' in r.text
+    g = api_report(client)
+    assert (g["status"], g["signed_by"]) == ("awaiting_review", "Signer")
+    client.cookies.set("vf_name", "Alice")
+    assert "Signed by <b>Signer</b>" in client.get("/r/prorate").text
+
+
+def test_sign_needs_a_name_and_the_current_version(client):
+    push(client)
+    r = client.post(
+        "/r/prorate/sign",
+        data={"version": 1},
+        headers={"HX-Request": "true", "HX-Trigger": "vf_sign"},
+    )
+    assert 'class="name-prompt"' in r.text and r.headers["HX-Retarget"] == "#vf_sign"
+    assert api_report(client)["status"] == "unsigned"
+    push(client, id="prorate", body="## Intent\nChanged.")
+    client.cookies.set("vf_name", "Signer")
+    stale = client.post("/r/prorate/sign", data={"version": 1})
+    assert STALE_COPY in stale.text
+    assert api_report(client)["signed_by"] is None
+    assert client.post("/r/nope/sign", data={"version": 1}).status_code == 404
+
+
+def test_verdict_refused_while_unsigned(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    approve = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
+    assert f'<p class="error" role="alert">{UNSIGNED_COPY}</p>' in approve.text
+    changes = client.post(
+        "/r/prorate/verdict", data={"version": 1, "verdict": "request_changes", "summary": "No."}
+    )
+    assert UNSIGNED_COPY in changes.text
+    g = api_report(client)
+    assert (g["status"], g["verdicts"]) == ("unsigned", [])
+
+
+def test_signer_cannot_review_own_version(client):
+    push(client)
+    sign(client)
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    approve = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
+    assert f'<p class="error" role="alert">{SELF_COPY}</p>' in approve.text
+    changes = client.post(
+        "/r/prorate/verdict", data={"version": 1, "verdict": "request_changes", "summary": "No."}
+    )
+    assert SELF_COPY in changes.text
+    g = api_report(client)
+    assert (g["status"], g["verdicts"]) == ("awaiting_review", [])
+
+
+def test_new_version_resets_signature(client):
+    push(client)
+    sign(client)
+    push(client, id="prorate", body="## Intent\nChanged.")
+    g = api_report(client)
+    assert (g["status"], g["signed_by"], g["signed_at"]) == ("unsigned", None, None)
+    client.cookies.set("vf_name", "Alice")
+    page = client.get("/r/prorate").text
+    assert "Signer" not in page and "Sign this version" in page
+    assert 'class="badge b-unsigned"' in page
+    assert "Sign this version" not in client.get("/r/prorate/v/1").text
+
+
+def test_header_shows_provenance_and_versions_show_commit(client):
+    push(
+        client,
+        agent="claude-code",
+        model="opus",
+        session_url="https://s/1",
+        commit="0123456789abcdef",
+    )
+    page = client.get("/r/prorate").text
+    assert "Written by <b>claude-code</b> (opus)" in page
+    assert '<a class="ext" href="https://s/1">session</a>' in page
+    assert "<code>0123456</code>" in page and "0123456789" not in page
+    push(client, id="prorate", agent="claude-code")
+    page = client.get("/r/prorate").text
+    assert "Written by <b>claude-code</b><" in page and "session</a>" not in page
+    push(client, id="prorate")
+    assert "Written by" not in client.get("/r/prorate").text
+
+
+def test_index_counts_unsigned(client):
+    push(client)
+    push(client, title="Other")
+    sign(client)
+    page = client.get("/").text
+    assert "<div>Unsigned</div>" in page
+    assert page.count('<span class="badge b-unsigned">1</span>') == 1
+    assert page.count('<span class="badge b-awaiting_review">1</span>') == 1
+
+
+AUTHOR_COPY = "Only alice@example.com can sign this report."
+
+
+def test_identity_header_only_author_can_sign(proxied):
+    push(proxied, author="alice@example.com")
+    bob = {"X-Forwarded-Email": "bob@example.com"}
+    page = proxied.get("/r/prorate", headers=bob).text
+    assert AUTHOR_COPY in page and "Sign this version" not in page
+    r = proxied.post("/r/prorate/sign", data={"version": 1}, headers=bob)
+    assert r.status_code == 403 and AUTHOR_COPY in r.text
+    assert api_report(proxied)["status"] == "unsigned"
+
+    alice = {"X-Forwarded-Email": "alice@example.com"}
+    assert "Sign this version" in proxied.get("/r/prorate", headers=alice).text
+    ok = proxied.post("/r/prorate/sign", data={"version": 1}, headers=alice)
+    assert ok.status_code == 200 and "Signed by <b>alice</b>" in ok.text
+    assert api_report(proxied)["status"] == "awaiting_review"
+    refused = proxied.post(
+        "/r/prorate/verdict", data={"version": 1, "verdict": "approve"}, headers=alice
+    )
+    assert SELF_COPY in refused.text
+    proxied.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"}, headers=bob)
+    assert api_report(proxied)["status"] == "approved"
+
+
+def test_identity_header_cookie_user_may_sign_any_report(proxied):
+    push(proxied, author="alice@example.com")
+    proxied.cookies.set("vf_name", "Bob")
+    r = proxied.post("/r/prorate/sign", data={"version": 1})
+    assert r.status_code == 200 and api_report(proxied)["signed_by"] == "Bob"

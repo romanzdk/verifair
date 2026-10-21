@@ -6,17 +6,7 @@
 {% if not is_current %}
 <div class="banner">Viewing v{{ version }} · current is v{{ current_version }} · <a href="{{ url }}">open current</a></div>
 {% endif %}
-<header class="head">
-  <h1>{{ report.title }}</h1>
-  <div class="meta">
-    <span id="vf_status" class="badge b-{{ status }}">{% if not is_current %}Current: {% endif %}{{ STATUS_LABELS[status] }}</span>
-    <span class="badge r-{{ report.risk }}">Risk: {{ report.risk }}</span>
-    <span>by <b>{{ report.author }}</b></span>
-    <span>v{{ version }} · {{ version_date|date }}</span>
-    <span id="vf_open">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
-    {% if ticket %}<a class="ext" href="{{ report.ticket_url }}">{{ ticket }}</a>{% endif %}
-  </div>
-</header>
+{% include "_header.html" %}
 <div class="body">
   <main class="main">
     {% if inline_name_prompt %}{% with next=here %}{% include "_name_prompt.html" %}{% endwith %}{% endif %}

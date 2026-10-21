@@ -32,8 +32,10 @@ templates.env.globals["STATUS_LABELS"] = rules.STATUS_LABELS
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 YEAR = 365 * 24 * 3600
 USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
-TABS = ("awaiting_review", "changes_requested", "approved")
+TABS = ("unsigned", "awaiting_review", "changes_requested", "approved")
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
+UNSIGNED = "The author has not signed this version yet."
+SELF_REVIEW = "You signed this report. Someone else has to approve it."
 Body = Annotated[str, Form(max_length=20000)]
 Anchor = Annotated[str, Form(max_length=2000)]
 
@@ -131,6 +133,18 @@ def _links(report: sqlite3.Row) -> list[tuple[str, str]]:
     return links
 
 
+def _status(conn: sqlite3.Connection, id: str, version: int) -> str:
+    signed = db.get_signature(conn, id, version) is not None
+    return rules.compute_status(db.list_verdicts(conn, id), version, signed=signed)
+
+
+def _sign_refusal(request: Request, report: sqlite3.Row, user_id: str) -> str | None:
+    author = report["author"]
+    if request.state.user_from_header and author and user_id != author:
+        return f"Only {author} can sign this report."
+    return None
+
+
 def report_context(
     conn: sqlite3.Connection, report: sqlite3.Row, version: int, user_id: str
 ) -> dict:
@@ -142,6 +156,7 @@ def report_context(
     verdicts = db.list_verdicts(conn, id)
     threads = build_threads(comments, sections, current)
     open_threads = [t for t in threads if t.root["resolved_at"] is None]
+    signature = db.get_signature(conn, id, current)
     return {
         "report": report,
         "url": f"/r/{url_quote(id)}",
@@ -150,7 +165,8 @@ def report_context(
         "version_date": shown["created_at"],
         "current_version": current,
         "is_current": version == current,
-        "status": rules.compute_status(verdicts, current),
+        "status": rules.compute_status(verdicts, current, signed=signature is not None),
+        "signature": signature,
         "sections": sections,
         "threads": threads,
         "threads_by_section": threads_by_section(threads),
@@ -183,8 +199,7 @@ def index(request: Request, conn: Conn, user: User):
     projects = []
     for project in db.list_projects(conn):
         statuses = Counter(
-            rules.compute_status(db.list_verdicts(conn, r["id"]), r["latest_version"])
-            for r in db.list_reports(conn, project)
+            _status(conn, r["id"], r["latest_version"]) for r in db.list_reports(conn, project)
         )
         projects.append({"name": project, "counts": statuses})
     return _page(request, user, "index.html", {"projects": projects})
@@ -206,7 +221,7 @@ def project_page(
     rows = [
         {
             "report": r,
-            "status": rules.compute_status(db.list_verdicts(conn, r["id"]), r["latest_version"]),
+            "status": _status(conn, r["id"], r["latest_version"]),
             "ticket": _ticket_label(r["ticket_url"]) if r["ticket_url"] else None,
         }
         for r in reports
@@ -226,6 +241,7 @@ def project_page(
 def report_page(id: str, request: Request, conn: Conn, user: User):
     report = _require_report(conn, id)
     ctx = report_context(conn, report, db.latest_version(conn, id), user[0])
+    ctx["sign_refusal"] = _sign_refusal(request, report, user[0])
     return _page(request, user, "report.html", ctx)
 
 
@@ -349,10 +365,19 @@ def post_verdict(
     if version != latest:
         return _stale(request, id, latest)
     ctx = report_context(conn, report, version, user_id)
-    if verdict == "request_changes" and not rules.can_request_changes(
+    signature = ctx["signature"]
+    if signature is None:
+        error = UNSIGNED
+    elif signature["signer_id"] == user_id:
+        error = SELF_REVIEW
+    elif verdict == "request_changes" and not rules.can_request_changes(
         ctx["threads"], user_id, summary
     ):
-        return _partial(request, ["_verdict.html"], ctx | {"error": REFUSED, "summary": summary})
+        error = REFUSED
+    else:
+        error = None
+    if error:
+        return _partial(request, ["_verdict.html"], ctx | {"error": error, "summary": summary})
     try:
         row = db.add_verdict(
             conn,
@@ -370,6 +395,33 @@ def post_verdict(
     background.add_task(notify.send, settings, notify.verdict_text(report, row, settings.base_url))
     ctx = report_context(conn, report, version, user_id) | {"oob": True}
     return _partial(request, ["_verdict.html", "_sidebar.html"], ctx)
+
+
+@router.post("/r/{id}/sign")
+def sign(
+    id: str,
+    request: Request,
+    conn: Conn,
+    user: User,
+    background: BackgroundTasks,
+    version: Annotated[int, Form()],
+):
+    report = _require_report(conn, id)
+    user_id, name = user
+    if not name:
+        return _name_prompt(request, f"/r/{id}")
+    refusal = _sign_refusal(request, report, user_id)
+    if refusal:
+        raise HTTPException(403, refusal)
+    try:
+        db.sign_version(conn, report_id=id, version=version, signer_id=user_id, signer_name=name)
+    except db.StaleVersion as stale:
+        return _stale(request, id, stale.latest)
+    settings = request.app.state.settings
+    text = notify.ready_for_review_text(report, version, name, settings.base_url)
+    background.add_task(notify.send, settings, text)
+    ctx = report_context(conn, report, version, user_id) | {"oob": True, "verdict_oob": True}
+    return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html"], ctx)
 
 
 @router.post("/me")

@@ -14,8 +14,15 @@ def _esc(text: str) -> str:
 
 def report_pushed_text(report: Mapping, version: int, base_url: str) -> str:
     return (
-        f"New report v{version} in {_esc(report['project'])}: {_esc(report['title'])} "
-        f"(risk {report['risk']}) {base_url}/r/{report['id']}"
+        f"Draft report v{version} in {_esc(report['project'])}: {_esc(report['title'])} "
+        f"{base_url}/r/{report['id']}"
+    )
+
+
+def ready_for_review_text(report: Mapping, version: int, signer_name: str, base_url: str) -> str:
+    return (
+        f"Ready for review: {_esc(report['title'])} v{version} (risk {report['risk']}), "
+        f"signed by {_esc(signer_name)} {base_url}/r/{report['id']}"
     )
 
 

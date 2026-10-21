@@ -13,7 +13,19 @@ def make_settings(url):
 
 def test_report_pushed_text():
     assert notify.report_pushed_text(REPORT, 2, "http://x") == (
-        "New report v2 in billing-service: Prorate (risk high) http://x/r/prorate"
+        "Draft report v2 in billing-service: Prorate http://x/r/prorate"
+    )
+
+
+def test_ready_for_review_text():
+    assert notify.ready_for_review_text(REPORT, 2, "Ann", "http://x") == (
+        "Ready for review: Prorate v2 (risk high), signed by Ann http://x/r/prorate"
+    )
+
+
+def test_ready_for_review_text_escapes_user_text():
+    assert notify.ready_for_review_text(EVIL, 1, "<@U1>", "http://x") == (
+        "Ready for review: &lt;T&gt; v1 (risk high), signed by &lt;@U1&gt; http://x/r/p"
     )
 
 
@@ -46,7 +58,7 @@ EVIL = {"id": "p", "project": "a&b", "title": "<T>", "risk": "high"}
 
 def test_report_pushed_text_escapes_user_text():
     assert notify.report_pushed_text(EVIL, 1, "http://x?a=1&b=2") == (
-        "New report v1 in a&amp;b: &lt;T&gt; (risk high) http://x?a=1&b=2/r/p"
+        "Draft report v1 in a&amp;b: &lt;T&gt; http://x?a=1&b=2/r/p"
     )
 
 

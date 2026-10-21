@@ -171,6 +171,9 @@ def test_reply_older_than_root_does_not_break_listing(client, settings):
 
 def test_verdicts_carry_reviewer_id_and_current(client):
     push(client)
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    client.post("/r/prorate/sign", data={"version": 1})
     client.cookies.set("vf_id", "alice000")
     client.cookies.set("vf_name", "Alice")
     client.post("/r/prorate/verdict", data={"verdict": "approve", "version": 1})
@@ -270,7 +273,7 @@ def test_push_and_comment_notify_when_slack_configured(tmp_path, monkeypatch):
     client = TestClient(create_app(settings))
     push(client)
     assert len(sent) == 1
-    assert sent[0].startswith("New report v1 in billing-service")
+    assert sent[0].startswith("Draft report v1 in billing-service")
     client.post("/api/reports/prorate/comments", json={"body": "Why?", "author": "bot"}, headers=H)
     assert len(sent) == 2
     assert sent[1].startswith("bot commented on Prorate › report: Why?")

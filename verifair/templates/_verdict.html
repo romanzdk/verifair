@@ -1,4 +1,4 @@
-<form class="verdict" id="vf_verdict" hx-post="{{ url }}/verdict" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="#vf_verdict button">
+<form class="verdict" id="vf_verdict" hx-post="{{ url }}/verdict" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="#vf_verdict button"{% if verdict_oob %} hx-swap-oob="true"{% endif %}>
   <div class="vmsg" aria-live="polite">
     {% if my_verdict %}<p class="mine" role="alert">{{ "You approved" if my_verdict.verdict == "approve" else "You requested changes on" }} v{{ current_version }}</p>{% endif %}
     {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
