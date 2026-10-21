@@ -33,6 +33,7 @@ Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 YEAR = 365 * 24 * 3600
 USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
 TABS = ("awaiting_review", "changes_requested", "unsigned", "approved")
+SCOPES = {"all": "All changes", "author": "My changes", "reviewer": "My reviews"}
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
@@ -146,8 +147,9 @@ def _status(conn: sqlite3.Connection, id: str, version: int) -> str:
 
 def _sign_refusal(request: Request, report: sqlite3.Row, user_id: str) -> str | None:
     author = report["author"]
-    if request.state.user_from_header and author not in ("", "agent") and user_id != author:
-        return f"Only {author} can sign this report."
+    owner = report["author_id"] or (author if author not in ("", "agent") else None)
+    if request.state.user_from_header and owner and user_id != owner:
+        return f"Only {author if author != 'agent' else owner} can sign this report."
     return None
 
 
@@ -207,15 +209,43 @@ def _thread_response(request, conn, report, user_id, comment_id, reset_form=Fals
     return _partial(request, names, ctx)
 
 
+def _landing_scope(scope: str, user_id: str) -> dict:
+    if scope not in SCOPES:
+        scope = "all"
+    titles = {
+        "all": "No projects yet",
+        "author": "No changes owned by you yet",
+        "reviewer": "No review requests for you yet",
+    }
+    descriptions = {
+        "all": "Projects appear here when an agent shares its first change report.",
+        "author": "Changes linked to your identity will appear here.",
+        "reviewer": "Changes appear here when someone requests your review.",
+    }
+    return {
+        "scope": scope,
+        "scopes": SCOPES,
+        "identity_id": user_id,
+        "scope_empty_title": titles[scope],
+        "scope_empty_description": descriptions[scope],
+    }
+
+
 @router.get("/")
-def index(request: Request, conn: Conn, user: User):
+def index(request: Request, conn: Conn, user: User, scope: str = "all"):
+    scope_context = _landing_scope(scope, user[0])
+    scope = scope_context["scope"]
     projects = []
     totals = Counter()
     priority = {status: i for i, status in enumerate(TABS)}
     for project in db.list_projects(conn):
         reports = sorted(
-            db.list_reports(conn, project), key=lambda r: (r["updated_at"], r["id"]), reverse=True
+            db.list_reports(conn, project, scope=scope, user_id=user[0]),
+            key=lambda r: (r["updated_at"], r["id"]),
+            reverse=True,
         )
+        if not reports:
+            continue
         rows = [
             {"report": r, "status": _status(conn, r["id"], r["latest_version"])} for r in reports
         ]
@@ -241,7 +271,8 @@ def index(request: Request, conn: Conn, user: User):
         request,
         user,
         "index.html",
-        {
+        scope_context
+        | {
             "projects": projects,
             "totals": totals,
             "total_changes": sum(totals.values()),
@@ -257,14 +288,19 @@ def project_page(
     conn: Conn,
     user: User,
     tab: str = "all",
+    scope: str = "all",
 ):
+    scope_context = _landing_scope(scope, user[0])
+    scope = scope_context["scope"]
     if tab not in (*TABS, "all"):
         tab = "all"
-    reports = sorted(
-        db.list_reports(conn, project), key=lambda r: (r["updated_at"], r["id"]), reverse=True
-    )
-    if not reports:
+    if project not in db.list_projects(conn):
         raise HTTPException(404, "project not found")
+    reports = sorted(
+        db.list_reports(conn, project, scope=scope, user_id=user[0]),
+        key=lambda r: (r["updated_at"], r["id"]),
+        reverse=True,
+    )
     rows = [
         {
             "report": r,
@@ -273,7 +309,7 @@ def project_page(
         }
         for r in reports
     ]
-    ctx = {
+    ctx = scope_context | {
         "project": project,
         "tab": tab,
         "tabs": TABS,
@@ -287,7 +323,20 @@ def project_page(
             "unsigned": "No unsigned changes",
             "approved": "No approved changes yet",
         }[tab],
+        "empty_description": (
+            f"Try another status, or view all {len(reports)} matching "
+            f"change{'s' if len(reports) != 1 else ''} in this project."
+        ),
+        "empty_url": "?tab=all" + (f"&scope={scope}" if scope != "all" else ""),
+        "empty_action": "View all changes" if tab != "all" else None,
     }
+    if not reports and scope != "all":
+        ctx.update(
+            empty_title=scope_context["scope_empty_title"],
+            empty_description="View everyone's changes in this project, or choose another scope.",
+            empty_url="?scope=all&tab=all",
+            empty_action="View everyone's changes",
+        )
     return _page(request, user, "project.html", ctx)
 
 

@@ -15,6 +15,23 @@
 .landing-summary dt { font-size: 11px; color: var(--muted-foreground); white-space: nowrap; }
 .landing-summary dd { margin: 0 0 3px; font-size: 25px; line-height: 1.2; font-weight: 600; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .landing-summary-ready dd { color: var(--accent); }
+.landing-scope-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.landing-scopes { display: flex; gap: 3px; padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--secondary); }
+.landing-scopes > a { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; padding: 7px 15px; border-radius: 6px; color: var(--muted-foreground); font-size: 12px; font-weight: 550; white-space: nowrap; }
+.landing-scopes > a:hover { color: var(--foreground); text-decoration: none; }
+.landing-scopes > a[aria-current] { background: var(--card); color: var(--foreground); box-shadow: 0 1px 3px rgba(20, 36, 65, .08); }
+.landing-identity { position: relative; margin-left: auto; }
+.landing-identity > summary { display: flex; align-items: center; gap: 6px; min-height: 32px; list-style: none; color: var(--muted-foreground); font-size: 12px; cursor: pointer; }
+.landing-identity > summary::-webkit-details-marker { display: none; }
+.landing-identity > summary::after { content: "⌄"; }
+.landing-identity > summary:hover { color: var(--foreground); }
+.landing-identity-panel { position: absolute; right: 0; top: 38px; z-index: 30; width: 300px; max-width: calc(100vw - 32px); padding: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px rgba(20, 36, 65, .12); }
+.landing-identity-panel > strong { display: block; font-size: 13px; }
+.landing-identity-panel code { display: block; margin: 10px 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; user-select: all; }
+.landing-identity-panel button { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--accent-surface); color: var(--accent-surface-foreground); font: inherit; font-size: 12px; cursor: pointer; }
+.landing-identity-panel p, .landing-identity-panel [role="status"] { display: block; margin: 12px 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; }
+.landing-identity-panel [role="status"]:empty { display: none; }
+.landing-page :is(button, summary):focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 5px; }
 .landing-project-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
 .landing-project-card { min-width: 0; padding: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: 0 2px 6px rgba(20, 36, 65, .025); }
 .landing-project-card:hover { border-color: var(--input); }
@@ -127,6 +144,10 @@
   .landing-wrap { width: calc(100% - 32px); padding-top: 28px; }
   .landing-heading h1 { font-size: 27px; }
   .landing-heading > div > p { font-size: 13px; max-width: 280px; }
+  .landing-scope-bar { gap: 6px; margin-bottom: 20px; }
+  .landing-scopes { width: 100%; }
+  .landing-scopes > a { flex: 1; padding-inline: 8px; }
+  .landing-identity > summary { font-size: 11px; }
   .landing-project-card { padding: 20px; }
   .landing-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; }
   .landing-status-count { display: flex; align-items: center; gap: 10px; min-height: 44px; }

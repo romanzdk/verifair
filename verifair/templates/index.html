@@ -15,10 +15,11 @@
   </dl>
   {% endif %}
 </header>
+{% include "_scope_filter.html" %}
 <div class="landing-project-grid">
   {% for p in projects %}
   <article class="landing-project-card">
-    <a class="landing-project-link" href="/p/{{ p.name|urlencode }}">
+    <a class="landing-project-link" href="/p/{{ p.name|urlencode }}{% if scope != 'all' %}?scope={{ scope }}{% endif %}">
       <span class="landing-project-icon" aria-hidden="true">{{ p.name[:1]|upper }}</span>
       <div class="landing-project-name"><h2>{{ p.name }}</h2><span>{{ p.total }} change{{ "s" if p.total != 1 }}</span></div>
       <span class="landing-arrow" aria-hidden="true">→</span>
@@ -32,22 +33,26 @@
     {% endif %}
     <div class="landing-status-grid" aria-label="Changes by status">
       {% for key in tabs %}
-      <a class="landing-status-count{% if not p.counts[key] %} is-zero{% endif %}" href="/p/{{ p.name|urlencode }}?tab={{ key }}" aria-label="{{ STATUS_LABELS[key] }}: {{ p.counts[key] }} change{{ 's' if p.counts[key] != 1 }}">
+      <a class="landing-status-count{% if not p.counts[key] %} is-zero{% endif %}" href="/p/{{ p.name|urlencode }}?tab={{ key }}{% if scope != 'all' %}&amp;scope={{ scope }}{% endif %}" aria-label="{{ STATUS_LABELS[key] }}: {{ p.counts[key] }} change{{ 's' if p.counts[key] != 1 }}">
         <strong>{{ p.counts[key] }}</strong><span>{{ STATUS_LABELS[key] }}</span>
       </a>
       {% endfor %}
     </div>
     <footer class="landing-project-footer">
       {% if p.updated_at %}<span>Updated <time datetime="{{ p.updated_at }}">{{ p.updated_at|date }}</time></span>{% endif %}
-      <a href="/p/{{ p.name|urlencode }}">View changes <span aria-hidden="true">→</span></a>
+      <a href="/p/{{ p.name|urlencode }}{% if scope != 'all' %}?scope={{ scope }}{% endif %}">View changes <span aria-hidden="true">→</span></a>
     </footer>
   </article>
   {% else %}
   <div class="landing-empty landing-directory-empty">
     <div class="landing-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM8 8h8M8 12h6M8 16h4"/></svg></div>
-    <h2>No projects yet</h2>
-    <p>Projects appear here when an agent shares its first change report.</p>
+    <h2>{{ scope_empty_title }}</h2>
+    <p>{{ scope_empty_description }}</p>
+    {% if scope != "all" %}
+    <a class="landing-button" href="/">View all projects <span aria-hidden="true">→</span></a>
+    {% else %}
     <div class="landing-empty-flow"><span>Intent</span><i aria-hidden="true">→</i><span>Evidence</span><i aria-hidden="true">→</i><span>Decision</span></div>
+    {% endif %}
   </div>
   {% endfor %}
 </div>

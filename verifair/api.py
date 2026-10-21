@@ -52,8 +52,19 @@ def _not_blank(text: str) -> str:
     return text
 
 
+def _human_id(value: str) -> str:
+    if value == "agent":
+        raise ValueError("must identify a human")
+    return value
+
+
 HttpUrl = Annotated[str, AfterValidator(_http_url)]
 Author = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+UserId = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=256),
+    AfterValidator(_human_id),
+]
 Anchor = Annotated[str, Field(max_length=2000)]
 Context = Annotated[str, Field(max_length=64)]
 SLUG = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
@@ -77,6 +88,8 @@ class ReportIn(BaseModel):
     ticket_url: HttpUrl | None = None
     links: list[Link] = []
     author: Author = "agent"
+    author_id: UserId | None = None
+    reviewers: Annotated[list[UserId], Field(max_length=50)] | None = None
     agent: Annotated[str, Field(max_length=60)] | None = None
     model: Annotated[str, Field(max_length=60)] | None = None
     session_url: HttpUrl | None = None
@@ -153,7 +166,9 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             id=body.id,
             ticket_url=body.ticket_url,
             links=[link.model_dump() for link in body.links],
-            author=body.author,
+            author=body.author if "author" in body.model_fields_set else None,
+            author_id=body.author_id,
+            reviewers=body.reviewers,
             agent=body.agent,
             model=body.model,
             session_url=body.session_url,
@@ -183,6 +198,8 @@ def get_report(id: str, conn: Conn):
         "ticket_url": report["ticket_url"],
         "links": json.loads(report["links"]),
         "author": report["author"],
+        "author_id": report["author_id"],
+        "reviewers": db.requested_reviewers(conn, id),
         "agent": report["agent"],
         "model": report["model"],
         "session_url": report["session_url"],

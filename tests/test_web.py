@@ -69,7 +69,7 @@ def test_project_page_tabs_and_unknown_404(client):
     assert "Retry webhooks" in everything.text and "Prorate" in everything.text
 
     assert client.get("/p/nope").status_code == 404
-    assert "All changes · 3" in r.text
+    assert "All statuses · 3" in r.text
     bogus = client.get("/p/billing-service?tab=bogus")
     assert bogus.status_code == 200 and "Prorate" in bogus.text and "Retry webhooks" in bogus.text
 

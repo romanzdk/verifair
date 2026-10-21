@@ -320,7 +320,7 @@ def test_init_schema_migrates_v1_database(tmp_path):
     )
     init_schema(c)
     init_schema(c)
-    assert {"agent", "model", "session_url"} <= _columns(c, "reports")
+    assert {"agent", "model", "session_url", "author_id"} <= _columns(c, "reports")
     assert "commit" in _columns(c, "versions")
     assert "blocking" in _columns(c, "comments")
     assert c.execute("SELECT blocking FROM comments").fetchone()[0] == 1

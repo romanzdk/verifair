@@ -1,0 +1,17 @@
+<div class="landing-scope-bar">
+  <nav class="landing-scopes" aria-label="Filter changes by your role">
+    {% for key, label in scopes.items() %}
+    <a href="?scope={{ key }}{% if tab is defined %}&amp;tab={{ tab }}{% endif %}"{% if scope == key %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <details class="landing-identity">
+    <summary>Your identity</summary>
+    <div class="landing-identity-panel">
+      <strong>{{ user_name or "Your identity" }}</strong>
+      <code>{{ identity_id }}</code>
+      <button type="button" data-copy-identity="{{ identity_id }}">Copy ID</button>
+      <p>Use this ID for author ownership and review requests.{% if not user_from_header %} It belongs to this browser.{% endif %}</p>
+      <span data-copy-result role="status"></span>
+    </div>
+  </details>
+</div>

@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS reports (
     ticket_url TEXT,
     links TEXT NOT NULL DEFAULT '[]',
     author TEXT NOT NULL,
+    author_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     agent TEXT,
@@ -66,9 +67,15 @@ CREATE TABLE IF NOT EXISTS signatures (
     created_at TEXT NOT NULL,
     PRIMARY KEY (report_id, version)
 );
+CREATE TABLE IF NOT EXISTS review_requests (
+    report_id TEXT NOT NULL REFERENCES reports(id),
+    reviewer_id TEXT NOT NULL,
+    PRIMARY KEY (report_id, reviewer_id)
+);
 CREATE INDEX IF NOT EXISTS comments_report_parent ON comments(report_id, parent_id);
 CREATE INDEX IF NOT EXISTS verdicts_report ON verdicts(report_id);
 CREATE INDEX IF NOT EXISTS reports_project ON reports(project);
+CREATE INDEX IF NOT EXISTS review_requests_reviewer ON review_requests(reviewer_id);
 """
 
 
@@ -131,10 +138,18 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "reports", "agent", "TEXT")
     _ensure_column(conn, "reports", "model", "TEXT")
     _ensure_column(conn, "reports", "session_url", "TEXT")
+    _ensure_column(conn, "reports", "author_id", "TEXT")
     _ensure_column(conn, "versions", "commit", "TEXT")
     _ensure_column(conn, "comments", "blocking", "INTEGER NOT NULL DEFAULT 1")
     _ensure_column(conn, "comments", "prefix", "TEXT")
     _ensure_column(conn, "comments", "suffix", "TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS reports_author ON reports(author_id)")
+    conn.execute(
+        "UPDATE reports SET author_id=(SELECT signer_id FROM signatures s"
+        " WHERE s.report_id=reports.id ORDER BY version DESC LIMIT 1)"
+        " WHERE author_id IS NULL AND EXISTS"
+        " (SELECT 1 FROM signatures s WHERE s.report_id=reports.id)"
+    )
 
 
 def _unique_id(conn: sqlite3.Connection, base: str) -> str:
@@ -155,7 +170,9 @@ def push_report(
     id: str | None = None,
     ticket_url: str | None = None,
     links: list[str] | None = None,
-    author: str = "agent",
+    author: str | None = None,
+    author_id: str | None = None,
+    reviewers: list[str] | None = None,
     agent: str | None = None,
     model: str | None = None,
     session_url: str | None = None,
@@ -173,17 +190,31 @@ def push_report(
                 raise ProjectMismatch(f"report {id!r} belongs to project {existing['project']!r}")
             version = latest_version(conn, id) + 1
             conn.execute(
-                "UPDATE reports SET title=?, risk=?, ticket_url=?, links=?, author=?, updated_at=?,"
+                "UPDATE reports SET title=?, risk=?, ticket_url=?, links=?,"
+                " author=COALESCE(?, author), author_id=COALESCE(?, author_id), updated_at=?,"
                 " agent=?, model=?, session_url=? WHERE id=?",
-                (title, risk, ticket_url, links_json, author, now, agent, model, session_url, id),
+                (
+                    title,
+                    risk,
+                    ticket_url,
+                    links_json,
+                    author,
+                    author_id,
+                    now,
+                    agent,
+                    model,
+                    session_url,
+                    id,
+                ),
             )
         else:
             id = id or _unique_id(conn, slugify(title))
             version = 1
             conn.execute(
-                "INSERT INTO reports (id, project, title, risk, ticket_url, links, author,"
+                "INSERT INTO reports (id, project, title, risk, ticket_url, links,"
+                " author, author_id,"
                 " created_at, updated_at, agent, model, session_url)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     id,
                     project,
@@ -191,13 +222,20 @@ def push_report(
                     risk,
                     ticket_url,
                     links_json,
-                    author,
+                    author or "agent",
+                    author_id,
                     now,
                     now,
                     agent,
                     model,
                     session_url,
                 ),
+            )
+        if reviewers is not None:
+            conn.execute("DELETE FROM review_requests WHERE report_id=?", (id,))
+            conn.executemany(
+                "INSERT INTO review_requests (report_id, reviewer_id) VALUES (?, ?)",
+                [(id, reviewer) for reviewer in set(reviewers)],
             )
         conn.execute(
             'INSERT INTO versions (report_id, version, body, created_at, "commit")'
@@ -234,15 +272,39 @@ def list_projects(conn: sqlite3.Connection) -> list[str]:
     return [r["project"] for r in rows]
 
 
-def list_reports(conn: sqlite3.Connection, project: str) -> list[sqlite3.Row]:
+def list_reports(
+    conn: sqlite3.Connection, project: str, *, scope: str = "all", user_id: str | None = None
+) -> list[sqlite3.Row]:
+    conditions = ["r.project=?"]
+    parameters = [project]
+    if scope == "author":
+        conditions.append("(r.author_id=? OR (r.author_id IS NULL AND r.author=?))")
+        parameters.extend((user_id, user_id))
+    elif scope == "reviewer":
+        conditions.append(
+            "EXISTS (SELECT 1 FROM review_requests q WHERE q.report_id=r.id AND q.reviewer_id=?)"
+        )
+        parameters.append(user_id)
     return conn.execute(
         "SELECT r.*,"
         " (SELECT MAX(version) FROM versions v WHERE v.report_id = r.id) AS latest_version,"
         " (SELECT COUNT(*) FROM comments c WHERE c.report_id = r.id"
         "  AND c.parent_id IS NULL AND c.resolved_at IS NULL) AS open_threads"
-        " FROM reports r WHERE r.project=? ORDER BY r.created_at DESC, r.rowid DESC",
-        (project,),
+        " FROM reports r WHERE "
+        + " AND ".join(conditions)
+        + " ORDER BY r.created_at DESC, r.rowid DESC",
+        parameters,
     ).fetchall()
+
+
+def requested_reviewers(conn: sqlite3.Connection, report_id: str) -> list[str]:
+    return [
+        row["reviewer_id"]
+        for row in conn.execute(
+            "SELECT reviewer_id FROM review_requests WHERE report_id=? ORDER BY reviewer_id",
+            (report_id,),
+        )
+    ]
 
 
 def add_comment(
@@ -409,6 +471,10 @@ def sign_version(
             )
         except sqlite3.IntegrityError:
             raise AlreadySigned(f"{report_id} v{version} is already signed") from None
+        conn.execute(
+            "UPDATE reports SET author_id=? WHERE id=? AND author_id IS NULL",
+            (signer_id, report_id),
+        )
     log.info(
         "version signed report=%s version=%d signer_id=%s", report_id, version, _short(signer_id)
     )

@@ -22,6 +22,14 @@ uv run uvicorn verifair.asgi:app
 
 Open http://localhost:8000. Users set a display name (kept in a cookie). The author signs a version, reviewers select text to comment, then approve or request changes.
 
+## Personal views
+
+Everyone sees all projects and changes by default. The landing pages also offer **My changes** (reports you own, including unsigned drafts) and **My reviews** (reports where your review was requested, including completed reviews). These scopes combine with project status filters. Project cards, previews and counts use the selected scope, and links between the landing pages preserve it.
+
+Open **Your identity** on either landing page to copy the ID to give your agent. Set `author_id` to the owner's ID and `reviewers` to the requested reviewers' IDs when publishing. Display names do not determine ownership. Review requests help people find work; anyone with access can still read and review a report, and the existing signature and approval rules apply.
+
+Local identities belong to a browser. With the auth proxy described under Deploying, the trusted identity header supplies the same ID across devices. For reports without an explicit owner, signing records the signer as the owner. Existing signed reports get their owner from their latest recorded signature when the database is upgraded. Unsigned legacy reports still support an `author` value equal to the user's exact identity, as required by the original proxy integration.
+
 ## Push a report
 
 ```bash
@@ -37,6 +45,8 @@ curl -sS --fail-with-body -X POST http://localhost:8000/api/reports \
     "ticket_url": "https://example.com/tickets/BILL-412",
     "links": [{"label": "Merge request", "url": "https://example.com/code/merge_requests/231"}],
     "author": "Alice",
+    "author_id": "alice@example.com",
+    "reviewers": ["bob@example.com"],
     "agent": "claude",
     "model": "opus",
     "commit": "a1b2c3d"
@@ -56,7 +66,9 @@ The commands below use the report `id` as `$ID`.
 - Required: `project`, `title` (1 to 200 characters), `risk` (`low`, `medium` or `high`) and `body` (markdown).
 - `project` and `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`: letters, digits, `.`, `_` and `-`, starting with a letter or digit, up to 100 characters.
 - `ticket_url`, `session_url` and `links[].url` must start with `http://` or `https://`.
-- Optional `author` (up to 60 characters): the human who owns the report and should sign it. The default is `agent`, which means anyone with a name may sign.
+- Optional `author` (up to 60 characters): the human author's display name. Defaults to `agent`. Use `author_id` to link ownership to a stable identity.
+- Optional `author_id`: the owner's stable identity, separate from the display name in `author`. Optional `reviewers`: up to 50 stable identities to request reviews from. Each ID must be 1–256 characters and cannot be `agent`; it must match the user's identity exactly. Duplicate reviewers are stored once.
+- On later versions, omitted `author`, `author_id` and `reviewers` retain their previous values. A supplied `author_id` transfers ownership; a supplied reviewer list replaces the requests, and `reviewers: []` clears them. `null` for `author_id` or `reviewers` also leaves the existing value unchanged. Requests belong to the change and survive signing, verdicts and new versions.
 - Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
 - The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as a top-level H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
 - Unknown JSON keys are rejected with 422.
@@ -85,6 +97,8 @@ VERIFAIR_API_TOKEN=change-me VERIFAIR_URL=https://verifair.example.com VERIFAIR_
   "ticket_url": "https://example.com/tickets/BILL-412",
   "links": [{"label": "Merge request", "url": "https://example.com/code/merge_requests/231"}],
   "author": "Alice",
+  "author_id": "alice@example.com",
+  "reviewers": ["bob@example.com"],
   "agent": "claude",
   "model": "opus",
   "session_url": "https://example.com/sessions/42",
@@ -255,7 +269,7 @@ For example `Assisted-by: claude:opus`. Agents do not add `Signed-off-by`. Only 
 - A version must be signed before anyone can approve or request changes on it. Until then the status is `unsigned`.
 - The first signature on a version is kept. Signing again does nothing.
 - Without `VERIFAIR_IDENTITY_HEADER`, anyone who has set a name can sign. The name is only a cookie, so this is a convenience, not a control.
-- With `VERIFAIR_IDENTITY_HEADER`, a report whose `author` is a person can only be signed by that person, so `author` must equal the header value (for example the email). A report whose `author` is `agent` can be signed by anyone.
+- With `VERIFAIR_IDENTITY_HEADER`, only the owner can sign: `author_id` must equal the header value (for example the email). Without `author_id`, a person in the legacy `author` field must match the header instead. A report with `author: "agent"` and no owner can be signed by anyone; the signer becomes its owner.
 - The person who signed a version cannot approve it or request changes on it. Someone else has to.
 - Only with the identity header behind an auth proxy is signing a real control. See Deploying.
 
