@@ -63,6 +63,10 @@ class ReportIn(BaseModel):
     ticket_url: HttpUrl | None = None
     links: list[Link] = []
     author: Author = "agent"
+    agent: Annotated[str, Field(max_length=60)] | None = None
+    model: Annotated[str, Field(max_length=60)] | None = None
+    session_url: HttpUrl | None = None
+    commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{7,40}$")
 
 
 class CommentIn(BaseModel):
@@ -72,6 +76,7 @@ class CommentIn(BaseModel):
     parent_id: int | None = None
     section: Anchor | None = None
     quote: Anchor | None = None
+    blocking: bool = True
 
 
 def _require_report(conn: sqlite3.Connection, id: str) -> sqlite3.Row:
@@ -97,12 +102,17 @@ def _comment_json(row: sqlite3.Row, resolved: bool | None = None) -> dict:
         "author_type": "agent" if row["author_id"] == "agent" else "human",
         "body": row["body"],
         "created_at": row["created_at"],
+        "blocking": bool(row["blocking"]),
         "resolved": row["resolved_at"] is not None if resolved is None else resolved,
     }
 
 
 @router.post("/reports", status_code=201)
 def push_report(body: ReportIn, request: Request, conn: Conn, background: BackgroundTasks):
+    headings = {s.heading for s in split_sections(body.body)}
+    missing = [s for s in request.app.state.settings.required_sections if s not in headings]
+    if missing:
+        return JSONResponse({"detail": "missing sections", "sections": missing}, 422)
     try:
         id, version = db.push_report(
             conn,
@@ -114,6 +124,10 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             ticket_url=body.ticket_url,
             links=[link.model_dump() for link in body.links],
             author=body.author,
+            agent=body.agent,
+            model=body.model,
+            session_url=body.session_url,
+            commit=body.commit,
         )
     except db.ProjectMismatch:
         raise HTTPException(409, "id belongs to another project") from None
@@ -130,6 +144,7 @@ def get_report(id: str, conn: Conn):
     report = _require_report(conn, id)
     current = db.latest_version(conn, id)
     verdicts = db.list_verdicts(conn, id)
+    signature = db.get_signature(conn, id, current)
     return {
         "id": report["id"],
         "project": report["project"],
@@ -138,10 +153,15 @@ def get_report(id: str, conn: Conn):
         "ticket_url": report["ticket_url"],
         "links": json.loads(report["links"]),
         "author": report["author"],
-        "status": compute_status(verdicts, current),
+        "agent": report["agent"],
+        "model": report["model"],
+        "session_url": report["session_url"],
+        "signed_by": signature["signer_name"] if signature else None,
+        "signed_at": signature["created_at"] if signature else None,
+        "status": compute_status(verdicts, current, signed=signature is not None),
         "current_version": current,
         "versions": [
-            {"version": v["version"], "created_at": v["created_at"]}
+            {"version": v["version"], "created_at": v["created_at"], "commit": v["commit"]}
             for v in db.list_versions(conn, id)
         ],
         "verdicts": [
@@ -200,6 +220,7 @@ def post_comment(
             parent_id=body.parent_id,
             section=body.section,
             quote=body.quote,
+            blocking=body.blocking,
         )
     except ValueError:
         raise HTTPException(404, "parent not found") from None

@@ -23,7 +23,7 @@ def test_push_and_get_report(client):
     assert r.status_code == 201
     assert r.json() == {"id": "prorate", "version": 1, "url": "http://localhost:8000/r/prorate"}
     g = client.get("/api/reports/prorate", headers=H).json()
-    assert (g["status"], g["current_version"], g["risk"]) == ("awaiting_review", 1, "high")
+    assert (g["status"], g["current_version"], g["risk"]) == ("unsigned", 1, "high")
     assert g["project"] == "billing-service"
     assert g["ticket_url"] == "https://t/BILL-412"
     assert g["links"] == [{"label": "MR", "url": "https://mr/1"}]
@@ -73,6 +73,7 @@ def test_comment_roundtrip_and_open_filter(client):
         "author_type": "agent",
         "body": "Why?",
         "created_at": root.json()["created_at"],
+        "blocking": True,
         "resolved": False,
     }
     reply = client.post(
@@ -312,3 +313,126 @@ def test_blank_title_says_must_not_be_blank(client):
     r = push(client, title="   ")
     assert r.status_code == 422
     assert "must not be blank" in r.json()["detail"][0]["msg"]
+
+
+@pytest.fixture
+def strict_client(settings):
+    from dataclasses import replace
+
+    from fastapi.testclient import TestClient
+
+    from verifair.app import create_app
+
+    required = ("Verification", "Rollback", "Security impact")
+    return TestClient(create_app(replace(settings, required_sections=required)))
+
+
+def test_push_missing_required_sections_422(strict_client):
+    body = "## Verification\nran tests\n\n## rollback\nlower case does not count"
+    r = push(strict_client, body=body)
+    assert r.status_code == 422
+    assert r.json() == {"detail": "missing sections", "sections": ["Rollback", "Security impact"]}
+    assert strict_client.get("/api/reports/prorate", headers=H).status_code == 404
+
+
+def test_push_with_all_required_sections_ok(strict_client):
+    body = "## Verification\na\n\n## Rollback\nb\n\n## Security impact\nc"
+    assert push(strict_client, body=body).status_code == 201
+
+
+def test_empty_required_sections_disables_the_check(client):
+    assert push(client, body="no headings at all").status_code == 201
+
+
+def test_load_settings_required_sections(monkeypatch):
+    from verifair.config import load_settings
+
+    monkeypatch.setenv("VERIFAIR_API_TOKEN", "t")
+    monkeypatch.delenv("VERIFAIR_REQUIRED_SECTIONS", raising=False)
+    monkeypatch.delenv("VERIFAIR_IDENTITY_HEADER", raising=False)
+    s = load_settings()
+    assert s.required_sections == ("Verification", "Rollback", "Security impact")
+    assert s.identity_header is None
+    monkeypatch.setenv("VERIFAIR_REQUIRED_SECTIONS", " A , ,B ")
+    monkeypatch.setenv("VERIFAIR_IDENTITY_HEADER", "X-User")
+    s = load_settings()
+    assert (s.required_sections, s.identity_header) == (("A", "B"), "X-User")
+    monkeypatch.setenv("VERIFAIR_REQUIRED_SECTIONS", "")
+    monkeypatch.setenv("VERIFAIR_IDENTITY_HEADER", "")
+    s = load_settings()
+    assert (s.required_sections, s.identity_header) == ((), None)
+
+
+def test_provenance_and_commit_roundtrip(client):
+    r = push(
+        client,
+        agent="claude",
+        model="opus",
+        session_url="https://sessions.example/1",
+        commit="a1b2c3d",
+    )
+    assert r.status_code == 201
+    push(
+        client,
+        id="prorate",
+        body="## Intent\nv2",
+        commit="a" * 40,
+        agent="claude",
+        model="opus",
+        session_url="https://sessions.example/1",
+    )
+    g = client.get("/api/reports/prorate", headers=H).json()
+    assert (g["agent"], g["model"], g["session_url"]) == (
+        "claude",
+        "opus",
+        "https://sessions.example/1",
+    )
+    assert (g["signed_by"], g["signed_at"]) == (None, None)
+    assert [v["commit"] for v in g["versions"]] == ["a1b2c3d", "a" * 40]
+
+
+def test_provenance_defaults_to_null(client):
+    push(client)
+    g = client.get("/api/reports/prorate", headers=H).json()
+    assert (g["agent"], g["model"], g["session_url"]) == (None, None, None)
+    assert [v["commit"] for v in g["versions"]] == [None]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"commit": "ABCDEF1"},
+        {"commit": "abc12"},
+        {"commit": "g" * 7},
+        {"commit": "a" * 41},
+        {"agent": "x" * 61},
+        {"model": "x" * 61},
+        {"session_url": "javascript:alert(1)"},
+    ],
+)
+def test_push_rejects_bad_provenance(client, overrides):
+    assert push(client, **overrides).status_code == 422
+
+
+def test_signed_report_shows_signer_and_status(client, settings):
+    from verifair import db
+
+    push(client)
+    conn = db.connect(settings.db_path)
+    db.sign_version(conn, report_id="prorate", version=1, signer_id="u1", signer_name="Alice")
+    g = client.get("/api/reports/prorate", headers=H).json()
+    assert (g["status"], g["signed_by"]) == ("awaiting_review", "Alice")
+    assert g["signed_at"]
+
+
+def test_comment_blocking_roundtrip(client):
+    push(client)
+    url = "/api/reports/prorate/comments"
+    default = client.post(url, json={"body": "a"}, headers=H).json()
+    assert default["blocking"] is True
+    nit = client.post(url, json={"body": "b", "blocking": False}, headers=H).json()
+    assert nit["blocking"] is False
+    reply = client.post(url, json={"body": "c", "parent_id": nit["id"]}, headers=H).json()
+    assert reply["blocking"] is False
+    threads = client.get(url, headers=H).json()["threads"]
+    assert [t["blocking"] for t in threads] == [True, False]

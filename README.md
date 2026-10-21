@@ -25,7 +25,7 @@ curl -sS --fail-with-body -X POST http://localhost:8000/api/reports \
     "project": "billing-service",
     "title": "Prorate mid-cycle plan changes",
     "risk": "high",
-    "body": "## Intent\nCharge upgrades by remaining days.",
+    "body": "## Intent\nCharge upgrades by remaining days.\n\n## Verification\nUnit tests pass.\n\n## Rollback\nRevert the merge request.\n\n## Security impact\nNone.",
     "ticket_url": "https://example.com/tickets/BILL-412",
     "links": [{"label": "Merge request", "url": "https://example.com/code/merge_requests/231"}],
     "author": "agent"
@@ -44,7 +44,9 @@ The commands below use the report `id` as `$ID`.
 - To add a new version, push again with the same `id`. Without `id`, every push makes a new report. Comments stay on the version they were made on; the API marks them `stale` when a newer version exists and `found` when the quoted text still appears in the same-named section of the current version.
 - Required: `project`, `title` (1 to 200 characters), `risk` (`low`, `medium` or `high`) and `body` (markdown).
 - `project` and `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`: letters, digits, `.`, `_` and `-`, starting with a letter or digit, up to 100 characters.
-- `ticket_url` and `links[].url` must start with `http://` or `https://`.
+- `ticket_url`, `session_url` and `links[].url` must start with `http://` or `https://`.
+- Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
+- The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as an H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
 - Unknown JSON keys are rejected with 422.
 
 Report markdown: raw HTML is shown as text, not rendered, and `javascript:` links are dropped. Use plain markdown only.
@@ -69,11 +71,16 @@ VERIFAIR_API_TOKEN=change-me VERIFAIR_URL=https://verifair.example.com VERIFAIR_
   "ticket_url": "https://example.com/tickets/BILL-412",
   "links": [{"label": "Merge request", "url": "https://example.com/code/merge_requests/231"}],
   "author": "agent",
+  "agent": "claude",
+  "model": "opus",
+  "session_url": "https://example.com/sessions/42",
+  "signed_by": "Alice",
+  "signed_at": "2026-10-21T09:30:00+00:00",
   "status": "changes_requested",
   "current_version": 2,
   "versions": [
-    {"version": 1, "created_at": "2026-10-21T09:00:12+00:00"},
-    {"version": 2, "created_at": "2026-10-21T11:30:40+00:00"}
+    {"version": 1, "created_at": "2026-10-21T09:00:12+00:00", "commit": "a1b2c3d"},
+    {"version": 2, "created_at": "2026-10-21T11:30:40+00:00", "commit": null}
   ],
   "verdicts": [
     {"reviewer": "Alice", "reviewer_id": "4f0c1a", "verdict": "approve", "version": 1, "current": false, "summary": "", "created_at": "2026-10-21T10:02:00+00:00"},
@@ -82,7 +89,8 @@ VERIFAIR_API_TOKEN=change-me VERIFAIR_URL=https://verifair.example.com VERIFAIR_
 }
 ```
 
-- `status` is `awaiting_review`, `changes_requested` or `approved`. It only counts verdicts on `current_version`.
+- `status` is `unsigned`, `awaiting_review`, `changes_requested` or `approved`. It is `unsigned` until someone signs `current_version`; after that it only counts verdicts on `current_version`.
+- `signed_by` and `signed_at` describe the signature on `current_version`, or are `null`. `agent`, `model` and `session_url` are `null` when the push did not send them.
 - `verdict` is `approve` or `request_changes`. `current` is true when the verdict was given on `current_version`.
 
 ## Read and answer comments
@@ -108,6 +116,7 @@ Response (`open=true` leaves out resolved threads):
       "author_type": "human",
       "body": "Which first day?",
       "created_at": "2026-10-21T09:14:03+00:00",
+      "blocking": true,
       "resolved": false,
       "stale": true,
       "found": true,
@@ -116,7 +125,7 @@ Response (`open=true` leaves out resolved threads):
           "id": 2, "version": 1, "parent_id": 1, "section": "Edge cases", "quote": "first day of the cycle",
           "author": "agent", "author_id": "agent", "author_type": "agent",
           "body": "Cycle start day, inclusive.", "created_at": "2026-10-21T09:20:41+00:00",
-          "resolved": false, "stale": true, "found": true
+          "blocking": true, "resolved": false, "stale": true, "found": true
         }
       ]
     }
@@ -129,7 +138,7 @@ Response (`open=true` leaves out resolved threads):
 - Replies carry the same `section`, `quote`, `stale` and `found` as their thread.
 - `author_type` is `agent` or `human`.
 
-Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?}`. The response is 201 with one comment (same fields as above, without `stale`, `found` and `replies`).
+Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?, blocking?}`. The response is 201 with one comment (same fields as above, without `stale`, `found` and `replies`).
 
 ```bash
 curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comments" \
@@ -141,6 +150,7 @@ curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comment
 - With `parent_id` it is a reply. A reply to a resolved thread opens it again. A reply takes its section and quote from the thread, so sending `section` or `quote` with `parent_id` is rejected with 422 `"replies cannot set section or quote"`.
 - Without `parent_id` it starts a new thread. `section` must be an H2 heading of the current version, exactly as written, for example `"section": "Edge cases"`. Text before the first `##` is the section `Intro`; a report with no `##` at all is one section called `Report`. `quote` points at a piece of text in that section, so `quote` without `section` is rejected with 422 `"quote requires section"`.
 - Without `section` the thread is a general comment on the whole report.
+- `blocking` defaults to `true`. Send `false` for a nit that should not hold up approval. Replies always take `blocking` from their thread.
 
 To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comment_id` can be the first comment or any reply; the whole thread is resolved. The response is `{"resolved": true}`. Calling it again does nothing. Reviewers can reopen a resolved thread in the web UI.
 
@@ -151,9 +161,9 @@ To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comme
 | 401 | `"invalid token"` |
 | 404 | `"report not found"`, `"parent not found"` or `"comment not found"` |
 | 409 | `"id belongs to another project"` |
-| 422 | a list of field errors (pydantic style), `"replies cannot set section or quote"`, `"quote requires section"`, or `"unknown section"` |
+| 422 | a list of field errors (pydantic style), `"replies cannot set section or quote"`, `"quote requires section"`, `"unknown section"` or `"missing sections"` |
 
-An unknown section also lists the valid headings: `{"detail": "unknown section", "sections": ["Intent", "Edge cases"]}`.
+An unknown section also lists the valid headings: `{"detail": "unknown section", "sections": ["Intent", "Edge cases"]}`. Missing sections lists the required headings the body lacks, in the configured order.
 
 ## Configuration
 
@@ -162,6 +172,8 @@ An unknown section also lists the valid headings: `{"detail": "unknown section",
 | `VERIFAIR_API_TOKEN` | required | Bearer token agents use for `/api` |
 | `VERIFAIR_DB_PATH` | `./verifair.db` | SQLite file |
 | `VERIFAIR_BASE_URL` | `http://localhost:8000` | Used for links in API responses and notifications |
+| `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | Comma-separated H2 headings every pushed body must have; empty turns the check off |
+| `VERIFAIR_IDENTITY_HEADER` | unset | Name of a request header that carries the user identity (not used yet) |
 | `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook for new reports, comments and verdicts |
 
 ## Report template

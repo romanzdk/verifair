@@ -139,3 +139,9 @@ def test_can_request_changes_needs_summary_or_own_open_thread(conn):
 
     resolve_thread(conn, "r", root["id"])
     assert not can_request_changes(_threads(conn), "alice", "")
+
+
+def test_unsigned_overrides_verdicts(conn):
+    assert compute_status(_verdicts(conn), 1, signed=False) == "unsigned"
+    assert compute_status([], 1, signed=False) == "unsigned"
+    assert compute_status([], 1) == "awaiting_review"

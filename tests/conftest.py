@@ -12,6 +12,7 @@ def settings(tmp_path):
         db_path=str(tmp_path / "test.db"),
         base_url="http://localhost:8000",
         slack_webhook_url=None,
+        required_sections=(),
     )
 
 

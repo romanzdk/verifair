@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from verifair.render import Thread
 
 STATUS_LABELS = {
+    "unsigned": "Unsigned",
     "awaiting_review": "Awaiting review",
     "changes_requested": "Changes requested",
     "approved": "Approved",
@@ -34,7 +35,9 @@ def latest_verdicts(verdicts: list[sqlite3.Row], version: int) -> dict[str, sqli
     return latest
 
 
-def compute_status(verdicts: list[sqlite3.Row], current_version: int) -> str:
+def compute_status(verdicts: list[sqlite3.Row], current_version: int, signed: bool = True) -> str:
+    if not signed:
+        return "unsigned"
     kinds = {row["verdict"] for row in latest_verdicts(verdicts, current_version).values()}
     if "request_changes" in kinds:
         return "changes_requested"

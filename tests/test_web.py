@@ -18,6 +18,14 @@ def push(client, **overrides):
     return client.post("/api/reports", json=payload | overrides, headers=H)
 
 
+def sign(settings, id="prorate", version=1):
+    from verifair import db
+
+    conn = db.connect(settings.db_path)
+    db.sign_version(conn, report_id=id, version=version, signer_id="s1", signer_name="Signer")
+    conn.close()
+
+
 def api_threads(client, id="prorate"):
     return client.get(f"/api/reports/{id}/comments", headers=H).json()["threads"]
 
@@ -121,8 +129,9 @@ def test_comment_reply_resolve_via_htmx(client):
     assert client.post("/r/prorate/comments/999/resolve").status_code == 404
 
 
-def test_verdict_request_changes_refused_without_summary_or_thread(client):
+def test_verdict_request_changes_refused_without_summary_or_thread(client, settings):
     push(client)
+    sign(settings)
     client.cookies.set("vf_name", "Alice")
     r = client.post(
         "/r/prorate/verdict", data={"version": 1, "verdict": "request_changes", "summary": " "}
@@ -137,8 +146,9 @@ def test_verdict_request_changes_refused_without_summary_or_thread(client):
     )
 
 
-def test_verdict_request_changes_allowed_with_summary(client):
+def test_verdict_request_changes_allowed_with_summary(client, settings):
     push(client)
+    sign(settings)
     client.cookies.set("vf_name", "Alice")
     r = client.post(
         "/r/prorate/verdict",
@@ -148,8 +158,9 @@ def test_verdict_request_changes_allowed_with_summary(client):
     assert client.get("/api/reports/prorate", headers=H).json()["status"] == "changes_requested"
 
 
-def test_verdict_approve_changes_status_and_sidebar(client):
+def test_verdict_approve_changes_status_and_sidebar(client, settings):
     push(client)
+    sign(settings)
     client.cookies.set("vf_name", "Alice")
     r = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
     assert r.status_code == 200
@@ -294,12 +305,13 @@ def test_set_name_invalid_keeps_query_and_shows_error_in_menu(client):
     assert f'name="next" value="{nxt}"' in page.text
 
 
-def test_request_changes_gate_counts_own_thread_carried_from_older_version(client):
+def test_request_changes_gate_counts_own_thread_carried_from_older_version(client, settings):
     push(client)
     client.cookies.set("vf_id", "alice000")
     client.cookies.set("vf_name", "Alice")
     client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     push(client, id="prorate", body="## Intent\nChanged.")
+    sign(settings, version=2)
 
     client.cookies.set("vf_id", "bob00000")
     client.cookies.set("vf_name", "Bob")
