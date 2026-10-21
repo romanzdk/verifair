@@ -148,7 +148,7 @@ section:hover h2 .cc { opacity: 1; }
 }
 .verdict textarea { flex: 1; min-height: 38px; resize: none; }
 .verdict .mine, .verdict .error { flex-basis: 100%; margin: 0; font-size: 12px; }
-.verdict .mine { color: var(--success-foreground); font-weight: 600; }
+.verdict .mine { color: var(--success); font-weight: 600; }
 .verdict .error { color: var(--destructive); font-weight: 600; }
 body > .name-prompt { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; border-radius: 0; }
 
