@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}verifair{% endblock %}</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/app.css">{% block page_assets %}{% endblock %}
 <script src="/static/htmx.min.js" defer></script>
 <script src="/static/app.js" defer></script>
 </head>
-<body>
+<body{% block body_attributes %}{% endblock %}>
 <div class="topbar">
   <a class="logo" href="/">veri<span>fair</span></a>
   <div class="crumb">{% block crumb %}<b>Projects</b>{% endblock %}</div>

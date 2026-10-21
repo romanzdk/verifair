@@ -32,7 +32,7 @@ templates.env.globals["STATUS_LABELS"] = rules.STATUS_LABELS
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 YEAR = 365 * 24 * 3600
 USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
-TABS = ("unsigned", "awaiting_review", "changes_requested", "approved")
+TABS = ("awaiting_review", "changes_requested", "unsigned", "approved")
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
@@ -210,12 +210,44 @@ def _thread_response(request, conn, report, user_id, comment_id, reset_form=Fals
 @router.get("/")
 def index(request: Request, conn: Conn, user: User):
     projects = []
+    totals = Counter()
+    priority = {status: i for i, status in enumerate(TABS)}
     for project in db.list_projects(conn):
-        statuses = Counter(
-            _status(conn, r["id"], r["latest_version"]) for r in db.list_reports(conn, project)
+        reports = sorted(
+            db.list_reports(conn, project), key=lambda r: (r["updated_at"], r["id"]), reverse=True
         )
-        projects.append({"name": project, "counts": statuses})
-    return _page(request, user, "index.html", {"projects": projects})
+        rows = [
+            {"report": r, "status": _status(conn, r["id"], r["latest_version"])} for r in reports
+        ]
+        statuses = Counter(row["status"] for row in rows)
+        totals.update(statuses)
+        projects.append(
+            {
+                "name": project,
+                "counts": statuses,
+                "total": len(rows),
+                "preview": min(rows, key=lambda row: priority[row["status"]], default=None),
+                "updated_at": max((r["updated_at"] for r in reports), default=None),
+            }
+        )
+    projects.sort(
+        key=lambda p: (
+            not p["counts"]["awaiting_review"],
+            not (p["counts"]["unsigned"] or p["counts"]["changes_requested"]),
+            p["name"].casefold(),
+        )
+    )
+    return _page(
+        request,
+        user,
+        "index.html",
+        {
+            "projects": projects,
+            "totals": totals,
+            "total_changes": sum(totals.values()),
+            "tabs": TABS,
+        },
+    )
 
 
 @router.get("/p/{project}")
@@ -224,11 +256,13 @@ def project_page(
     request: Request,
     conn: Conn,
     user: User,
-    tab: str = "awaiting_review",
+    tab: str = "all",
 ):
     if tab not in (*TABS, "all"):
-        tab = "awaiting_review"
-    reports = db.list_reports(conn, project)
+        tab = "all"
+    reports = sorted(
+        db.list_reports(conn, project), key=lambda r: (r["updated_at"], r["id"]), reverse=True
+    )
     if not reports:
         raise HTTPException(404, "project not found")
     rows = [
@@ -246,6 +280,13 @@ def project_page(
         "counts": Counter(row["status"] for row in rows),
         "total": len(rows),
         "rows": [row for row in rows if tab == "all" or row["status"] == tab],
+        "empty_title": {
+            "all": "No changes yet",
+            "awaiting_review": "No changes awaiting review",
+            "changes_requested": "No changes requested",
+            "unsigned": "No unsigned changes",
+            "approved": "No approved changes yet",
+        }[tab],
     }
     return _page(request, user, "project.html", ctx)
 

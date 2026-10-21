@@ -1,14 +1,54 @@
-{% extends "base.html" %}
-{% block content %}
-<div class="list">
-  <div class="row row-index h"><div>Project</div>{% for key, label in STATUS_LABELS.items() %}<div>{{ label }}</div>{% endfor %}</div>
-  {% for p in projects %}
-  <div class="row row-index">
-    <div class="t"><a href="/p/{{ p.name|urlencode }}">{{ p.name }}</a></div>
-    {% for key, label in STATUS_LABELS.items() %}<div><span class="badge{% if p.counts[key] %} b-{{ key }}{% endif %}">{{ p.counts[key] }}</span></div>{% endfor %}
+{% extends "landing_base.html" %}
+{% block title %}Projects · verifair{% endblock %}
+{% block landing_content %}
+<header class="landing-heading">
+  <div>
+    <div class="landing-eyebrow">Review workspace</div>
+    <h1>Projects</h1>
+    <p>Choose a project to review intent, evidence, and open questions.</p>
   </div>
+  {% if projects %}
+  <dl class="landing-summary" aria-label="Workspace summary">
+    <div><dt>Projects</dt><dd>{{ projects|length }}</dd></div>
+    <div><dt>Changes</dt><dd>{{ total_changes }}</dd></div>
+    <div class="landing-summary-ready"><dt>Awaiting review</dt><dd>{{ totals.awaiting_review }}</dd></div>
+  </dl>
+  {% endif %}
+</header>
+<div class="landing-project-grid">
+  {% for p in projects %}
+  <article class="landing-project-card">
+    <a class="landing-project-link" href="/p/{{ p.name|urlencode }}">
+      <span class="landing-project-icon" aria-hidden="true">{{ p.name[:1]|upper }}</span>
+      <div class="landing-project-name"><h2>{{ p.name }}</h2><span>{{ p.total }} change{{ "s" if p.total != 1 }}</span></div>
+      <span class="landing-arrow" aria-hidden="true">→</span>
+    </a>
+    {% if p.preview %}{% set r = p.preview.report %}
+    <a class="landing-project-preview" href="/r/{{ r.id|urlencode }}">
+      <div class="landing-preview-label"><span class="landing-state-dot landing-state-{{ p.preview.status }}" aria-hidden="true"></span>{{ "Ready for review" if p.preview.status == "awaiting_review" else STATUS_LABELS[p.preview.status] }}</div>
+      <div class="landing-preview-title">{{ r.title }}</div>
+      <div class="landing-preview-meta">by {{ r.author }} <span aria-hidden="true">·</span> v{{ r.latest_version }}</div>
+    </a>
+    {% endif %}
+    <div class="landing-status-grid" aria-label="Changes by status">
+      {% for key in tabs %}
+      <a class="landing-status-count{% if not p.counts[key] %} is-zero{% endif %}" href="/p/{{ p.name|urlencode }}?tab={{ key }}" aria-label="{{ STATUS_LABELS[key] }}: {{ p.counts[key] }} change{{ 's' if p.counts[key] != 1 }}">
+        <strong>{{ p.counts[key] }}</strong><span>{{ STATUS_LABELS[key] }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    <footer class="landing-project-footer">
+      {% if p.updated_at %}<span>Updated <time datetime="{{ p.updated_at }}">{{ p.updated_at|date }}</time></span>{% endif %}
+      <a href="/p/{{ p.name|urlencode }}">View changes <span aria-hidden="true">→</span></a>
+    </footer>
+  </article>
   {% else %}
-  <p class="empty">No reports yet. Agents push them to <code>POST /api/reports</code>.</p>
+  <div class="landing-empty landing-directory-empty">
+    <div class="landing-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM8 8h8M8 12h6M8 16h4"/></svg></div>
+    <h2>No projects yet</h2>
+    <p>Projects appear here when an agent shares its first change report.</p>
+    <div class="landing-empty-flow"><span>Intent</span><i aria-hidden="true">→</i><span>Evidence</span><i aria-hidden="true">→</i><span>Decision</span></div>
+  </div>
   {% endfor %}
 </div>
 {% endblock %}

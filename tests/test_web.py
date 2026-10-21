@@ -55,11 +55,13 @@ def test_project_page_tabs_and_unknown_404(client):
     r = client.get("/p/billing-service")
     assert r.status_code == 200
     assert "Awaiting review · 1" in r.text and "Approved · 1" in r.text
-    assert r.text.index("Unsigned · 1") < r.text.index("Awaiting review · 1")
-    assert "Unsigned one" not in r.text
+    assert "Unsigned one" in r.text and "Retry webhooks" in r.text
+    pending = client.get("/p/billing-service?tab=awaiting_review")
+    assert "Prorate" in pending.text and "Unsigned one" not in pending.text
+    assert "Retry webhooks" not in pending.text
     unsigned = client.get("/p/billing-service?tab=unsigned")
     assert "Unsigned one" in unsigned.text and "Prorate" not in unsigned.text
-    assert "Prorate" in r.text and "BILL-412" in r.text and "Retry webhooks" not in r.text
+    assert "Prorate" in r.text and "BILL-412" in r.text
 
     approved = client.get("/p/billing-service?tab=approved")
     assert "Retry webhooks" in approved.text and "Prorate" not in approved.text
@@ -67,11 +69,30 @@ def test_project_page_tabs_and_unknown_404(client):
     assert "Retry webhooks" in everything.text and "Prorate" in everything.text
 
     assert client.get("/p/nope").status_code == 404
-    assert "All · 3" in r.text
+    assert "All changes · 3" in r.text
     bogus = client.get("/p/billing-service?tab=bogus")
-    assert (
-        bogus.status_code == 200 and "Prorate" in bogus.text and "Retry webhooks" not in bogus.text
-    )
+    assert bogus.status_code == 200 and "Prorate" in bogus.text and "Retry webhooks" in bogus.text
+
+
+def test_unsigned_project_opens_with_its_changes_visible(client):
+    push(client, title="Draft evidence report")
+    page = client.get("/p/billing-service")
+    assert "Draft evidence report" in page.text
+    assert 'aria-current="page"' in page.text
+    filtered = client.get("/p/billing-service?tab=awaiting_review")
+    assert "No changes awaiting review" in filtered.text
+    assert 'href="?tab=all"' in filtered.text
+
+
+def test_project_cards_link_to_real_statuses_and_prioritize_reviewable_changes(client):
+    push(client, title="Ready evidence")
+    sign(client, "ready-evidence")
+    push(client, title="Later unsigned report")
+    page = client.get("/")
+    assert 'href="/p/billing-service?tab=awaiting_review"' in page.text
+    assert 'href="/p/billing-service?tab=unsigned"' in page.text
+    assert 'href="/r/ready-evidence"' in page.text
+    assert 'href="/r/later-unsigned-report"' not in page.text
 
 
 def test_report_page_renders_sections_nav_links_and_sets_id_cookie(client):
@@ -769,9 +790,8 @@ def test_index_counts_unsigned(client):
     push(client, title="Other")
     sign(client)
     page = client.get("/").text
-    assert "<div>Unsigned</div>" in page
-    assert page.count('<span class="badge b-unsigned">1</span>') == 1
-    assert page.count('<span class="badge b-awaiting_review">1</span>') == 1
+    assert page.count('aria-label="Unsigned: 1 change"') == 1
+    assert page.count('aria-label="Awaiting review: 1 change"') == 1
 
 
 AUTHOR_COPY = "Only alice@example.com can sign this report."

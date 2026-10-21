@@ -1,25 +1,49 @@
-{% extends "base.html" %}
+{% extends "landing_base.html" %}
 {% block title %}{{ project }} · verifair{% endblock %}
 {% block crumb %}<a href="/"><b>Projects</b></a><i>›</i>{{ project }}{% endblock %}
-{% block content %}
-<nav class="tabs">
-  {% for key in tabs %}<a href="?tab={{ key }}"{% if tab == key %} class="on"{% endif %}>{{ STATUS_LABELS[key] }} · {{ counts[key] }}</a>{% endfor %}
-  <a href="?tab=all"{% if tab == "all" %} class="on"{% endif %}>All · {{ total }}</a>
-</nav>
-<div class="list">
-  <div class="row h"><div>Change</div><div>Risk</div><div>Author</div><div>Status</div></div>
-  {% for row in rows %}{% set r = row.report %}
-  <div class="row">
-    <div>
-      <a class="t" href="/r/{{ r.id|urlencode }}">{{ r.title }}</a>
-      <div class="s">v{{ r.latest_version }}{% if r.open_threads %} · {{ r.open_threads }} open thread{{ "s" if r.open_threads != 1 }}{% endif %} · {{ row.ticket or "no ticket" }}</div>
-    </div>
-    <div><span class="badge r-{{ r.risk }}">{{ r.risk }}</span></div>
-    <div>{{ r.author }}</div>
-    <div><span class="badge b-{{ row.status }}">{{ STATUS_LABELS[row.status] }}</span></div>
+{% block landing_content %}
+<header class="landing-heading landing-project-heading">
+  <div class="landing-project-heading-name">
+    <span class="landing-project-icon landing-project-icon-large" aria-hidden="true">{{ project[:1]|upper }}</span>
+    <div><div class="landing-eyebrow">Project changes</div><h1>{{ project }}</h1></div>
   </div>
+  <p class="landing-project-summary">{{ total }} change{{ "s" if total != 1 }}<span aria-hidden="true"> · </span>{{ counts.awaiting_review }} awaiting review</p>
+</header>
+<section class="landing-changes" aria-labelledby="landing-changes-heading">
+  <h2 class="landing-sr-only" id="landing-changes-heading">Changes</h2>
+  <nav class="landing-filters" aria-label="Filter changes by status" data-status-nav>
+    <a href="?tab=all" aria-label="All changes · {{ total }}"{% if tab == "all" %} aria-current="page"{% endif %}>All changes <span>{{ total }}</span></a>
+    {% for key in tabs %}
+    <a href="?tab={{ key }}" aria-label="{{ STATUS_LABELS[key] }} · {{ counts[key] }}"{% if tab == key %} aria-current="page"{% endif %}>{{ STATUS_LABELS[key] }} <span>{{ counts[key] }}</span></a>
+    {% endfor %}
+  </nav>
+  {% if rows %}
+  <div class="landing-change-columns" aria-hidden="true"><span>Change</span><span>Author</span><span>Risk</span><span>Status</span></div>
+  <ul class="landing-change-list">
+    {% for row in rows %}{% set r = row.report %}
+    <li><a class="landing-change-row" href="/r/{{ r.id|urlencode }}">
+      <div class="landing-change-name">
+        <h3>{{ r.title }}</h3>
+        <ul class="landing-change-meta" aria-label="Change metadata">
+          <li>v{{ r.latest_version }}</li>
+          {% if row.ticket %}<li>{{ row.ticket }}</li>{% endif %}
+          {% if r.open_threads %}<li>{{ r.open_threads }} open thread{{ "s" if r.open_threads != 1 }}</li>{% endif %}
+          <li>Updated <time datetime="{{ r.updated_at }}">{{ r.updated_at|date }}</time></li>
+        </ul>
+      </div>
+      <div class="landing-change-author"><span class="landing-field-label">Author: </span><span class="landing-author-initial" aria-hidden="true">{{ r.author[:1]|upper }}</span><span>{{ r.author }}</span></div>
+      <div class="landing-change-risk"><span class="landing-field-label">Risk: </span><span class="landing-risk landing-risk-{{ r.risk }}">{{ r.risk }}</span></div>
+      <div class="landing-change-status"><span class="landing-sr-only">Status: </span><span class="badge b-{{ row.status }}">{{ STATUS_LABELS[row.status] }}</span></div>
+    </a></li>
+    {% endfor %}
+  </ul>
   {% else %}
-  <p class="empty">Nothing here.</p>
-  {% endfor %}
-</div>
+  <div class="landing-empty landing-filter-empty">
+    <div class="landing-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM8 8h8M8 12h6M8 16h4"/></svg></div>
+    <h2>{{ empty_title }}</h2>
+    <p>Try another status, or view all {{ total }} change{{ "s" if total != 1 }} in this project.</p>
+    {% if tab != "all" %}<a class="landing-button" href="?tab=all">View all changes <span aria-hidden="true">→</span></a>{% endif %}
+  </div>
+  {% endif %}
+</section>
 {% endblock %}

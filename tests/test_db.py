@@ -436,7 +436,7 @@ def test_legacy_signer_verdict_is_history_without_effective_self_approval(settin
     assert report["verdicts"][0]["summary"] == "Old approval"
     assert 'class="badge b-awaiting_review"' in upgraded.get("/r/r0").text
     assert "Awaiting review · 1" in upgraded.get("/p/p").text
-    assert '<span class="badge b-awaiting_review">1</span>' in upgraded.get("/").text
+    assert 'aria-label="Awaiting review: 1 change"' in upgraded.get("/").text
     upgraded.cookies.set("vf_id", "bob00000")
     upgraded.cookies.set("vf_name", "Bob")
     approved = upgraded.post("/r/r0/verdict", data={"version": 1, "verdict": "approve"})
