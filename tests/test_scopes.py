@@ -13,10 +13,13 @@ BOB = {"X-Forwarded-Email": "bob@example.com"}
 
 @pytest.fixture
 def team(settings):
-    return TestClient(
-        create_app(replace(settings, identity_header="X-Forwarded-Email")),
-        headers={"Sec-Fetch-Site": "same-origin"},
-    )
+    shared = replace(settings, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss")
+    app = create_app(shared)
+    conn = db.connect(shared.db_path)
+    for id in ("alice@example.com", "bob@example.com", "carol@example.com"):
+        db.add_user(conn, id=id, name=id.partition("@")[0], role="member")
+    conn.close()
+    return TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
 
 
 def publish(client, id="owned", **overrides):

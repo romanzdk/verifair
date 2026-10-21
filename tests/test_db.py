@@ -613,6 +613,11 @@ def test_bootstrap_admin_only_on_empty_table(conn):
     assert [u["id"] for u in list_users(conn)] == ["boss@example.com"]
 
 
+def test_bootstrap_admin_name_falls_back_to_the_whole_id(conn):
+    assert bootstrap_admin(conn, "@example.com") is True
+    assert get_user(conn, "@example.com")["name"] == "@example.com"
+
+
 def test_bootstrap_admin_skips_table_with_only_members(conn):
     add_user(conn, id="m", name="M", role="member")
     assert bootstrap_admin(conn, "boss@example.com") is False

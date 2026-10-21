@@ -42,19 +42,11 @@ Body = Annotated[str, Form(max_length=20000)]
 Anchor = Annotated[str, Form(max_length=2000)]
 
 
-def _header_user(request: Request) -> tuple[str, str] | None:
-    header = request.app.state.settings.identity_header
-    value = request.headers.get(header, "").strip() if header else ""
-    if not value or value == "agent":
-        return None
-    return value, (value.split("@")[0] or value)[:60]
-
-
 def current_user(request: Request) -> tuple[str, str | None]:
-    from_header = _header_user(request)
-    request.state.user_from_header = from_header is not None
-    if from_header:
-        return from_header
+    member = request.state.member
+    request.state.user_from_header = member is not None
+    if member is not None:
+        return member["id"], member["name"]
     user_id = request.cookies.get("vf_id")
     if not user_id or user_id == "agent" or not USER_ID.fullmatch(user_id):
         # FastAPI drops cookies set on an injected Response when the route returns its own
@@ -565,7 +557,7 @@ def sign(
 
 @router.post("/me")
 def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str, Form()] = "/"):
-    if _header_user(request):
+    if request.state.member is not None:
         raise HTTPException(403, "identity is set by the proxy")
     name = name.strip()
     if not next.startswith("/") or next.startswith(("//", "/\\")):

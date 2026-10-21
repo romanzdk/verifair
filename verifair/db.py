@@ -582,7 +582,7 @@ def bootstrap_admin(conn: sqlite3.Connection, admin_id: str) -> bool:
         cur = conn.execute(
             "INSERT INTO users (id, name, role, created_at, updated_at)"
             " SELECT ?, ?, 'admin', ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)",
-            (admin_id, admin_id.partition("@")[0], now, now),
+            (admin_id, admin_id.partition("@")[0] or admin_id, now, now),
         )
     return cur.rowcount > 0
 

@@ -32,7 +32,9 @@ def test_missing_shared_token_never_authenticates(settings):
 
     from verifair.app import create_app
 
-    shared = replace(settings, api_token=None, identity_header="X-Forwarded-Email")
+    shared = replace(
+        settings, api_token=None, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss"
+    )
     client = TestClient(create_app(shared))
     for headers in [{"Authorization": "Bearer None"}, {"Authorization": "Bearer "}, {}]:
         r = client.get("/api/reports/x", headers=headers)

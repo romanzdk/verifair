@@ -1,5 +1,9 @@
+from dataclasses import replace
+
 import pytest
 
+from verifair import db
+from verifair.app import create_app
 from verifair.config import load_settings
 
 
@@ -24,6 +28,32 @@ def test_shared_mode_loads_without_api_token(monkeypatch):
         "X-Forwarded-Email",
         "admin@example.com",
     )
+
+
+def test_shared_mode_startup_bootstraps_the_first_admin(shared_settings):
+    def users():
+        conn = db.connect(shared_settings.db_path)
+        try:
+            return [(u["id"], u["name"], u["role"]) for u in db.list_users(conn)]
+        finally:
+            conn.close()
+
+    with pytest.raises(RuntimeError) as error:
+        create_app(replace(shared_settings, bootstrap_admin_id=None))
+    assert str(error.value) == "VERIFAIR_BOOTSTRAP_ADMIN_ID is required to create the first admin"
+    assert users() == []
+    create_app(shared_settings)
+    assert users() == [("admin@example.com", "admin", "admin")]
+    create_app(replace(shared_settings, bootstrap_admin_id=None))
+    create_app(replace(shared_settings, bootstrap_admin_id="other@example.com"))
+    assert users() == [("admin@example.com", "admin", "admin")]
+
+
+def test_local_mode_startup_needs_no_users(settings):
+    create_app(replace(settings, bootstrap_admin_id="admin@example.com"))
+    conn = db.connect(settings.db_path)
+    assert db.list_users(conn) == []
+    conn.close()
 
 
 def test_empty_bootstrap_admin_id_is_none(monkeypatch):

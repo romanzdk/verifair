@@ -614,9 +614,15 @@ def proxied(settings):
 
     from fastapi.testclient import TestClient
 
+    from verifair import db
     from verifair.app import create_app
 
-    app = create_app(replace(settings, identity_header="X-Forwarded-Email"))
+    shared = replace(settings, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss")
+    app = create_app(shared)
+    conn = db.connect(shared.db_path)
+    for id in ("alice@example.com", "bob@example.com"):
+        db.add_user(conn, id=id, name=id.partition("@")[0], role="member")
+    conn.close()
     return TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
 
 
@@ -639,12 +645,6 @@ def test_identity_header_is_the_user(proxied):
     assert (thread["author_id"], thread["author"]) == ("alice@example.com", "alice")
 
 
-def test_identity_header_without_at_sign_is_used_whole(proxied):
-    push(proxied)
-    page = proxied.get("/r/prorate", headers={"X-Forwarded-Email": "svc-bot"})
-    assert '<span class="me">svc-bot</span>' in page.text
-
-
 def test_identity_header_blocks_set_name(proxied):
     r = proxied.post(
         "/me",
@@ -655,32 +655,128 @@ def test_identity_header_blocks_set_name(proxied):
     assert r.status_code == 403 and "vf_name" not in r.cookies
 
 
-@pytest.mark.parametrize("value", [None, "", "  "])
-def test_identity_header_configured_but_absent_uses_cookie(proxied, value):
+@pytest.mark.parametrize("value", [None, "", "  ", "agent"])
+def test_identity_header_configured_but_absent_is_401(proxied, value):
     push(proxied)
+    proxied.cookies.set("vf_id", "bob00000")
+    proxied.cookies.set("vf_name", "Bob")
     headers = {} if value is None else {"X-Forwarded-Email": value}
-    page = proxied.get("/r/prorate", headers=headers)
-    assert "Set your name" in page.text and 'action="/me"' in page.text
-    proxied.post("/me", data={"name": "Bob"}, headers=headers)
+    assert proxied.get("/r/prorate", headers=headers).status_code == 401
+    assert proxied.post("/me", data={"name": "Bob"}, headers=headers).status_code == 401
     r = proxied.post(
         "/r/prorate/comments",
         data={"version": 1, "section": "Intent", "body": "Why?"},
         headers=headers,
     )
-    assert r.status_code == 200
-    assert api_threads(proxied)[0]["author"] == "Bob"
+    assert r.status_code == 401
+    assert api_threads(proxied) == []
 
 
-def test_identity_header_is_capped_at_60_chars(proxied):
-    push(proxied)
-    page = proxied.get("/r/prorate", headers={"X-Forwarded-Email": "a" * 80 + "@example.com"})
-    assert f'<span class="me">{"a" * 60}</span>' in page.text
+SIGN_IN_COPY = "Sign in through your company login to use verifair."
+CSP = (
+    "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
+    " frame-ancestors 'none'"
+)
 
 
-def test_identity_header_agent_falls_back_to_cookie(proxied):
-    push(proxied)
-    page = proxied.get("/r/prorate", headers={"X-Forwarded-Email": "agent"})
-    assert "Set your name" in page.text and 'action="/me"' in page.text
+def _anonymous(shared_settings):
+    from fastapi.testclient import TestClient
+
+    from verifair.app import create_app
+
+    return TestClient(create_app(shared_settings))
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", "/"),
+        ("get", "/p/x"),
+        ("get", "/r/x"),
+        ("get", "/docs"),
+        ("get", "/redoc"),
+        ("get", "/openapi.json"),
+        ("get", "/missing"),
+        ("post", "/me"),
+        ("post", "/r/x/comments"),
+    ],
+)
+def test_shared_mode_without_identity_is_401(shared_settings, method, path):
+    r = getattr(_anonymous(shared_settings), method)(path)
+    assert r.status_code == 401
+    assert r.headers["content-type"].startswith("text/html")
+    assert SIGN_IN_COPY in r.text and 'href="/static/app.css"' in r.text
+    assert r.headers["content-security-policy"] == CSP
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert "set-cookie" not in r.headers
+
+
+def test_shared_mode_non_members_are_403_and_deactivation_takes_effect(
+    shared_client, shared_settings, as_user
+):
+    from verifair import db
+
+    gone = as_user("gone@example.com")
+    assert shared_client.get("/", headers=gone).status_code == 200
+    conn = db.connect(shared_settings.db_path)
+    db.update_user(conn, "gone@example.com", active=False)
+    conn.close()
+    for who in ["gone@example.com", "stranger@example.com", "<b>x</b>@example.com"]:
+        for r in [
+            shared_client.get("/", headers={"X-Forwarded-Email": who}),
+            shared_client.post("/me", data={"name": "M"}, headers={"X-Forwarded-Email": who}),
+        ]:
+            assert r.status_code == 403
+            assert r.headers["content-type"].startswith("text/html")
+            assert r.headers["content-security-policy"] == CSP
+            escaped = who.replace("<", "&lt;").replace(">", "&gt;")
+            copy = f"You are not a member of this workspace yet. Ask an admin to add {escaped}."
+            assert copy in r.text
+            assert "<b>" not in r.text
+
+
+def test_shared_mode_member_is_the_users_row_and_gets_no_cookies(
+    shared_client, shared_settings, as_user
+):
+    from verifair import db
+
+    bob = as_user("bob@example.com", name="Bob Builder")
+    conn = db.connect(shared_settings.db_path)
+    db.push_report(conn, project="p", title="T", risk="low", body="## A\nx")
+    conn.close()
+    shared_client.cookies.set("vf_id", "mallory0")
+    shared_client.cookies.set("vf_name", "Mallory")
+    for path in ["/", "/p/p", "/r/t", "/r/t/v/1", "/docs", "/openapi.json"]:
+        r = shared_client.get(path, headers=bob)
+        assert r.status_code == 200, path
+        assert "set-cookie" not in r.headers, path
+    page = shared_client.get("/r/t", headers=bob).text
+    assert '<span class="me">Bob Builder</span>' in page and "Mallory" not in page
+    assert 'action="/me"' not in page
+    r = shared_client.post(
+        "/r/t/comments", data={"version": 1, "section": "A", "body": "Why?"}, headers=bob
+    )
+    assert r.status_code == 200 and "set-cookie" not in r.headers
+    conn = db.connect(shared_settings.db_path)
+    comment = db.list_comments(conn, "t")[0]
+    conn.close()
+    assert (comment["author_id"], comment["author_name"]) == ("bob@example.com", "Bob Builder")
+    admin = shared_client.get("/").text
+    assert '<span class="me">admin</span>' in admin
+
+
+def test_shared_mode_browser_check_still_applies_to_members(shared_settings):
+    r = _anonymous(shared_settings).post(
+        "/me", data={"name": "M"}, headers={"X-Forwarded-Email": "admin@example.com"}
+    )
+    assert (r.status_code, r.json()) == (403, {"detail": "browser request required"})
+
+
+def test_shared_mode_health_static_and_api_skip_the_membership_check(shared_settings):
+    anonymous = _anonymous(shared_settings)
+    assert anonymous.get("/healthz").json() == {"ok": True}
+    assert anonymous.get("/static/app.css").status_code == 200
+    assert anonymous.get("/api/reports/x").json() == {"detail": "invalid token"}
 
 
 UNSIGNED_COPY = "The author has not signed this version yet."
@@ -819,11 +915,11 @@ def test_identity_header_only_author_can_sign(proxied):
     assert api_report(proxied)["status"] == "approved"
 
 
-def test_identity_header_cookie_user_may_sign_any_report(proxied):
+def test_identity_header_cookie_user_may_not_sign(proxied):
     push(proxied, author="alice@example.com")
     proxied.cookies.set("vf_name", "Bob")
     r = proxied.post("/r/prorate/sign", data={"version": 1})
-    assert r.status_code == 200 and api_report(proxied)["signed_by"] == "Bob"
+    assert r.status_code == 401 and api_report(proxied)["status"] == "unsigned"
 
 
 def test_identity_header_anyone_may_sign_agent_authored_report(proxied):
