@@ -1,6 +1,11 @@
 # Roles and permissions implementation plan
 
-Status: Planned.
+Status (2026-10-21): the owner chose a minimal cut of this plan, and that cut is built. README "Roles and access" describes it.
+
+- Built: shared mode, turned on by `VERIFAIR_IDENTITY_HEADER`; Admin and Member roles; membership required (401 without the header, 403 for non-members); the first admin from `VERIFAIR_BOOTSTRAP_ADMIN_ID`; last-admin protection; per-member agent tokens on an `/access` page, shown once, revocable, revoked on deactivation and never with admin power; the shared `VERIFAIR_API_TOKEN` refused in shared mode; reports owned by the token owner; thread resolve and blocking changes limited to the thread creator, an admin, or the report owner for agent threads. Local mode is unchanged.
+- Deferred: an audit table, identity links and legacy identity migration, token scopes and project grants, forced token expiry, ownership transfer, admin override forms, the `VERIFAIR_AUTH_MODE` flag, a reviewers PUT endpoint, and separate auth, permissions and admin modules.
+
+The rest of this document is kept as the background design for later work.
 
 Add Admin and Member permissions to the existing FastAPI and SQLite app. Membership is admin-approved: a trusted SSO identity identifies the person, and an active membership grants access. Active members continue to see every project and report by default. Author and reviewer remain relationships to a change.
 

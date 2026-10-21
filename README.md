@@ -22,11 +22,13 @@ uv run uvicorn verifair.asgi:app
 
 Open http://localhost:8000. Users set a display name (kept in a cookie). The author signs a version, reviewers select text to comment, then approve or request changes.
 
+This is local mode. For a team, use shared mode. See [Roles and access](#roles-and-access).
+
 ## Personal views
 
 Everyone sees all projects and changes by default. The landing pages also offer **My changes** (reports you own, including unsigned drafts) and **My reviews** (reports where your review was requested, including completed reviews). These scopes combine with project status filters. Project cards, previews and counts use the selected scope, and links between the landing pages preserve it.
 
-Open **Your identity** on either landing page to copy the ID to give your agent. Set `author_id` to the owner's ID and `reviewers` to the requested reviewers' IDs when publishing. Display names do not determine ownership. Review requests help people find work; anyone with access can still read and review a report, and the existing signature and approval rules apply.
+Open **Your identity** on either landing page to copy the ID to give your agent. Set `author_id` to the owner's ID and `reviewers` to the requested reviewers' IDs when publishing. In shared mode the agent token sets the owner, so `author_id` can be left out. Display names do not determine ownership. Review requests help people find work; anyone with access can still read and review a report, and the existing signature and approval rules apply.
 
 Local identities belong to a browser. With the auth proxy described under Deploying, the trusted identity header supplies the same ID across devices. For reports without an explicit owner, signing records the signer as the owner. Existing signed reports get their owner from their latest recorded signature when the database is upgraded. Unsigned legacy reports still support an `author` value equal to the user's exact identity, as required by the original proxy integration.
 
@@ -59,19 +61,20 @@ Response:
 {"id": "my-change", "version": 1, "url": "http://localhost:8000/r/my-change"}
 ```
 
-The commands below use the report `id` as `$ID`.
+The commands below use the report `id` as `$ID`. In shared mode, use your own agent token instead of `$VERIFAIR_API_TOKEN`.
 
 - `id` is optional on the first push. Without it, verifair makes one from the title and returns it.
 - To add a new version, push again with the same `id`. Without `id`, every push makes a new report. Comments stay on the version they were made on; the API marks them `stale` when a newer version exists and `found` when the quoted text can be located in the current version, including after a section rename or move.
 - Required: `project`, `title` (1 to 200 characters), `risk` (`low`, `medium` or `high`) and `body` (markdown).
 - `project` and `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`: letters, digits, `.`, `_` and `-`, starting with a letter or digit, up to 100 characters.
 - `ticket_url`, `session_url` and `links[].url` must start with `http://` or `https://`.
-- Optional `author` (up to 60 characters): the human author's display name. Defaults to `agent`. Use `author_id` to link ownership to a stable identity.
+- Optional `author` (up to 60 characters): the human author's display name. Defaults to `agent`. Use `author_id` to link ownership to a stable identity. In shared mode `author` is ignored and the report shows the token owner's name.
 - Optional `author_id`: the owner's stable identity, separate from the display name in `author`. Optional `reviewers`: up to 50 stable identities to request reviews from. Each ID must be 1–256 characters and cannot be `agent`; it must match the user's identity exactly. Duplicate reviewers are stored once.
-- On later versions, omitted `author`, `author_id` and `reviewers` retain their previous values. A supplied `author_id` transfers ownership; a supplied reviewer list replaces the requests, and `reviewers: []` clears them. `null` for `author_id` or `reviewers` also leaves the existing value unchanged. Requests belong to the change and survive signing, verdicts and new versions.
+- On later versions, omitted `author`, `author_id` and `reviewers` retain their previous values. In local mode a supplied `author_id` transfers ownership; a supplied reviewer list replaces the requests, and `reviewers: []` clears them. `null` for `author_id` or `reviewers` also leaves the existing value unchanged. Requests belong to the change and survive signing, verdicts and new versions.
 - Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
 - The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as a top-level H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
 - Unknown JSON keys are rejected with 422.
+- In shared mode the token owner owns the report. `author_id` can be left out; if sent, it must be the token owner, or the push gets 403 `"author_id must be the token owner."`. A push to an `id` that belongs to another member's report gets 403 `"This report belongs to another member."`, also when the token owner is an admin. Every requested reviewer must be an active member, or the push gets 422 `"Reviewer {id} is not an active member."`.
 
 A push sends a "draft" message to Slack (if configured). The "ready for review" message is sent when the version is signed.
 
@@ -187,8 +190,11 @@ curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comment
 - `section` and `quote` are limited to 2,000 characters each; `prefix` and `suffix` to 64 each. A quote repeated within the named section without nonempty context is rejected with 422 `"ambiguous quote"`. Add `prefix` or `suffix` to disambiguate it.
 - Without `section` the thread is a general comment on the whole report.
 - `blocking` defaults to `true`. Send `false` for a nit that should not hold up approval. Replies always take `blocking` from their thread.
+- In shared mode an agent token can only comment on its owner's reports. Other reports return 403 `"This report belongs to another member."`.
 
 To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comment_id` can be the first comment or any reply; the whole thread is resolved. The response is `{"resolved": true}`. Calling it again does nothing. Reviewers can reopen a resolved thread in the web UI.
+
+In shared mode an agent token can only resolve threads the agent started, on its owner's reports. Any other thread returns 403 `"Only the person who started this thread or an admin can do that."`.
 
 ## Wait for feedback
 
@@ -216,9 +222,10 @@ This endpoint signals feedback; it does not provide a lossless event stream. Sto
 | Status | `detail` |
 | --- | --- |
 | 401 | `"invalid token"` |
+| 403 | shared mode only: `"This report belongs to another member."`, `"author_id must be the token owner."` or `"Only the person who started this thread or an admin can do that."` |
 | 404 | `"report not found"`, `"parent not found"` or `"comment not found"` |
 | 409 | `"id belongs to another project"` |
-| 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"ambiguous quote"`, `"unknown section"` or `"missing sections"` |
+| 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"ambiguous quote"`, `"unknown section"`, `"missing sections"` or, in shared mode, `"Reviewer {id} is not an active member."` |
 
 An unknown section also lists the valid headings: `{"detail": "unknown section", "sections": ["Intent", "Edge cases"]}`. Missing sections lists the required headings the body lacks, in the configured order.
 
@@ -226,11 +233,12 @@ An unknown section also lists the valid headings: `{"detail": "unknown section",
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `VERIFAIR_API_TOKEN` | required | Bearer token agents use for `/api` |
+| `VERIFAIR_API_TOKEN` | required in local mode | Bearer token agents use for `/api` in local mode. Not accepted in shared mode |
 | `VERIFAIR_DB_PATH` | `./verifair.db` | SQLite file |
 | `VERIFAIR_BASE_URL` | `http://localhost:8000` | Used for links in API responses and notifications |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | Comma-separated H2 headings every pushed body must have; empty turns the check off |
-| `VERIFAIR_IDENTITY_HEADER` | unset | Name of a request header that carries the user identity (see Deploying) |
+| `VERIFAIR_IDENTITY_HEADER` | unset | Name of a request header that carries the user identity. Setting it turns on shared mode (see Roles and access) |
+| `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: id of the first admin, created when the database has no members |
 | `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook for draft reports, ready-for-review notifications, comments and verdicts |
 
 ## Report template
@@ -275,11 +283,95 @@ For example `Assisted-by: claude:opus`. Agents do not add `Signed-off-by`. Only 
 
 ## Blocking threads
 
-- A new thread is blocking by default. A reviewer can tick "Non-blocking (suggestion)" when writing it, and switch a thread between blocking and non-blocking later.
+- A new thread is blocking by default. A reviewer can tick "Non-blocking (suggestion)" when writing it, and switch a thread between blocking and non-blocking later. In shared mode only some people can do that; see [Moderation](#moderation).
 - Approve is refused while any blocking thread is open. Resolve the thread or mark it non-blocking first.
 - Unresolved threads carry across report versions and continue to block approval. `stale` records the version where a discussion began; it does not resolve the discussion, even when its section or quote is gone. Close obsolete concerns explicitly or mark them non-blocking.
 - Request changes needs a summary, or an open blocking thread of your own.
 - The sidebar counts open blocking threads and suggestions.
+
+## Roles and access
+
+verifair has two modes. `VERIFAIR_IDENTITY_HEADER` switches between them.
+
+- **Local mode** (the header is not set): no sign-in. People set a name, kept in a cookie. Agents share one `VERIFAIR_API_TOKEN`. Anyone can resolve any thread. Use it on your own machine or in a small trusted group. `/access` only shows a note.
+- **Shared mode** (the header is set): an auth proxy signs people in and verifair checks that they are members. Each agent uses a token owned by one member. This is the mode for a team.
+
+### Set up shared mode
+
+1. Put verifair behind an auth proxy that signs users in, for example with SSO.
+2. The proxy must set the identity header on every request. It must strip any value the client sent and write its own. Otherwise anyone can pose as anyone.
+3. Make verifair reachable only through the proxy. Anyone who can reach it directly can send any header.
+4. Set `VERIFAIR_IDENTITY_HEADER` to the header name, for example `X-Forwarded-Email`.
+5. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID` to your own id, exactly as the proxy sends it, for example `jane@example.com`. On a database with no members, startup makes this id the first admin. Once members exist, it adds no one.
+6. `VERIFAIR_API_TOKEN` is not needed. If it is set, shared mode refuses it.
+
+```bash
+export VERIFAIR_IDENTITY_HEADER=X-Forwarded-Email
+export VERIFAIR_BOOTSTRAP_ADMIN_ID=jane@example.com
+uv run uvicorn verifair.asgi:app
+```
+
+Startup fails when the database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set. It also fails when the id is not a plain id (no spaces, `/` or `\`).
+
+A request without the header gets 401. A signed-in person who is not an active member gets 403 with a note to ask an admin. `/healthz` and `/static/` stay public. `/api/` uses tokens. Every other page, including `/docs` and `/openapi.json`, needs membership.
+
+### What members and admins can do
+
+| Action | Member | Admin | Agent token |
+| --- | --- | --- | --- |
+| Read all projects, reports and threads | Yes | Yes | Yes |
+| Push a report or a new version | Through their own agent token | Same as a member | The owner's reports only |
+| Comment, reply, reopen a thread | Yes | Yes | Comment and reply on the owner's reports |
+| Sign a version | Own reports | Own reports | No |
+| Approve or request changes | Reports someone else signed | Same as a member | No |
+| Resolve a thread or change its blocking flag | Threads they started, and agent threads on their own reports | Any thread | Agent threads on the owner's reports |
+| Create and revoke agent tokens | Own tokens | Own tokens, and revoke anyone's | No |
+| Add members, change roles, deactivate | No | Yes | No |
+
+### Members and roles
+
+Admins manage members on the **Access** page (`/access`, linked next to **Your identity** on the landing pages). To add a member, enter their id exactly as the proxy sends it (case matters), a display name, and a role: `admin` or `member`. The members table changes roles and deactivates or reactivates people. Members are never deleted, so their history stays.
+
+A deactivated member is refused on their next request, and all their tokens are revoked. Reactivating them does not bring old tokens back.
+
+There must always be at least one active admin. verifair refuses to demote or deactivate the last one: `There must be at least one active admin.`
+
+Admin and token actions are written to the app log as `access action=... actor=... target=...`. The token secret is never logged.
+
+### Agent tokens
+
+Every member creates their own agent tokens on `/access`. A token looks like `vf_<id>.<secret>`. It is shown once, right after you create it. Copy it then; verifair keeps only a hash. Send it as `Authorization: Bearer vf_...`.
+
+- The `/access` page lists your tokens. Revoke a token there when you no longer need it. Admins can revoke anyone's token.
+- Deactivating a member revokes their tokens.
+- A token acts for its owner, but never with admin power, even when the owner is an admin. It cannot push to or comment on another member's report, and it cannot resolve threads that a person started.
+- The shared `VERIFAIR_API_TOKEN` is refused in shared mode.
+
+### Report ownership
+
+The token owner owns every report the token pushes. Report ids are chosen by the client. If an id is already used by another member's report, the push gets 403 `This report belongs to another member.` Pick a different id, or leave `id` out and verifair makes a new one. Ownership cannot be transferred.
+
+### Moderation
+
+Anyone can reply to a thread or reopen it. Only these people can resolve a thread or change its blocking flag:
+
+- the person who started the thread,
+- an admin,
+- the report owner, when the agent started the thread.
+
+The buttons are hidden for everyone else, and a direct request gets 403 `Only the person who started this thread or an admin can do that.` A resolved thread shows who resolved it.
+
+### Moving an existing deployment to shared mode
+
+A deployment that already sets `VERIFAIR_IDENTITY_HEADER` runs in shared mode after the upgrade. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID` before you upgrade, or startup fails. Then add the members on `/access` and give each agent a member token. The old shared token stops working. Existing reports keep their `author_id`. A member can push new versions only to reports whose `author_id` is their id.
+
+### Not built yet
+
+- An audit log in the app.
+- Token scopes and token expiry.
+- Ownership transfer.
+- Admin overrides, such as resolving with a recorded reason.
+- Moving local-mode identities to member ids.
 
 ## Docker
 
@@ -292,9 +384,9 @@ The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind
 
 ## Deploying
 
-- The web UI has no login. Anyone who can open it can comment and give verdicts. Run it on a private network or behind an auth proxy (SSO, basic auth). The Docker example above only listens on `127.0.0.1`.
+- In local mode the web UI has no login. Anyone who can open it can comment and give verdicts. Run it on a private network or behind an auth proxy (SSO, basic auth). For a team, use shared mode (see Roles and access). The Docker example above only listens on `127.0.0.1`.
 - HTTPS is required for browser access outside loopback, including private-network hostnames. Local development may use HTTP on `localhost`, `127.0.0.1` or `[::1]`. Put a TLS reverse proxy in front of the loopback listener for shared deployments. Ordinary HTTP hostnames can load pages but browser writes return 403 because browsers omit the required `Sec-Fetch-Site` header on those origins.
-- To identify users from an auth proxy, set `VERIFAIR_IDENTITY_HEADER` to the header the proxy adds, for example `X-Forwarded-Email` with oauth2-proxy. The header value becomes the user id and the part before `@` the display name. The name prompt goes away, and signing and approvals are tied to that identity. The proxy must strip this header from client requests, or anyone can pose as anyone. Requests without the header fall back to the name cookie, so keep the app reachable only through the proxy.
+- To identify users from an auth proxy, set `VERIFAIR_IDENTITY_HEADER` to the header the proxy adds, for example `X-Forwarded-Email` with oauth2-proxy. This turns on shared mode. The header value becomes the user id; the display name comes from the member list. The name prompt goes away, and signing and approvals are tied to that identity. The proxy must strip this header from client requests, or anyone can pose as anyone. Requests without the header get 401, but keep the app reachable only through the proxy.
 - Set `VERIFAIR_BASE_URL` to the public HTTPS URL, for example `https://verifair.example.com`. It is used in notification links and in the push response, and enables secure cookies. Keep the browser on this origin and have the reverse proxy preserve `Sec-Fetch-Site`.
 - Serve it at the root of a domain. Sub-paths (like `/verifair/`) are not supported.
 - `/data` must be a volume on local disk. SQLite runs in WAL mode and does not work well on network file systems.
@@ -306,7 +398,7 @@ The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind
 
 Before upgrading a shared deployment, configure a trusted TLS certificate and an HTTPS reverse proxy for its hostname. Redirect the old HTTP URL to HTTPS, set `VERIFAIR_BASE_URL` to that HTTPS origin, and restart verifair behind the proxy with its existing database volume. Update agent URLs and bookmarked report links to HTTPS. A healthy `/healthz` response or a readable page on HTTP does not confirm that browser writes work.
 
-After restarting, open the HTTPS URL in a browser, set your name if needed, and submit a comment on a draft report to check that writes pass through the proxy. Existing non-loopback HTTP deployments need this change before the upgrade; private-network placement alone does not enable browser writes. The API continues to use its bearer token, and `/healthz` can still be checked over the internal loopback HTTP listener.
+After restarting, open the HTTPS URL in a browser, set your name if needed, and submit a comment on a draft report to check that writes pass through the proxy. Existing non-loopback HTTP deployments need this change before the upgrade; private-network placement alone does not enable browser writes. The API continues to use bearer tokens, and `/healthz` can still be checked over the internal loopback HTTP listener.
 
 ## Related projects
 
