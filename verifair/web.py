@@ -53,7 +53,12 @@ def _with_id_cookie(request: Request, response):
 
 
 def _page(request: Request, user: tuple[str, str | None], name: str, ctx: dict):
-    ctx = ctx | {"user_name": user[1]}
+    url = request.url.remove_query_params("name_error")
+    ctx = ctx | {
+        "user_name": user[1],
+        "here": url.path + (f"?{url.query}" if url.query else ""),
+        "name_error": "name_error" in request.query_params,
+    }
     return _with_id_cookie(request, templates.TemplateResponse(request, name, ctx))
 
 
@@ -300,10 +305,10 @@ def post_verdict(
 @router.post("/me")
 def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str, Form()] = "/"):
     name = name.strip()
-    if not 1 <= len(name) <= 60:
-        raise HTTPException(400, "name must be 1-60 characters")
     if not next.startswith("/") or next.startswith(("//", "/\\")):
         next = "/"
+    if not 1 <= len(name) <= 60:
+        return RedirectResponse(f"{next}{'&' if '?' in next else '?'}name_error=1", 303)
     response = RedirectResponse(next, status_code=303)
     response.set_cookie("vf_name", url_quote(name), max_age=YEAR, samesite="lax")
     return response

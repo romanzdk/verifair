@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% set inline_name_prompt = is_current and not user_name %}
 {% block title %}{{ report.title }} · verifair{% endblock %}
 {% block crumb %}<a href="/"><b>Projects</b></a><i>›</i><a href="/p/{{ report.project|urlencode }}"><b>{{ report.project }}</b></a><i>›</i>{{ report.title }}{% endblock %}
 {% block content %}
@@ -18,6 +19,7 @@
 </header>
 <div class="body">
   <main class="main">
+    {% if inline_name_prompt %}{% with next=here %}{% include "_name_prompt.html" %}{% endwith %}{% endif %}
     {% for s in sections %}
     <section id="{{ s.slug }}" data-section="{{ s.heading }}">
       <h2><span class="num">{{ loop.index }}</span>{{ s.heading }}{% if is_current %} <button type="button" class="cc" data-comment-section>💬 comment</button>{% endif %}</h2>

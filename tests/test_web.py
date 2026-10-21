@@ -1,5 +1,7 @@
 import re
 
+import pytest
+
 H = {"Authorization": "Bearer t"}
 SAMPLE = "## Intent\nFull new price.\n\n## Edge cases\nChange on the first day."
 
@@ -185,8 +187,6 @@ def test_set_name(client):
     assert evil.headers["location"] == "/"
     slash = client.post("/me", data={"name": "Bob", "next": "/\\evil"}, follow_redirects=False)
     assert slash.headers["location"] == "/"
-    assert client.post("/me", data={"name": "  "}).status_code == 400
-    assert client.post("/me", data={"name": "x" * 61}).status_code == 400
 
 
 def test_headings_cannot_collide_with_app_ids(client):
@@ -224,3 +224,39 @@ def test_comment_time_is_labelled_utc(client):
     client.cookies.set("vf_name", "Alice")
     r = client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
     assert re.search(r'class="when">[^<]* \d\d:\d\d UTC<', r.text)
+
+
+def test_first_visit_shows_inline_name_prompt(client):
+    push(client)
+    push(client, id="prorate", body="## Intent\nChanged.")
+    r = client.get("/r/prorate")
+    assert "Set your name</b>" in r.text
+    assert r.text.index('<main class="main">') < r.text.index('class="name-prompt"')
+    assert 'name="next" value="/r/prorate"' in r.text
+    assert 'class="name-prompt"' not in client.get("/r/prorate/v/1").text
+    client.cookies.set("vf_name", "Alice")
+    assert 'class="name-prompt"' not in client.get("/r/prorate").text
+
+
+@pytest.mark.parametrize("name", ["  ", "x" * 61])
+def test_set_name_invalid_redirects_back_with_error(client, name):
+    push(client)
+    r = client.post("/me", data={"name": name, "next": "/r/prorate"}, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/r/prorate?name_error=1")
+    assert "vf_name" not in r.cookies
+    page = client.get(r.headers["location"])
+    assert page.text.count("Enter a name (1–60 characters).") == 1
+    assert 'class="name-prompt"' in page.text
+    assert 'name="next" value="/r/prorate"' in page.text
+
+
+def test_set_name_invalid_keeps_query_and_shows_error_in_menu(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    nxt = "/p/billing-service?tab=approved"
+    r = client.post("/me", data={"name": " ", "next": nxt}, follow_redirects=False)
+    assert r.headers["location"] == nxt + "&name_error=1"
+    page = client.get(r.headers["location"])
+    assert '<details class="me" open>' in page.text
+    assert page.text.count("Enter a name (1–60 characters).") == 1
+    assert f'name="next" value="{nxt}"' in page.text

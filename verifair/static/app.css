@@ -141,6 +141,7 @@ section:hover h2 .cc { opacity: 1; }
 .cform textarea { width: 100%; min-height: 60px; }
 .name-prompt { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px; border: 1px solid var(--warning); border-radius: 8px; background: var(--warning-surface); margin: 6px 0; }
 .name-prompt p { margin: 0; flex-basis: 100%; }
+.name-prompt .error, .me-form .error { color: var(--destructive); font-weight: 600; margin: 0; }
 
 .verdict {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; border-top: 1px solid var(--border);
