@@ -257,3 +257,75 @@ def test_current_user_refuses_a_missing_member_in_shared_mode(shared_settings):
     with pytest.raises(HTTPException) as denied:
         web.current_user(request)
     assert denied.value.status_code == 401
+
+
+def test_member_deactivated_mid_request_gets_the_denied_page(
+    shared_client, conn, as_user, monkeypatch
+):
+    bob = as_user("bob@example.com")
+    create = db.create_token
+
+    def deactivate_then_create(conn, **kwargs):
+        db.update_user(conn, "bob@example.com", active=False)
+        return create(conn, **kwargs)
+
+    monkeypatch.setattr(db, "create_token", deactivate_then_create)
+    r = shared_client.post("/access/tokens", data={"label": "laptop"}, headers=bob)
+    assert r.status_code == 403 and r.headers["content-type"].startswith("text/html")
+    assert r.headers["cache-control"] == "no-store"
+    assert "Ask an admin to add bob@example.com." in r.text
+    assert db.list_tokens(conn) == []
+
+
+def test_browser_check_refusals_on_access_keep_the_security_headers(
+    shared_client, shared_settings, conn
+):
+    from fastapi.testclient import TestClient
+
+    from verifair.app import create_app
+
+    bare = TestClient(create_app(shared_settings), headers=ADMIN)
+    for r in [
+        shared_client.post(
+            "/access/tokens", data={"label": "x"}, headers=ADMIN | {"Sec-Fetch-Site": "cross-site"}
+        ),
+        bare.post("/access/tokens", data={"label": "x"}),
+    ]:
+        assert r.status_code == 403
+        assert r.headers["cache-control"] == "no-store"
+        assert r.headers["x-content-type-options"] == "nosniff"
+    assert db.list_tokens(conn) == []
+
+
+@pytest.mark.parametrize(
+    "id",
+    ["../tokens/x/revoke", "a/b", "a\\b", "a\nb", "a\x00b", "a\x7fb", "a b", "a\tb", ".", ".."],
+)
+def test_add_member_refuses_ids_that_are_not_plain(shared_client, conn, id):
+    r = shared_client.post("/access/users", data={"id": id, "name": "X"}, headers=ADMIN)
+    assert r.status_code == 422
+    assert "Use a plain id such as jane@example.com." in r.text
+    assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
+
+
+def test_member_id_with_plus_and_at_round_trips_through_row_actions(shared_client, conn):
+    id = "jane+ci@example.com"
+    r = shared_client.post("/access/users", data={"id": id, "name": "Jane"}, headers=ADMIN)
+    assert r.status_code == 200 and id in r.text
+    action = "/access/users/jane%2Bci%40example.com"
+    assert r.text.count(f'action="{action}"') == 2
+    for data, expected in (({"role": "admin"}, ("admin", 1)), ({"active": "0"}, ("admin", 0))):
+        r = shared_client.post(action, data=data, headers=ADMIN, follow_redirects=False)
+        assert r.status_code == 303
+        row = db.get_user(conn, id)
+        assert (row["role"], row["active"]) == expected
+
+
+def test_existing_id_with_a_slash_is_encoded_in_row_actions(shared_client, conn):
+    db.add_user(conn, id="team/ops", name="Ops", role="member")
+    page = shared_client.get("/access", headers=ADMIN).text
+    assert page.count('action="/access/users/team%2Fops"') == 2
+    r = shared_client.post(
+        "/access/users/team%2Fops", data={"role": "admin"}, headers=ADMIN, follow_redirects=False
+    )
+    assert r.status_code == 303 and db.get_user(conn, "team/ops")["role"] == "admin"

@@ -15,7 +15,7 @@
       <td>Revoked <time datetime="{{ t.revoked_at }}">{{ t.revoked_at|date }}</time></td><td></td>
       {% else %}
       <td>Active</td>
-      <td><form method="post" action="/access/tokens/{{ t.id|urlencode }}/revoke"><button class="btn">Revoke</button></form></td>
+      <td><form method="post" action="/access/tokens/{{ t.id|segment }}/revoke"><button class="btn">Revoke</button></form></td>
       {% endif %}
     </tr>
     {% else %}
@@ -57,7 +57,7 @@
   <table>
     <thead><tr><th>Id</th><th>Name</th><th>Role</th><th>Active</th><th><span class="landing-sr-only">Actions</span></th></tr></thead>
     <tbody>
-      {% for u in users %}{% set action = "/access/users/" ~ u.id|urlencode %}
+      {% for u in users %}{% set action = "/access/users/" ~ u.id|segment %}
       <tr>
         <td><code>{{ u.id }}</code></td>
         <td>{{ u.name }}</td>

@@ -13,7 +13,6 @@ CSP = (
     " frame-ancestors 'none'"
 )
 SIGN_IN = "Sign in through your company login to use verifair."
-NOT_MEMBER = "You are not a member of this workspace yet. Ask an admin to add {id}."
 
 
 def _active_member(db_path: str, user_id: str):
@@ -33,7 +32,7 @@ async def _membership_denial(request: Request, settings: Settings):
         request.state.member = await run_in_threadpool(_active_member, settings.db_path, user_id)
         if request.state.member is not None:
             return None
-        message, status = NOT_MEMBER.format(id=user_id), 403
+        message, status = web.NOT_MEMBER.format(id=user_id), 403
     return web.templates.TemplateResponse(
         request, "denied.html", {"message": message}, status_code=status
     )
@@ -64,18 +63,19 @@ def create_app(settings: Settings) -> FastAPI:
         path = request.url.path
         is_api = path.startswith("/api/")
         request.state.member = None
-        denial = None
+        response = None
         if settings.identity_header and not (
             is_api or path == "/healthz" or path.startswith("/static/")
         ):
-            denial = await _membership_denial(request, settings)
-        if denial is None and request.method == "POST" and not is_api:
+            response = await _membership_denial(request, settings)
+        if response is None and request.method == "POST" and not is_api:
             site = request.headers.get("Sec-Fetch-Site")
             if site is None:
-                return JSONResponse({"detail": "browser request required"}, 403)
-            if site not in ("same-origin", "none"):
-                return PlainTextResponse("cross-origin request refused", 403)
-        response = denial if denial is not None else await call_next(request)
+                response = JSONResponse({"detail": "browser request required"}, 403)
+            elif site not in ("same-origin", "none"):
+                response = PlainTextResponse("cross-origin request refused", 403)
+        if response is None:
+            response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         if path == "/access" or path.startswith("/access/"):
             response.headers["Cache-Control"] = "no-store"

@@ -29,11 +29,13 @@ def _date(iso: str) -> str:
 
 
 templates.env.filters["date"] = _date
+templates.env.filters["segment"] = lambda value: url_quote(value, safe="")
 templates.env.globals["STATUS_LABELS"] = rules.STATUS_LABELS
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 YEAR = 365 * 24 * 3600
 USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
+PLAIN_ID = re.compile(r"[^/\\\x00-\x1f\x7f\s]+")
 TABS = ("awaiting_review", "changes_requested", "unsigned", "approved")
 SCOPES = {"all": "All changes", "author": "My changes", "reviewer": "My reviews"}
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
@@ -45,6 +47,8 @@ Anchor = Annotated[str, Form(max_length=2000)]
 LAST_ADMIN = "There must be at least one active admin."
 MEMBER_EXISTS = "That member already exists."
 MEMBER_INPUT = "Enter an id (1–200 characters) and a name (1–60 characters)."
+MEMBER_PLAIN = "Use a plain id such as jane@example.com."
+NOT_MEMBER = "You are not a member of this workspace yet. Ask an admin to add {id}."
 LABEL_INPUT = "Enter a label (1–60 characters)."
 ADMIN_ONLY = "Only an admin can manage members."
 OWNER_ONLY = "Only the token owner or an admin can revoke it."
@@ -687,6 +691,8 @@ def add_member(
     id, name = id.strip(), name.strip()
     if not (1 <= len(id) <= 200 and 1 <= len(name) <= 60):
         return _access(request, conn, user, error=MEMBER_INPUT, status=422)
+    if not PLAIN_ID.fullmatch(id) or id in (".", ".."):
+        return _access(request, conn, user, error=MEMBER_PLAIN, status=422)
     try:
         db.add_user(conn, id=id, name=name, role=role)
     except ValueError:
@@ -730,7 +736,10 @@ def new_token(
     label = label.strip()
     if not 1 <= len(label) <= 60:
         return _access(request, conn, user, error=LABEL_INPUT, status=422)
-    token, row = db.create_token(conn, owner_id=member["id"], label=label)
+    try:
+        token, row = db.create_token(conn, owner_id=member["id"], label=label)
+    except ValueError:
+        return _denied(request, NOT_MEMBER.format(id=member["id"]))
     log.info("access action=create_token actor=%s target=%s", user[0], row["id"])
     return _access(request, conn, user, token=token)
 
