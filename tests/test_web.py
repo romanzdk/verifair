@@ -801,3 +801,11 @@ def test_identity_header_cookie_user_may_sign_any_report(proxied):
     proxied.cookies.set("vf_name", "Bob")
     r = proxied.post("/r/prorate/sign", data={"version": 1})
     assert r.status_code == 200 and api_report(proxied)["signed_by"] == "Bob"
+
+
+def test_identity_header_anyone_may_sign_agent_authored_report(proxied):
+    push(proxied)
+    r = proxied.post(
+        "/r/prorate/sign", data={"version": 1}, headers={"X-Forwarded-Email": "bob@example.com"}
+    )
+    assert r.status_code == 200 and api_report(proxied)["signed_by"] == "bob"

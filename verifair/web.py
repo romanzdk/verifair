@@ -140,7 +140,7 @@ def _status(conn: sqlite3.Connection, id: str, version: int) -> str:
 
 def _sign_refusal(request: Request, report: sqlite3.Row, user_id: str) -> str | None:
     author = report["author"]
-    if request.state.user_from_header and author and user_id != author:
+    if request.state.user_from_header and author not in ("", "agent") and user_id != author:
         return f"Only {author} can sign this report."
     return None
 
