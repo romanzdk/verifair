@@ -8,11 +8,11 @@
 <header class="head">
   <h1>{{ report.title }}</h1>
   <div class="meta">
-    <span id="status-badge" class="badge b-{{ status }}">{{ STATUS_LABELS[status] }}</span>
+    <span id="vf_status" class="badge b-{{ status }}">{{ STATUS_LABELS[status] }}</span>
     <span class="badge r-{{ report.risk }}">Risk: {{ report.risk }}</span>
     <span>by <b>{{ report.author }}</b></span>
     <span>v{{ version }} · {{ version_date|date }}</span>
-    <span id="open-count">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
+    <span id="vf_open">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
     {% if ticket %}<a class="ext" href="{{ report.ticket_url }}">{{ ticket }}</a>{% endif %}
   </div>
 </header>
@@ -40,10 +40,10 @@
     </section>
     {% endfor %}
     {% if threads_by_section.get(None) %}
-    <section id="earlier-versions" class="earlier">
+    <section id="vf_earlier" class="earlier">
       <h2>Earlier versions</h2>
       <p class="dismiss">Threads on sections that are no longer in this version.</p>
-      <div class="threads" id="threads-earlier">
+      <div class="threads" id="vf_threads_earlier">
         {% for thread in threads_by_section[None] %}{% include "_thread.html" %}{% endfor %}
       </div>
     </section>
@@ -56,6 +56,6 @@
 </div>
 {% if is_current %}
 {% include "_verdict.html" %}
-<div id="popover" class="pop" hidden><button type="button">💬 Comment on selection</button></div>
+<div id="vf_popover" class="pop" hidden><button type="button">💬 Comment on selection</button></div>
 {% endif %}
 {% endblock %}

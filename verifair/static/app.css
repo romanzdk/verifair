@@ -164,6 +164,7 @@ body > .name-prompt { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; 
 .tabs a.on { color: var(--foreground); border-bottom: 2px solid var(--accent); font-weight: 500; }
 
 @media (max-width: 720px) {
+  body { padding-bottom: 170px; }
   .body { display: flex; flex-direction: column-reverse; }
   .main { border-right: 0; }
   .side { position: static; align-self: stretch; border-bottom: 1px solid var(--border); }

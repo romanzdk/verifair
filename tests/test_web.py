@@ -129,7 +129,7 @@ def test_verdict_approve_changes_status_and_sidebar(client):
     r = client.post("/r/prorate/verdict", data={"verdict": "approve"})
     assert r.status_code == 200
     assert "You approved v1" in r.text
-    assert 'id="sidebar"' in r.text and 'id="status-badge"' in r.text
+    assert 'id="vf_sidebar"' in r.text and 'id="vf_status"' in r.text
     assert 'hx-swap-oob="true"' in r.text
     assert "Approved" in r.text and "approved v1" in r.text
     assert client.get("/api/reports/prorate", headers=H).json()["status"] == "approved"
@@ -185,3 +185,28 @@ def test_set_name(client):
     assert slash.headers["location"] == "/"
     assert client.post("/me", data={"name": "  "}).status_code == 400
     assert client.post("/me", data={"name": "x" * 61}).status_code == 400
+
+
+def test_headings_cannot_collide_with_app_ids(client):
+    push(client, body="## Verdict\nShip it.\n\n## Sidebar\nNotes.\n\n## Popover\nMore.")
+    r = client.get("/r/prorate")
+    assert r.text.count('id="verdict"') == 1 and r.text.count('id="sidebar"') == 1
+    assert r.text.count('id="popover"') == 1
+    assert 'hx-post="/r/prorate/verdict"' in r.text and 'id="vf_verdict"' in r.text
+
+
+def test_blank_comment_and_reply_422(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    blank = client.post("/r/prorate/comments", data={"section": "Intent", "body": "  \n "})
+    assert blank.status_code == 422 and api_threads(client) == []
+    client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
+    cid = api_threads(client)[0]["id"]
+    assert client.post(f"/r/prorate/comments/{cid}/reply", data={"body": " "}).status_code == 422
+    assert api_threads(client)[0]["replies"] == []
+
+
+def test_name_form_next_keeps_query(client):
+    push(client)
+    r = client.get("/p/billing-service?tab=approved")
+    assert 'name="next" value="/p/billing-service?tab=approved"' in r.text

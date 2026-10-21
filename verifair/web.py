@@ -68,6 +68,13 @@ def _name_prompt(request: Request, next: str):
     return _partial(request, ["_name_prompt.html"], {"next": next}, headers)
 
 
+def _require_body(body: str) -> str:
+    body = body.strip()
+    if not body:
+        raise HTTPException(422, "comment body is empty")
+    return body
+
+
 def _require_report(conn: sqlite3.Connection, id: str) -> sqlite3.Row:
     report = db.get_report(conn, id)
     if report is None:
@@ -190,10 +197,11 @@ def post_comment(
     user: User,
     background: BackgroundTasks,
     section: Annotated[str, Form()],
-    body: Annotated[str, Form(min_length=1)],
+    body: Annotated[str, Form()],
     quote: Annotated[str | None, Form()] = None,
 ):
     report = _require_report(conn, id)
+    body = _require_body(body)
     user_id, name = user
     if not name:
         return _name_prompt(request, f"/r/{id}")
@@ -220,9 +228,10 @@ def post_reply(
     conn: Conn,
     user: User,
     background: BackgroundTasks,
-    body: Annotated[str, Form(min_length=1)],
+    body: Annotated[str, Form()],
 ):
     report = _require_report(conn, id)
+    body = _require_body(body)
     user_id, name = user
     if not name:
         return _name_prompt(request, f"/r/{id}")

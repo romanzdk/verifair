@@ -1,8 +1,8 @@
-<aside class="side" id="sidebar"{% if oob %} hx-swap-oob="true"{% endif %}>
+<aside class="side" id="vf_sidebar"{% if oob %} hx-swap-oob="true"{% endif %}>
   <h4>On this page</h4>
   <ul>
     {% for s in sections %}<li><a href="#{{ s.slug }}">{{ loop.index }} {{ s.heading }}</a>{% if open_by_section[s.slug] %} <span class="n">{{ open_by_section[s.slug] }}</span>{% endif %}</li>{% endfor %}
-    {% if threads_by_section.get(None) %}<li><a href="#earlier-versions">Earlier versions</a>{% if open_by_section[None] %} <span class="n">{{ open_by_section[None] }}</span>{% endif %}</li>{% endif %}
+    {% if threads_by_section.get(None) %}<li><a href="#vf_earlier">Earlier versions</a>{% if open_by_section[None] %} <span class="n">{{ open_by_section[None] }}</span>{% endif %}</li>{% endif %}
   </ul>
   <h4>Reviewers</h4>
   {% for r in reviewers %}
@@ -16,6 +16,6 @@
   </ul>
 </aside>
 {% if oob %}
-<span id="status-badge" class="badge b-{{ status }}" hx-swap-oob="true">{{ STATUS_LABELS[status] }}</span>
-<span id="open-count" hx-swap-oob="true">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
+<span id="vf_status" class="badge b-{{ status }}" hx-swap-oob="true">{{ STATUS_LABELS[status] }}</span>
+<span id="vf_open" hx-swap-oob="true">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
 {% endif %}

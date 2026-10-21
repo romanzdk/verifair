@@ -1,4 +1,4 @@
-const popover = document.getElementById("popover");
+const popover = document.getElementById("vf_popover");
 let pending = null;
 
 function sectionOf(node) {
@@ -51,7 +51,7 @@ function escapeRegExp(text) {
 }
 
 function highlight() {
-  document.querySelectorAll("mark[id^=m]").forEach((mark) => {
+  document.querySelectorAll("mark[id^=vf_m]").forEach((mark) => {
     const parent = mark.parentNode;
     mark.replaceWith(...mark.childNodes);
     parent.normalize();
@@ -69,7 +69,7 @@ function highlight() {
       range.setStart(node, match.index);
       range.setEnd(node, match.index + match[0].length);
       const mark = document.createElement("mark");
-      mark.id = `m${thread.id.slice(1)}`;
+      mark.id = `vf_m${thread.id.slice(1)}`;
       range.surroundContents(mark);
       return;
     }
