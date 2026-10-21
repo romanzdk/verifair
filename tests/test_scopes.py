@@ -7,25 +7,29 @@ from verifair import db
 from verifair.app import create_app
 
 TOKEN = {"Authorization": "Bearer t"}
+AGENTS = {}
 ALICE = {"X-Forwarded-Email": "alice@example.com"}
 BOB = {"X-Forwarded-Email": "bob@example.com"}
 
 
 @pytest.fixture
-def team(settings):
+def team(settings, monkeypatch):
     shared = replace(settings, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss")
     app = create_app(shared)
     conn = db.connect(shared.db_path)
     for id in ("alice@example.com", "bob@example.com", "carol@example.com"):
         db.add_user(conn, id=id, name=id.partition("@")[0], role="member")
+        token, _ = db.create_token(conn, owner_id=id, label="agent")
+        monkeypatch.setitem(AGENTS, id, {"Authorization": f"Bearer {token}"})
     conn.close()
+    monkeypatch.setitem(TOKEN, "Authorization", AGENTS["alice@example.com"]["Authorization"])
     return TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
 
 
-def publish(client, id="owned", **overrides):
+def publish(client, id="owned", by=None, **overrides):
     return client.post(
         "/api/reports",
-        headers=TOKEN,
+        headers=AGENTS[by] if by else TOKEN,
         json={
             "id": id,
             "project": "billing",
@@ -42,55 +46,40 @@ def report(client, id="owned"):
 
 
 def seed(team):
-    assert (
-        publish(
-            team, author="Alice", author_id="alice@example.com", reviewers=["bob@example.com"]
-        ).status_code
-        == 201
-    )
-    assert (
-        publish(
-            team,
-            "requested",
-            author="Bob",
-            author_id="bob@example.com",
-            reviewers=["alice@example.com"],
-        ).status_code
-        == 201
-    )
-    assert (
-        publish(team, "elsewhere", project="other", author_id="bob@example.com").status_code == 201
-    )
+    bob = "bob@example.com"
+    assert publish(team, author_id="alice@example.com", reviewers=[bob]).status_code == 201
+    assert publish(team, "requested", by=bob, reviewers=["alice@example.com"]).status_code == 201
+    assert publish(team, "elsewhere", by=bob, project="other").status_code == 201
 
 
-def test_publish_preserves_and_explicitly_replaces_ownership_and_requests(team):
+def test_local_publish_preserves_and_explicitly_replaces_ownership_and_requests(client):
     response = publish(
-        team,
+        client,
         author="Alice",
         author_id="alice@example.com",
         reviewers=["bob@example.com", "bob@example.com"],
     )
     assert response.status_code == 201
-    first = report(team)
+    first = report(client)
     assert (first["author_id"], first["reviewers"]) == (
         "alice@example.com",
         ["bob@example.com"],
     )
-    assert publish(team).json()["version"] == 2
-    revised = report(team)
+    assert publish(client).json()["version"] == 2
+    revised = report(client)
     assert (revised["author"], revised["author_id"], revised["reviewers"]) == (
         "Alice",
         "alice@example.com",
         ["bob@example.com"],
     )
-    publish(team, author="Bob", author_id="bob@example.com", reviewers=["alice@example.com"])
-    reassigned = report(team)
+    publish(client, author="Bob", author_id="bob@example.com", reviewers=["alice@example.com"])
+    reassigned = report(client)
     assert (reassigned["author_id"], reassigned["reviewers"]) == (
         "bob@example.com",
         ["alice@example.com"],
     )
-    publish(team, reviewers=[])
-    assert report(team)["reviewers"] == []
+    publish(client, reviewers=[])
+    assert report(client)["reviewers"] == []
 
 
 @pytest.mark.parametrize(
@@ -142,7 +131,7 @@ def test_my_reviews_includes_requested_work_before_activity_and_after_completion
     )
     completed = team.get("/p/billing?scope=reviewer&tab=approved", headers=ALICE).text
     assert 'href="/r/requested"' in completed and 'href="/r/owned"' not in completed
-    assert publish(team, "requested").json()["version"] == 2
+    assert publish(team, "requested", by="bob@example.com").json()["version"] == 2
     draft = team.get("/p/billing?scope=reviewer&tab=unsigned", headers=ALICE).text
     assert 'href="/r/requested"' in draft
     assert report(team, "requested")["reviewers"] == ["alice@example.com"]
@@ -183,7 +172,18 @@ def test_no_matches_is_a_useful_empty_state_and_not_a_missing_project(team):
 
 def test_identity_is_stable_across_browsers_and_not_matched_by_display_name(team):
     seed(team)
-    publish(team, "same-name", project="other", author="Alice", author_id="carol@example.com")
+    conn = db.connect(team.app.state.settings.db_path)
+    db.push_report(
+        conn,
+        id="same-name",
+        project="other",
+        title="same-name",
+        risk="low",
+        body="## Intent\nx",
+        author="Alice",
+        author_id="carol@example.com",
+    )
+    conn.close()
     team.cookies.set("vf_id", "bob00000")
     team.cookies.set("vf_name", "Bob")
     first = team.get("/?scope=author", headers=ALICE).text

@@ -26,11 +26,24 @@ from verifair.render import (
 )
 from verifair.rules import compute_status
 
+NOT_OWNER = "This report belongs to another member."
+MODERATION = "Only the person who started this thread or an admin can do that."
+
 
 def require_token(request: Request) -> None:
-    token = request.app.state.settings.api_token
+    settings = request.app.state.settings
     given = request.headers.get("Authorization", "")
-    if token is None or not secrets.compare_digest(given.encode(), f"Bearer {token}".encode()):
+    request.state.token_owner = None
+    if settings.identity_header:
+        scheme, _, token = given.partition(" ")
+        if scheme == "Bearer" and token:
+            with closing(db.connect(settings.db_path)) as conn:
+                request.state.token_owner = db.authenticate_token(conn, token)
+        if request.state.token_owner is None:
+            raise HTTPException(401, "invalid token")
+        return
+    token = settings.api_token
+    if not token or not secrets.compare_digest(given.encode(), f"Bearer {token}".encode()):
         raise HTTPException(401, "invalid token")
 
 
@@ -156,6 +169,18 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
     missing = [s for s in request.app.state.settings.required_sections if s not in headings]
     if missing:
         return JSONResponse({"detail": "missing sections", "sections": missing}, 422)
+    owner = request.state.token_owner
+    author = body.author if "author" in body.model_fields_set else None
+    if owner is not None:
+        if body.author_id not in (None, owner["id"]):
+            raise HTTPException(403, "author_id must be the token owner.")
+        for reviewer in body.reviewers or ():
+            member = db.get_user(conn, reviewer)
+            if member is None or not member["active"]:
+                return JSONResponse(
+                    {"detail": f"Reviewer {reviewer} is not an active member."}, 422
+                )
+        author = owner["name"]
     try:
         id, version = db.push_report(
             conn,
@@ -166,14 +191,17 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             id=body.id,
             ticket_url=body.ticket_url,
             links=[link.model_dump() for link in body.links],
-            author=body.author if "author" in body.model_fields_set else None,
+            author=author,
             author_id=body.author_id,
             reviewers=body.reviewers,
             agent=body.agent,
             model=body.model,
             session_url=body.session_url,
             commit=body.commit,
+            owner_id=owner["id"] if owner is not None else None,
         )
+    except db.NotOwner:
+        raise HTTPException(403, NOT_OWNER) from None
     except db.ProjectMismatch:
         raise HTTPException(409, "id belongs to another project") from None
     settings = request.app.state.settings
@@ -317,6 +345,9 @@ def post_comment(
     id: str, body: CommentIn, request: Request, conn: Conn, background: BackgroundTasks
 ):
     report = _require_report(conn, id)
+    owner = request.state.token_owner
+    if owner is not None and report["author_id"] != owner["id"]:
+        raise HTTPException(403, NOT_OWNER)
     if body.parent_id is not None and any(
         value is not None for value in (body.section, body.quote, body.prefix, body.suffix)
     ):
@@ -362,8 +393,17 @@ def post_comment(
 
 
 @router.post("/reports/{id}/comments/{cid}/resolve")
-def resolve_comment(id: str, cid: int, conn: Conn):
-    _require_report(conn, id)
-    if db.resolve_thread(conn, id, cid) is None:
+def resolve_comment(id: str, cid: int, request: Request, conn: Conn):
+    report = _require_report(conn, id)
+    owner = request.state.token_owner
+    by = None
+    if owner is not None:
+        root = db.thread_root(conn, id, cid)
+        if root is None:
+            raise HTTPException(404, "comment not found")
+        if root["author_id"] != "agent" or report["author_id"] != owner["id"]:
+            raise HTTPException(403, MODERATION)
+        by = "agent"
+    if db.resolve_thread(conn, id, cid, by=by) is None:
         raise HTTPException(404, "comment not found")
     return {"resolved": True}

@@ -609,7 +609,7 @@ def test_app_js_caps_quote_and_maps_error_copy():
 
 
 @pytest.fixture
-def proxied(settings):
+def proxied(settings, monkeypatch):
     from dataclasses import replace
 
     from fastapi.testclient import TestClient
@@ -622,7 +622,9 @@ def proxied(settings):
     conn = db.connect(shared.db_path)
     for id in ("alice@example.com", "bob@example.com"):
         db.add_user(conn, id=id, name=id.partition("@")[0], role="member")
+    token, _ = db.create_token(conn, owner_id="alice@example.com", label="agent")
     conn.close()
+    monkeypatch.setitem(H, "Authorization", f"Bearer {token}")
     return TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
 
 
@@ -890,11 +892,11 @@ def test_index_counts_unsigned(client):
     assert page.count('aria-label="Awaiting review: 1 change"') == 1
 
 
-AUTHOR_COPY = "Only alice@example.com can sign this report."
+AUTHOR_COPY = "Only alice can sign this report."
 
 
 def test_identity_header_only_author_can_sign(proxied):
-    push(proxied, author="alice@example.com")
+    push(proxied)
     bob = {"X-Forwarded-Email": "bob@example.com"}
     page = proxied.get("/r/prorate", headers=bob).text
     assert AUTHOR_COPY in page and "Sign this version" not in page
@@ -916,14 +918,18 @@ def test_identity_header_only_author_can_sign(proxied):
 
 
 def test_identity_header_cookie_user_may_not_sign(proxied):
-    push(proxied, author="alice@example.com")
+    push(proxied)
     proxied.cookies.set("vf_name", "Bob")
     r = proxied.post("/r/prorate/sign", data={"version": 1})
     assert r.status_code == 401 and api_report(proxied)["status"] == "unsigned"
 
 
 def test_identity_header_anyone_may_sign_agent_authored_report(proxied):
-    push(proxied)
+    from verifair import db
+
+    conn = db.connect(proxied.app.state.settings.db_path)
+    db.push_report(conn, project="billing-service", title="Prorate", risk="high", body=SAMPLE)
+    conn.close()
     r = proxied.post(
         "/r/prorate/sign", data={"version": 1}, headers={"X-Forwarded-Email": "bob@example.com"}
     )

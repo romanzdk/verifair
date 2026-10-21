@@ -2,20 +2,26 @@ import asyncio
 import sqlite3
 import threading
 import time
+from contextlib import closing
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from verifair import db
+from verifair.app import create_app
 
 H = {"Authorization": "Bearer t"}
 SAMPLE = "## Intent\nFull new price.\n\n## Edge cases\nFirst day."
+NOT_OWNER = "This report belongs to another member."
+MODERATION = "Only the person who started this thread or an admin can do that."
 
 
-def push(client, **overrides):
+def push(client, auth=H, **overrides):
     payload = {"project": "billing-service", "title": "Prorate", "risk": "high", "body": SAMPLE}
-    return client.post("/api/reports", json=payload | overrides, headers=H)
+    return client.post("/api/reports", json=payload | overrides, headers=auth)
 
 
 def test_requires_token(client):
@@ -804,3 +810,171 @@ def test_wait_without_since_detects_new_rows_in_the_same_second(client, settings
     thread.join()
     assert response.json()["comment"]["body"] == "Why?"
     assert response.json()["next_since"] == "2000-01-01T00:00:00+00:00"
+
+
+def test_local_mode_refuses_an_empty_shared_token(settings):
+    client = TestClient(create_app(replace(settings, api_token="")))
+    for headers in [{"Authorization": "Bearer "}, {"Authorization": "Bearer"}, {}]:
+        r = client.get("/api/reports/x", headers=headers)
+        assert (r.status_code, r.json()) == (401, {"detail": "invalid token"}), headers
+
+
+def _agent(settings, id, role="member"):
+    with closing(db.connect(settings.db_path)) as conn:
+        if db.get_user(conn, id) is None:
+            db.add_user(conn, id=id, name=id.partition("@")[0], role=role)
+        token, _ = db.create_token(conn, owner_id=id, label="agent")
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def alice(shared_client, shared_settings):
+    return _agent(shared_settings, "alice@example.com")
+
+
+@pytest.fixture
+def bob(shared_client, shared_settings):
+    return _agent(shared_settings, "bob@example.com")
+
+
+@pytest.fixture
+def admin(shared_client, shared_settings):
+    return _agent(shared_settings, "admin@example.com")
+
+
+def test_shared_mode_refuses_the_shared_token_and_accepts_member_tokens(shared_settings):
+    client = TestClient(create_app(replace(shared_settings, api_token="t")))
+    alice = _agent(shared_settings, "alice@example.com")
+    r = push(client, auth=H)
+    assert (r.status_code, r.json()) == (401, {"detail": "invalid token"})
+    assert push(client, auth=alice).status_code == 201
+
+
+def test_member_token_push_sets_owner_and_every_member_reads(shared_client, alice, bob):
+    assert push(shared_client, auth=alice, author="Someone else").status_code == 201
+    report = shared_client.get("/api/reports/prorate", headers=bob).json()
+    assert (report["author"], report["author_id"]) == ("alice", "alice@example.com")
+    assert shared_client.get("/api/reports/prorate/comments", headers=bob).json() == {"threads": []}
+    waited = shared_client.get("/api/reports/prorate/wait?timeout=0.1", headers=bob)
+    assert waited.json()["event"] == "timeout"
+    again = push(shared_client, auth=alice, id="prorate", author_id="alice@example.com")
+    assert again.json()["version"] == 2
+
+
+def test_revoked_or_deactivated_tokens_are_refused_on_the_next_call(
+    shared_client, shared_settings, alice, bob
+):
+    assert push(shared_client, auth=alice).status_code == 201
+    assert shared_client.get("/api/reports/prorate", headers=bob).status_code == 200
+    with closing(db.connect(shared_settings.db_path)) as conn:
+        [token] = db.list_tokens(conn, "alice@example.com")
+        db.revoke_token(conn, token["id"])
+        db.update_user(conn, "bob@example.com", active=False)
+    for auth in (alice, bob):
+        r = shared_client.get("/api/reports/prorate", headers=auth)
+        assert (r.status_code, r.json()) == (401, {"detail": "invalid token"})
+
+
+@pytest.mark.parametrize(
+    "shape",
+    ["", "Bearer", "Bearer ", "bearer {t}", "Token {t}", "{t}", "Bearer  {t}", "Bearer {t}x"],
+)
+def test_shared_mode_malformed_bearer_is_401(shared_client, alice, shape):
+    token = alice["Authorization"].removeprefix("Bearer ")
+    r = shared_client.get("/api/reports/x", headers={"Authorization": shape.format(t=token)})
+    assert (r.status_code, r.json()) == (401, {"detail": "invalid token"})
+
+
+def test_author_id_must_be_the_token_owner(shared_client, alice, bob):
+    r = push(shared_client, auth=alice, author_id="bob@example.com")
+    assert (r.status_code, r.json()) == (403, {"detail": "author_id must be the token owner."})
+    assert shared_client.get("/api/reports/prorate", headers=alice).status_code == 404
+
+
+def test_push_to_another_members_report_is_refused_even_for_admins(
+    shared_client, shared_settings, alice, bob, admin
+):
+    assert push(shared_client, auth=alice).status_code == 201
+    with closing(db.connect(shared_settings.db_path)) as conn:
+        db.push_report(conn, project="billing-service", title="Legacy", risk="low", body=SAMPLE)
+    for auth, id in [(bob, "prorate"), (admin, "prorate"), (alice, "legacy")]:
+        r = push(shared_client, auth=auth, id=id, title="Taken over")
+        assert (r.status_code, r.json()) == (403, {"detail": NOT_OWNER}), id
+    for id, title, owner in [
+        ("prorate", "Prorate", "alice@example.com"),
+        ("legacy", "Legacy", None),
+    ]:
+        report = shared_client.get(f"/api/reports/{id}", headers=alice).json()
+        assert (report["title"], report["current_version"], report["author_id"]) == (
+            title,
+            1,
+            owner,
+        )
+
+
+def test_shared_mode_reviewers_must_be_active_members(shared_client, shared_settings, alice, bob):
+    with closing(db.connect(shared_settings.db_path)) as conn:
+        db.add_user(conn, id="gone@example.com", name="gone", role="member")
+        db.update_user(conn, "gone@example.com", active=False)
+    for reviewers, unknown in [
+        (["bob@example.com", "ghost@example.com", "zed@example.com"], "ghost@example.com"),
+        (["gone@example.com"], "gone@example.com"),
+    ]:
+        r = push(shared_client, auth=alice, reviewers=reviewers)
+        detail = f"Reviewer {unknown} is not an active member."
+        assert (r.status_code, r.json()) == (422, {"detail": detail})
+    assert shared_client.get("/api/reports/prorate", headers=alice).status_code == 404
+    ok = push(shared_client, auth=alice, reviewers=["bob@example.com", "admin@example.com"])
+    assert ok.status_code == 201
+    report = shared_client.get("/api/reports/prorate", headers=alice).json()
+    assert report["reviewers"] == ["admin@example.com", "bob@example.com"]
+
+
+def test_agents_comment_only_on_their_owners_reports(shared_client, alice, bob, admin):
+    push(shared_client, auth=alice)
+    url = "/api/reports/prorate/comments"
+    for auth in (bob, admin):
+        r = shared_client.post(url, json={"body": "Hi"}, headers=auth)
+        assert (r.status_code, r.json()) == (403, {"detail": NOT_OWNER})
+    ok = shared_client.post(url, json={"body": "Hi", "author": "Claude"}, headers=alice)
+    assert ok.status_code == 201
+    assert (ok.json()["author_id"], ok.json()["author"]) == ("agent", "Claude")
+    assert len(shared_client.get(url, headers=bob).json()["threads"]) == 1
+
+
+def test_agents_resolve_only_agent_threads_on_their_owners_reports(
+    shared_client, shared_settings, alice, bob, admin
+):
+    push(shared_client, auth=alice)
+    url = "/api/reports/prorate/comments"
+    agent_thread = shared_client.post(url, json={"body": "Note"}, headers=alice).json()["id"]
+    with closing(db.connect(shared_settings.db_path)) as conn:
+        human_thread, owners_thread = (
+            db.add_comment(
+                conn, report_id="prorate", version=1, author_id=who, author_name=who, body="Why?"
+            )["id"]
+            for who in ("bob@example.com", "alice@example.com")
+        )
+
+    def resolve(cid, auth):
+        return shared_client.post(f"{url}/{cid}/resolve", headers=auth)
+
+    for cid, auth in [
+        (human_thread, alice),
+        (human_thread, bob),
+        (human_thread, admin),
+        (owners_thread, alice),
+        (agent_thread, bob),
+        (agent_thread, admin),
+    ]:
+        r = resolve(cid, auth)
+        assert (r.status_code, r.json()) == (403, {"detail": MODERATION}), cid
+    assert resolve(999, alice).status_code == 404
+    reply = shared_client.post(
+        url, json={"body": "Done", "parent_id": agent_thread}, headers=alice
+    ).json()["id"]
+    assert resolve(reply, alice).json() == {"resolved": True}
+    with closing(db.connect(shared_settings.db_path)) as conn:
+        rows = {c["id"]: c for c in db.list_comments(conn, "prorate")}
+    assert rows[agent_thread]["resolved_by"] == "agent"
+    assert rows[human_thread]["resolved_at"] is rows[owners_thread]["resolved_at"] is None

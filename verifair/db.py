@@ -116,6 +116,10 @@ class LastAdmin(Exception):
     pass
 
 
+class NotOwner(Exception):
+    pass
+
+
 class StaleVersion(Exception):
     def __init__(self, latest: int) -> None:
         super().__init__(f"latest version is {latest}")
@@ -203,12 +207,17 @@ def push_report(
     model: str | None = None,
     session_url: str | None = None,
     commit: str | None = None,
+    owner_id: str | None = None,
 ) -> tuple[str, int]:
     now = _now()
     links_json = json.dumps(links or [])
+    if owner_id is not None:
+        author_id = owner_id
     with _write(conn):
         existing = get_report(conn, id) if id else None
         if existing:
+            if owner_id is not None and existing["author_id"] != owner_id:
+                raise NotOwner(f"report {id!r} belongs to another member")
             if existing["project"] != project:
                 log.info(
                     "push rejected id=%s project=%s owner=%s", id, project, existing["project"]
@@ -421,6 +430,14 @@ def resolve_thread(
             (_now(), by, row[0]),
         )
     return row[0]
+
+
+def thread_root(conn: sqlite3.Connection, report_id: str, comment_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT root.* FROM comments c JOIN comments root ON root.id = COALESCE(c.parent_id, c.id)"
+        " WHERE c.id=? AND c.report_id=?",
+        (comment_id, report_id),
+    ).fetchone()
 
 
 def reopen_thread(conn: sqlite3.Connection, report_id: str, comment_id: int) -> bool:
