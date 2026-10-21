@@ -9,8 +9,27 @@ def test_health(client):
 
 def test_missing_token_raises(monkeypatch):
     monkeypatch.delenv("VERIFAIR_API_TOKEN", raising=False)
+    monkeypatch.delenv("VERIFAIR_IDENTITY_HEADER", raising=False)
     with pytest.raises(RuntimeError, match="VERIFAIR_API_TOKEN"):
         load_settings()
+
+
+def test_shared_mode_loads_without_api_token(monkeypatch):
+    monkeypatch.delenv("VERIFAIR_API_TOKEN", raising=False)
+    monkeypatch.setenv("VERIFAIR_IDENTITY_HEADER", "X-Forwarded-Email")
+    monkeypatch.setenv("VERIFAIR_BOOTSTRAP_ADMIN_ID", "admin@example.com")
+    s = load_settings()
+    assert (s.api_token, s.identity_header, s.bootstrap_admin_id) == (
+        None,
+        "X-Forwarded-Email",
+        "admin@example.com",
+    )
+
+
+def test_empty_bootstrap_admin_id_is_none(monkeypatch):
+    monkeypatch.setenv("VERIFAIR_API_TOKEN", "t")
+    monkeypatch.setenv("VERIFAIR_BOOTSTRAP_ADMIN_ID", "")
+    assert load_settings().bootstrap_admin_id is None
 
 
 def test_defaults(monkeypatch):

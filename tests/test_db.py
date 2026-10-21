@@ -1,4 +1,6 @@
+import hashlib
 import sqlite3
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -11,24 +13,34 @@ from fastapi.testclient import TestClient
 from verifair import db
 from verifair.db import (
     AlreadySigned,
+    LastAdmin,
     ProjectMismatch,
     StaleVersion,
     add_comment,
+    add_user,
     add_verdict,
+    authenticate_token,
+    bootstrap_admin,
     connect,
+    create_token,
     get_report,
     get_signature,
+    get_user,
     get_version,
     init_schema,
     list_comments,
     list_projects,
     list_reports,
+    list_tokens,
+    list_users,
     list_versions,
     push_report,
     reopen_thread,
     resolve_thread,
+    revoke_token,
     set_blocking,
     sign_version,
+    update_user,
 )
 from verifair.deps import get_conn
 
@@ -322,7 +334,7 @@ def test_init_schema_migrates_v1_database(tmp_path):
     init_schema(c)
     assert {"agent", "model", "session_url", "author_id"} <= _columns(c, "reports")
     assert "commit" in _columns(c, "versions")
-    assert "blocking" in _columns(c, "comments")
+    assert {"blocking", "resolved_by"} <= _columns(c, "comments")
     assert c.execute("SELECT blocking FROM comments").fetchone()[0] == 1
     push_report(
         c, project="p", title="T", risk="low", body="b2", id="r0", agent="x", commit="abc1234"
@@ -443,3 +455,235 @@ def test_legacy_signer_verdict_is_history_without_effective_self_approval(settin
     assert "You approved v1" in approved.text
     report = upgraded.get("/api/reports/r0", headers=headers).json()
     assert report["status"] == "approved" and len(report["verdicts"]) == 2
+
+
+def _resolved_by(conn, id):
+    return conn.execute("SELECT resolved_by FROM comments WHERE id=?", (id,)).fetchone()[0]
+
+
+def test_resolved_by_is_kept_on_first_resolve_and_cleared_on_reopen(conn):
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    kw = {"report_id": "r1", "version": 1, "author_id": "u1", "author_name": "Alice"}
+    root = add_comment(conn, body="?", **kw)
+    reply = add_comment(conn, body="!", parent_id=root["id"], **kw)
+    resolve_thread(conn, "r1", reply["id"], by="u2")
+    assert _resolved_by(conn, root["id"]) == "u2"
+    resolve_thread(conn, "r1", root["id"], by="u3")
+    assert _resolved_by(conn, root["id"]) == "u2"
+    reopen_thread(conn, "r1", root["id"])
+    assert _resolved_by(conn, root["id"]) is None
+    resolve_thread(conn, "r1", root["id"], by="u2")
+    add_comment(conn, body="not yet", parent_id=root["id"], **kw)
+    assert _resolved_by(conn, root["id"]) is None
+    resolve_thread(conn, "r1", root["id"])
+    assert _resolved_by(conn, root["id"]) is None
+    assert _resolved_at(conn, root["id"]) is not None
+
+
+def test_add_and_get_user(conn):
+    user = add_user(conn, id="ann@example.com", name="Ann", role="member")
+    assert (user["id"], user["name"], user["role"], user["active"]) == (
+        "ann@example.com",
+        "Ann",
+        "member",
+        1,
+    )
+    assert user["created_at"] == user["updated_at"]
+    assert get_user(conn, "ann@example.com")["name"] == "Ann"
+    assert get_user(conn, "nobody@example.com") is None
+
+
+def test_add_user_refuses_duplicate(conn):
+    add_user(conn, id="ann@example.com", name="Ann", role="member")
+    with pytest.raises(ValueError):
+        add_user(conn, id="ann@example.com", name="Other", role="admin")
+    assert get_user(conn, "ann@example.com")["name"] == "Ann"
+    assert not conn.in_transaction
+
+
+def test_bad_role_is_refused(conn):
+    with pytest.raises(ValueError):
+        add_user(conn, id="bob@example.com", name="Bob", role="owner")
+    assert get_user(conn, "bob@example.com") is None
+    add_user(conn, id="bob@example.com", name="Bob", role="member")
+    with pytest.raises(ValueError):
+        update_user(conn, "bob@example.com", role="owner")
+    assert get_user(conn, "bob@example.com")["role"] == "member"
+
+
+def test_list_users_admins_first_then_by_name(conn):
+    add_user(conn, id="z", name="Zed", role="member")
+    add_user(conn, id="b", name="Bea", role="admin")
+    add_user(conn, id="a", name="Al", role="member")
+    add_user(conn, id="y", name="Yan", role="admin")
+    assert [u["id"] for u in list_users(conn)] == ["b", "y", "a", "z"]
+
+
+def test_update_user_changes_role_and_active(conn):
+    add_user(conn, id="boss", name="Boss", role="admin")
+    add_user(conn, id="m", name="M", role="member")
+    conn.execute("UPDATE users SET updated_at='2000-01-01' WHERE id='m'")
+    promoted = update_user(conn, "m", role="admin")
+    assert (promoted["role"], promoted["active"]) == ("admin", 1)
+    assert promoted["updated_at"] != "2000-01-01"
+    off = update_user(conn, "m", active=False)
+    assert (off["role"], off["active"]) == ("admin", 0)
+    assert update_user(conn, "m", active=True)["active"] == 1
+    with pytest.raises(ValueError):
+        update_user(conn, "nobody", role="member")
+
+
+@pytest.mark.parametrize("change", [{"role": "member"}, {"active": False}])
+def test_update_user_refuses_to_remove_last_active_admin(conn, change):
+    add_user(conn, id="a", name="A", role="admin")
+    add_user(conn, id="b", name="B", role="admin")
+    update_user(conn, "b", active=False)
+    with pytest.raises(LastAdmin, match="There must be at least one active admin."):
+        update_user(conn, "a", **change)
+    a = get_user(conn, "a")
+    assert (a["role"], a["active"]) == ("admin", 1)
+    assert not conn.in_transaction
+    assert update_user(conn, "a", role="admin", active=True)["role"] == "admin"
+    update_user(conn, "b", active=True)
+    update_user(conn, "a", **change)
+
+
+def test_concurrent_demotion_of_last_two_admins_leaves_one(tmp_path, monkeypatch):
+    path = str(tmp_path / "admins.db")
+    init = connect(path)
+    init_schema(init)
+    add_user(init, id="a", name="A", role="admin")
+    add_user(init, id="b", name="B", role="admin")
+    init.close()
+    original = db.get_user
+
+    def slow_get_user(conn, id):
+        row = original(conn, id)
+        time.sleep(0.1)
+        return row
+
+    monkeypatch.setattr(db, "get_user", slow_get_user)
+    barrier = threading.Barrier(2)
+
+    def demote(target):
+        c = connect(path)
+        try:
+            barrier.wait()
+            update_user(c, target, role="member")
+            return "demoted"
+        except LastAdmin:
+            return "refused"
+        finally:
+            c.close()
+
+    with ThreadPoolExecutor(2) as pool:
+        results = list(pool.map(demote, ["a", "b"]))
+    assert sorted(results) == ["demoted", "refused"]
+    check = connect(path)
+    try:
+        admins = check.execute("SELECT id FROM users WHERE role='admin' AND active=1").fetchall()
+    finally:
+        check.close()
+    assert len(admins) == 1
+
+
+def test_deactivation_revokes_open_tokens_of_that_user(conn):
+    add_user(conn, id="boss", name="Boss", role="admin")
+    add_user(conn, id="m", name="M", role="member")
+    token, _ = create_token(conn, owner_id="m", label="laptop")
+    _, old = create_token(conn, owner_id="m", label="old")
+    conn.execute("UPDATE api_tokens SET revoked_at='2000-01-01' WHERE id=?", (old["id"],))
+    boss_token, _ = create_token(conn, owner_id="boss", label="ci")
+    update_user(conn, "m", active=False)
+    revoked = {t["label"]: t["revoked_at"] for t in list_tokens(conn)}
+    assert revoked["laptop"] is not None
+    assert revoked["old"] == "2000-01-01"
+    assert revoked["ci"] is None
+    update_user(conn, "m", active=True)
+    assert authenticate_token(conn, token) is None
+    assert authenticate_token(conn, boss_token)["id"] == "boss"
+
+
+def test_bootstrap_admin_only_on_empty_table(conn):
+    assert bootstrap_admin(conn, "boss@example.com") is True
+    boss = get_user(conn, "boss@example.com")
+    assert (boss["name"], boss["role"], boss["active"]) == ("boss", "admin", 1)
+    assert bootstrap_admin(conn, "boss@example.com") is False
+    assert bootstrap_admin(conn, "other@example.com") is False
+    assert [u["id"] for u in list_users(conn)] == ["boss@example.com"]
+
+
+def test_bootstrap_admin_skips_table_with_only_members(conn):
+    add_user(conn, id="m", name="M", role="member")
+    assert bootstrap_admin(conn, "boss@example.com") is False
+    assert get_user(conn, "boss@example.com") is None
+
+
+def test_token_round_trip_stores_only_a_digest(conn):
+    add_user(conn, id="m@example.com", name="M", role="member")
+    token, row = create_token(conn, owner_id="m@example.com", label="laptop")
+    assert token.startswith("vf_")
+    public_id, secret = token.removeprefix("vf_").split(".")
+    assert len(public_id) == 12 and row["id"] == public_id
+    assert (row["owner_id"], row["label"], row["revoked_at"]) == ("m@example.com", "laptop", None)
+    assert "digest" not in row.keys()
+    assert authenticate_token(conn, token)["name"] == "M"
+    stored = conn.execute("SELECT * FROM api_tokens").fetchone()
+    assert stored["digest"] == hashlib.sha256(secret.encode()).hexdigest()
+    assert secret not in " ".join(str(v) for v in stored)
+
+
+def test_authenticate_token_refuses_wrong_secret(conn):
+    add_user(conn, id="m", name="M", role="member")
+    token, _ = create_token(conn, owner_id="m", label="a")
+    _, other = create_token(conn, owner_id="m", label="b")
+    secret = token.split(".")[1]
+    assert authenticate_token(conn, token + "x") is None
+    assert authenticate_token(conn, f"vf_{other['id']}.{secret}") is None
+
+
+def test_authenticate_token_refuses_revoked(conn):
+    add_user(conn, id="m", name="M", role="member")
+    token, row = create_token(conn, owner_id="m", label="a")
+    kept, _ = create_token(conn, owner_id="m", label="b")
+    assert revoke_token(conn, row["id"]) is True
+    assert revoke_token(conn, row["id"]) is False
+    assert revoke_token(conn, "missing") is False
+    assert authenticate_token(conn, token) is None
+    assert authenticate_token(conn, kept)["id"] == "m"
+
+
+def test_authenticate_token_refuses_inactive_owner(conn):
+    add_user(conn, id="m", name="M", role="member")
+    token, _ = create_token(conn, owner_id="m", label="a")
+    conn.execute("UPDATE users SET active=0 WHERE id='m'")
+    assert authenticate_token(conn, token) is None
+
+
+def test_authenticate_token_returns_none_for_malformed_strings(conn):
+    add_user(conn, id="m", name="M", role="member")
+    token, _ = create_token(conn, owner_id="m", label="a")
+    body = token.removeprefix("vf_")
+    malformed = [
+        "",
+        "vf_",
+        "vf_.",
+        "vf_.x",
+        body,
+        f"vx_{body}",
+        f"vf_{body.split('.')[0]}",
+        f"{token}.x",
+        f"Bearer {token}",
+        "vf_\x00.\u00ff",
+    ]
+    assert [authenticate_token(conn, t) for t in malformed] == [None] * len(malformed)
+
+
+def test_list_tokens_filters_by_owner_and_never_returns_digest(conn):
+    add_user(conn, id="a", name="A", role="admin")
+    add_user(conn, id="m", name="M", role="member")
+    create_token(conn, owner_id="a", label="ci")
+    create_token(conn, owner_id="m", label="laptop")
+    assert {t["label"] for t in list_tokens(conn)} == {"ci", "laptop"}
+    assert [t["label"] for t in list_tokens(conn, "m")] == ["laptop"]
+    assert all("digest" not in t.keys() for t in list_tokens(conn))

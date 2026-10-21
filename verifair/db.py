@@ -1,5 +1,8 @@
+import hashlib
+import hmac
 import json
 import logging
+import secrets
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -47,7 +50,8 @@ CREATE TABLE IF NOT EXISTS comments (
     resolved_at TEXT,
     blocking INTEGER NOT NULL DEFAULT 1,
     prefix TEXT,
-    suffix TEXT
+    suffix TEXT,
+    resolved_by TEXT
 );
 CREATE TABLE IF NOT EXISTS verdicts (
     id INTEGER PRIMARY KEY,
@@ -72,6 +76,22 @@ CREATE TABLE IF NOT EXISTS review_requests (
     reviewer_id TEXT NOT NULL,
     PRIMARY KEY (report_id, reviewer_id)
 );
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id TEXT PRIMARY KEY,
+    digest TEXT NOT NULL,
+    owner_id TEXT NOT NULL REFERENCES users(id),
+    label TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT
+);
 CREATE INDEX IF NOT EXISTS comments_report_parent ON comments(report_id, parent_id);
 CREATE INDEX IF NOT EXISTS verdicts_report ON verdicts(report_id);
 CREATE INDEX IF NOT EXISTS reports_project ON reports(project);
@@ -88,6 +108,10 @@ class AlreadySigned(Exception):
 
 
 class VerdictRefused(Exception):
+    pass
+
+
+class LastAdmin(Exception):
     pass
 
 
@@ -143,6 +167,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "comments", "blocking", "INTEGER NOT NULL DEFAULT 1")
     _ensure_column(conn, "comments", "prefix", "TEXT")
     _ensure_column(conn, "comments", "suffix", "TEXT")
+    _ensure_column(conn, "comments", "resolved_by", "TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS reports_author ON reports(author_id)")
     conn.execute(
         "UPDATE reports SET author_id=(SELECT signer_id FROM signatures s"
@@ -380,7 +405,9 @@ def list_comments(
     return conn.execute(sql + " ORDER BY c.id", (report_id,)).fetchall()
 
 
-def resolve_thread(conn: sqlite3.Connection, report_id: str, comment_id: int) -> int | None:
+def resolve_thread(
+    conn: sqlite3.Connection, report_id: str, comment_id: int, *, by: str | None = None
+) -> int | None:
     with _write(conn):
         row = conn.execute(
             "SELECT COALESCE(parent_id, id) FROM comments WHERE id=? AND report_id=?",
@@ -389,15 +416,15 @@ def resolve_thread(conn: sqlite3.Connection, report_id: str, comment_id: int) ->
         if row is None:
             return None
         conn.execute(
-            "UPDATE comments SET resolved_at=? WHERE id=? AND resolved_at IS NULL",
-            (_now(), row[0]),
+            "UPDATE comments SET resolved_at=?, resolved_by=? WHERE id=? AND resolved_at IS NULL",
+            (_now(), by, row[0]),
         )
     return row[0]
 
 
 def reopen_thread(conn: sqlite3.Connection, report_id: str, comment_id: int) -> bool:
     cur = conn.execute(
-        "UPDATE comments SET resolved_at=NULL WHERE report_id=? AND id ="
+        "UPDATE comments SET resolved_at=NULL, resolved_by=NULL WHERE report_id=? AND id ="
         " (SELECT COALESCE(parent_id, id) FROM comments WHERE id=? AND report_id=?)",
         (report_id, comment_id, report_id),
     )
@@ -485,3 +512,123 @@ def get_signature(conn: sqlite3.Connection, report_id: str, version: int) -> sql
     return conn.execute(
         "SELECT * FROM signatures WHERE report_id=? AND version=?", (report_id, version)
     ).fetchone()
+
+
+ROLES = ("admin", "member")
+TOKEN_COLUMNS = "id, owner_id, label, created_at, revoked_at"
+
+
+def _check_role(role: str) -> None:
+    if role not in ROLES:
+        raise ValueError(f"role must be one of {', '.join(ROLES)}")
+
+
+def add_user(conn: sqlite3.Connection, *, id: str, name: str, role: str) -> sqlite3.Row:
+    _check_role(role)
+    now = _now()
+    with _write(conn):
+        try:
+            conn.execute(
+                "INSERT INTO users (id, name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (id, name, role, now, now),
+            )
+        except sqlite3.IntegrityError:
+            raise ValueError(f"user {id!r} already exists") from None
+    return get_user(conn, id)
+
+
+def get_user(conn: sqlite3.Connection, id: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM users WHERE id=?", (id,)).fetchone()
+
+
+def list_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM users ORDER BY role != 'admin', name, id").fetchall()
+
+
+def update_user(
+    conn: sqlite3.Connection, id: str, *, role: str | None = None, active: bool | None = None
+) -> sqlite3.Row:
+    if role is not None:
+        _check_role(role)
+    now = _now()
+    with _write(conn):
+        user = get_user(conn, id)
+        if user is None:
+            raise ValueError(f"user {id!r} not found")
+        role = role or user["role"]
+        active = bool(user["active"]) if active is None else active
+        if user["role"] == "admin" and user["active"] and (role != "admin" or not active):
+            others = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1 AND id!=?", (id,)
+            ).fetchone()[0]
+            if not others:
+                raise LastAdmin("There must be at least one active admin.")
+        conn.execute(
+            "UPDATE users SET role=?, active=?, updated_at=? WHERE id=?",
+            (role, int(active), now, id),
+        )
+        if not active:
+            conn.execute(
+                "UPDATE api_tokens SET revoked_at=? WHERE owner_id=? AND revoked_at IS NULL",
+                (now, id),
+            )
+    return get_user(conn, id)
+
+
+def bootstrap_admin(conn: sqlite3.Connection, admin_id: str) -> bool:
+    now = _now()
+    with _write(conn):
+        cur = conn.execute(
+            "INSERT INTO users (id, name, role, created_at, updated_at)"
+            " SELECT ?, ?, 'admin', ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)",
+            (admin_id, admin_id.partition("@")[0], now, now),
+        )
+    return cur.rowcount > 0
+
+
+def _digest(secret: str) -> str:
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+
+def create_token(conn: sqlite3.Connection, *, owner_id: str, label: str) -> tuple[str, sqlite3.Row]:
+    public_id, secret = secrets.token_hex(6), secrets.token_urlsafe(32)
+    with _write(conn):
+        conn.execute(
+            "INSERT INTO api_tokens (id, digest, owner_id, label, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (public_id, _digest(secret), owner_id, label, _now()),
+        )
+    row = conn.execute(
+        f"SELECT {TOKEN_COLUMNS} FROM api_tokens WHERE id=?", (public_id,)
+    ).fetchone()
+    return f"vf_{public_id}.{secret}", row
+
+
+def authenticate_token(conn: sqlite3.Connection, token: str) -> sqlite3.Row | None:
+    if not token.startswith("vf_") or token.count(".") != 1:
+        return None
+    public_id, secret = token[3:].split(".")
+    row = conn.execute(
+        "SELECT digest, owner_id FROM api_tokens WHERE id=? AND revoked_at IS NULL", (public_id,)
+    ).fetchone()
+    if row is None or not hmac.compare_digest(row["digest"], _digest(secret)):
+        return None
+    owner = get_user(conn, row["owner_id"])
+    return owner if owner["active"] else None
+
+
+def revoke_token(conn: sqlite3.Connection, token_id: str) -> bool:
+    with _write(conn):
+        cur = conn.execute(
+            "UPDATE api_tokens SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
+            (_now(), token_id),
+        )
+    return cur.rowcount > 0
+
+
+def list_tokens(conn: sqlite3.Connection, owner_id: str | None = None) -> list[sqlite3.Row]:
+    where, parameters = ("WHERE owner_id=?", (owner_id,)) if owner_id is not None else ("", ())
+    return conn.execute(
+        f"SELECT {TOKEN_COLUMNS} FROM api_tokens {where} ORDER BY created_at DESC, rowid DESC",
+        parameters,
+    ).fetchall()
