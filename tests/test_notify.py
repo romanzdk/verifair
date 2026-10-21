@@ -41,6 +41,29 @@ def test_verdict_text(verdict, phrase):
     )
 
 
+EVIL = {"id": "p", "project": "a&b", "title": "<T>", "risk": "high"}
+
+
+def test_report_pushed_text_escapes_user_text():
+    assert notify.report_pushed_text(EVIL, 1, "http://x?a=1&b=2") == (
+        "New report v1 in a&amp;b: &lt;T&gt; (risk high) http://x?a=1&b=2/r/p"
+    )
+
+
+def test_comment_text_escapes_user_text():
+    comment = {"id": 1, "author_name": "<@U1>", "section": "a<b", "body": "<!channel> a < b"}
+    assert notify.comment_text(EVIL, comment, "http://x") == (
+        "&lt;@U1&gt; commented on &lt;T&gt; › a&lt;b: &lt;!channel&gt; a &lt; b http://x/r/p#vf_c1"
+    )
+
+
+def test_verdict_text_escapes_user_text():
+    row = {"reviewer_name": "A&B", "verdict": "approve", "version": 1, "summary": "<!here>"}
+    assert notify.verdict_text(EVIL, row, "http://x") == (
+        "A&amp;B approved &lt;T&gt; v1: &lt;!here&gt; http://x/r/p"
+    )
+
+
 def test_send_without_url_makes_no_call(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("httpx.post must not be called")

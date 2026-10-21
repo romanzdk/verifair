@@ -8,27 +8,31 @@ from verifair.config import Settings
 log = logging.getLogger("verifair")
 
 
+def _esc(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def report_pushed_text(report: Mapping, version: int, base_url: str) -> str:
     return (
-        f"New report v{version} in {report['project']}: {report['title']} "
+        f"New report v{version} in {_esc(report['project'])}: {_esc(report['title'])} "
         f"(risk {report['risk']}) {base_url}/r/{report['id']}"
     )
 
 
 def comment_text(report: Mapping, comment: Mapping, base_url: str) -> str:
-    section = comment["section"] or "report"
+    section = _esc(comment["section"] or "report")
     url = f"{base_url}/r/{report['id']}#vf_c{comment['id']}"
     return (
-        f"{comment['author_name']} commented on {report['title']} › {section}: "
-        f"{comment['body'][:140]} {url}"
+        f"{_esc(comment['author_name'])} commented on {_esc(report['title'])} › {section}: "
+        f"{_esc(comment['body'][:140])} {url}"
     )
 
 
 def verdict_text(report: Mapping, verdict: Mapping, base_url: str) -> str:
     action = "approved" if verdict["verdict"] == "approve" else "requested changes on"
     return (
-        f"{verdict['reviewer_name']} {action} {report['title']} v{verdict['version']}: "
-        f"{verdict['summary']} {base_url}/r/{report['id']}"
+        f"{_esc(verdict['reviewer_name'])} {action} {_esc(report['title'])} "
+        f"v{verdict['version']}: {_esc(verdict['summary'])} {base_url}/r/{report['id']}"
     )
 
 
