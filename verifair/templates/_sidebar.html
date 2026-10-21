@@ -1,4 +1,5 @@
 <aside class="side" id="vf_sidebar"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% with s = open_count - blocking_count %}<p class="dismiss" id="vf_blocking">{{ blocking_count }} blocking · {{ s }} suggestion{{ "s" if s != 1 }}</p>{% endwith %}
   <h4>On this page</h4>
   <ul>
     {% for s in sections %}<li><a href="#{{ s.slug }}">{{ loop.index }} {{ s.heading }}</a>{% if open_by_section[s.slug] %}{% with n = open_by_section[s.slug] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endfor %}

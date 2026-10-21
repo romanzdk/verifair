@@ -224,7 +224,10 @@ def test_web_posts_notify(tmp_path, monkeypatch):
         "Ready for review: Prorate v1 (risk high), signed by Signer http://localhost:8000/r/prorate"
     )
     client.cookies.set("vf_name", "Alice")
-    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
+    client.post(
+        "/r/prorate/comments",
+        data={"version": 1, "section": "Intent", "body": "Why?", "blocking": "0"},
+    )
     client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve", "summary": "Fine."})
     assert sent[2].startswith("Alice commented on Prorate › Intent: Why?")
     assert sent[3].startswith("Alice approved Prorate v1: Fine.")
@@ -827,3 +830,124 @@ def test_resigning_keeps_the_first_signer_and_does_not_notify(client, monkeypatc
     assert sent == []
     g = api_report(client)
     assert (g["status"], g["signed_by"]) == ("approved", "Signer")
+
+
+BLOCKING_COPY = "Resolve the open blocking threads first, or mark them non-blocking."
+
+
+def _open_thread(client, blocking=None):
+    client.cookies.set("vf_id", "alice000")
+    client.cookies.set("vf_name", "Alice")
+    data = {"version": 1, "section": "Intent", "body": "Why?"}
+    if blocking is not None:
+        data["blocking"] = blocking
+    client.post("/r/prorate/comments", data=data)
+    client.cookies.set("vf_id", "bob00000")
+    client.cookies.set("vf_name", "Bob")
+    return api_threads(client)[-1]["id"]
+
+
+def _approve(client):
+    return client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
+
+
+def test_approve_refused_while_blocking_thread_open_and_allowed_after_resolve(client):
+    push(client)
+    sign(client)
+    cid = _open_thread(client)
+    refused = _approve(client)
+    assert f'<p class="error" role="alert">{BLOCKING_COPY}</p>' in refused.text
+    assert api_report(client)["verdicts"] == []
+
+    client.post(f"/r/prorate/comments/{cid}/resolve")
+    assert "You approved v1" in _approve(client).text
+
+    client.post(f"/r/prorate/comments/{cid}/reply", data={"version": 1, "body": "Still wrong."})
+    assert BLOCKING_COPY in _approve(client).text
+
+
+def test_approve_allowed_after_marking_thread_non_blocking(client):
+    push(client)
+    sign(client)
+    cid = _open_thread(client)
+    r = client.post(f"/r/prorate/comments/{cid}/blocking", data={"blocking": "0"})
+    assert r.status_code == 200
+    assert f'id="vf_t{cid}"' in r.text and 'class="badge tag-suggestion">Suggestion' in r.text
+    assert "Mark blocking" in r.text and 'id="vf_sidebar"' in r.text
+    assert 'id="vf_verdict"' in r.text and r.text.count('hx-swap-oob="true"') >= 2
+    assert "0 blocking · 1 suggestion" in r.text
+    assert api_threads(client)[0]["blocking"] is False
+    assert "You approved v1" in _approve(client).text
+
+    back = client.post(f"/r/prorate/comments/{cid}/blocking", data={"blocking": "1"})
+    assert 'class="badge tag-blocking">Blocking' in back.text and "Mark non-blocking" in back.text
+    assert api_threads(client)[0]["blocking"] is True
+
+
+def test_comment_form_non_blocking_checkbox_and_sidebar_counts(client):
+    push(client)
+    page = client.get("/r/prorate")
+    assert 'name="blocking" value="0"' in page.text and "Non-blocking (suggestion)" in page.text
+    _open_thread(client)
+    _open_thread(client, blocking="0")
+    _open_thread(client, blocking="0")
+    threads = api_threads(client)
+    assert [t["blocking"] for t in threads] == [True, False, False]
+    page = client.get("/r/prorate")
+    assert "1 blocking · 2 suggestions" in page.text and "3 open threads" in page.text
+    assert page.text.count('class="badge tag-suggestion"') == 2
+    client.post(f"/r/prorate/comments/{threads[0]['id']}/resolve")
+    assert "0 blocking · 2 suggestions" in client.get("/r/prorate").text
+
+
+def test_request_changes_refused_with_only_own_non_blocking_thread(client):
+    push(client)
+    sign(client)
+    client.cookies.set("vf_name", "Alice")
+    client.post(
+        "/r/prorate/comments",
+        data={"version": 1, "section": "Intent", "body": "Nit.", "blocking": "0"},
+    )
+    r = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "request_changes"})
+    assert REFUSED_COPY in r.text
+    assert api_report(client)["verdicts"] == []
+
+
+def test_blocking_toggle_root_only_and_needs_name(client):
+    push(client)
+    cid = _open_thread(client)
+    reply = client.post(f"/r/prorate/comments/{cid}/reply", data={"version": 1, "body": "Hm."})
+    assert reply.status_code == 200
+    rid = api_threads(client)[0]["replies"][0]["id"]
+    assert (
+        client.post(f"/r/prorate/comments/{rid}/blocking", data={"blocking": "0"}).status_code
+        == 404
+    )
+    assert (
+        client.post("/r/prorate/comments/999/blocking", data={"blocking": "0"}).status_code == 404
+    )
+    assert (
+        client.post(f"/r/prorate/comments/{cid}/blocking", data={"blocking": "x"}).status_code
+        == 422
+    )
+
+    client.cookies.delete("vf_name")
+    r = client.post(
+        f"/r/prorate/comments/{cid}/blocking",
+        data={"blocking": "0"},
+        headers={"HX-Request": "true"},
+    )
+    assert 'class="name-prompt"' in r.text and r.headers["HX-Retarget"] == f"#vf_t{cid}"
+    assert api_threads(client)[0]["blocking"] is True
+
+
+def test_api_non_blocking_thread_shows_suggestion_tag(client):
+    push(client)
+    client.post(
+        "/api/reports/prorate/comments",
+        json={"body": "Consider renaming.", "blocking": False},
+        headers=H,
+    )
+    page = client.get("/r/prorate").text
+    assert 'class="badge tag-suggestion">Suggestion' in page
+    assert 'class="badge tag-blocking"' not in page

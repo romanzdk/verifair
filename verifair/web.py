@@ -36,6 +36,7 @@ TABS = ("unsigned", "awaiting_review", "changes_requested", "approved")
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
+BLOCKED = "Resolve the open blocking threads first, or mark them non-blocking."
 Body = Annotated[str, Form(max_length=20000)]
 Anchor = Annotated[str, Form(max_length=2000)]
 
@@ -171,6 +172,7 @@ def report_context(
         "threads": threads,
         "threads_by_section": threads_by_section(threads),
         "open_count": len(open_threads),
+        "blocking_count": sum(t.blocking for t in open_threads),
         "open_by_section": Counter(t.section_slug for t in open_threads),
         "reviewers": rules.reviewers(comments, verdicts),
         "versions": db.list_versions(conn, id)[::-1],
@@ -180,13 +182,18 @@ def report_context(
     }
 
 
-def _thread_response(request, conn, report, user_id, comment_id, reset_form=False):
+def _thread_response(
+    request, conn, report, user_id, comment_id, reset_form=False, with_verdict=False
+):
     ctx = report_context(conn, report, db.latest_version(conn, report["id"]), user_id)
     ctx["thread"] = next(
         t for t in ctx["threads"] if comment_id in (t.root["id"], *(r["id"] for r in t.replies))
     )
     ctx["oob"] = True
     names = ["_thread.html", "_sidebar.html"]
+    if with_verdict:
+        ctx["verdict_oob"] = True
+        names.append("_verdict.html")
     section = next((s for s in ctx["sections"] if s.slug == ctx["thread"].section_slug), None)
     if reset_form and section:
         ctx["s"] = section
@@ -264,6 +271,7 @@ def post_comment(
     section: Anchor,
     body: Body,
     quote: Annotated[str | None, Form(max_length=2000)] = None,
+    blocking: Annotated[Literal["0", "1"], Form()] = "1",
 ):
     report = _require_report(conn, id)
     body = _require_body(body)
@@ -281,6 +289,7 @@ def post_comment(
             body=body,
             section=section,
             quote=quote or None,
+            blocking=blocking == "1",
         )
     except db.StaleVersion as stale:
         return _stale(request, id, stale.latest)
@@ -346,6 +355,23 @@ def reopen(id: str, cid: int, request: Request, conn: Conn, user: User):
     return _thread_response(request, conn, report, user[0], cid)
 
 
+@router.post("/r/{id}/comments/{cid}/blocking")
+def set_blocking(
+    id: str,
+    cid: int,
+    request: Request,
+    conn: Conn,
+    user: User,
+    blocking: Annotated[Literal["0", "1"], Form()],
+):
+    report = _require_report(conn, id)
+    if not user[1]:
+        return _name_prompt(request, f"/r/{id}", f"#vf_t{cid}")
+    if not db.set_blocking(conn, id, cid, blocking == "1"):
+        raise HTTPException(404, "comment not found")
+    return _thread_response(request, conn, report, user[0], cid, with_verdict=True)
+
+
 @router.post("/r/{id}/verdict")
 def post_verdict(
     id: str,
@@ -370,6 +396,8 @@ def post_verdict(
         error = UNSIGNED
     elif signature["signer_id"] == user_id:
         error = SELF_REVIEW
+    elif verdict == "approve" and not rules.can_approve(ctx["threads"]):
+        error = BLOCKED
     elif verdict == "request_changes" and not rules.can_request_changes(
         ctx["threads"], user_id, summary
     ):

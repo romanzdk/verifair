@@ -89,7 +89,9 @@ textarea { resize: vertical; }
 .b-changes_requested, .r-high { background: var(--destructive-surface); color: var(--destructive); }
 .b-approved { background: var(--success-surface); color: var(--success-foreground); }
 .r-medium { background: var(--warning-surface); color: var(--warning-foreground); }
-.r-low, .b-stale, .b-unsigned { background: var(--secondary); color: var(--muted-foreground); }
+.r-low, .b-stale, .b-unsigned, .tag-suggestion { background: var(--secondary); color: var(--muted-foreground); }
+.tag-blocking { background: var(--warning-surface); color: var(--warning-foreground); }
+.cform .nb { display: block; font-size: 12px; color: var(--muted-foreground); margin: 4px 0; }
 
 .body { display: grid; grid-template-columns: minmax(0, 1fr) 220px; max-width: 1180px; }
 .main { padding: 18px 20px 0; border-right: 1px solid var(--border); min-width: 0; }

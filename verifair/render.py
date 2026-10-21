@@ -27,6 +27,7 @@ class Thread:
     section_slug: str | None
     found: bool
     stale: bool
+    blocking: bool
 
 
 class _TextExtractor(HTMLParser):
@@ -113,6 +114,7 @@ def build_threads(
                 section_slug=section.slug if section else GENERAL if general else None,
                 found=found,
                 stale=root["version"] != current_version,
+                blocking=bool(root["blocking"]),
             )
         )
     return threads

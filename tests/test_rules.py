@@ -2,7 +2,13 @@ import pytest
 
 from verifair.db import add_comment, add_verdict, connect, init_schema, push_report, resolve_thread
 from verifair.render import build_threads
-from verifair.rules import can_request_changes, compute_status, latest_verdicts, reviewers
+from verifair.rules import (
+    can_approve,
+    can_request_changes,
+    compute_status,
+    latest_verdicts,
+    reviewers,
+)
 
 
 @pytest.fixture
@@ -25,7 +31,7 @@ def _verdict(conn, reviewer_id, verdict, version=1, name=None):
     )
 
 
-def _comment(conn, author_id, name=None, parent_id=None):
+def _comment(conn, author_id, name=None, parent_id=None, blocking=True):
     return add_comment(
         conn,
         report_id="r",
@@ -34,6 +40,7 @@ def _comment(conn, author_id, name=None, parent_id=None):
         author_name=name or author_id.title(),
         body="hi",
         parent_id=parent_id,
+        blocking=blocking,
     )
 
 
@@ -150,3 +157,20 @@ def test_unsigned_overrides_verdicts(conn):
 def test_signed_is_required():
     with pytest.raises(TypeError):
         compute_status([], 1)
+
+
+def test_can_request_changes_ignores_own_non_blocking_thread(conn):
+    _comment(conn, "alice", blocking=False)
+    assert not can_request_changes(_threads(conn), "alice", "")
+
+
+def test_can_approve_needs_no_open_blocking_thread(conn):
+    assert can_approve(_threads(conn))
+    _comment(conn, "bob", blocking=False)
+    assert can_approve(_threads(conn))
+    root = _comment(conn, "bob")
+    assert not can_approve(_threads(conn))
+    resolve_thread(conn, "r", root["id"])
+    assert can_approve(_threads(conn))
+    _comment(conn, "alice", parent_id=root["id"])
+    assert not can_approve(_threads(conn))
