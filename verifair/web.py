@@ -135,8 +135,13 @@ def _links(report: sqlite3.Row) -> list[tuple[str, str]]:
 
 
 def _status(conn: sqlite3.Connection, id: str, version: int) -> str:
-    signed = db.get_signature(conn, id, version) is not None
-    return rules.compute_status(db.list_verdicts(conn, id), version, signed=signed)
+    signature = db.get_signature(conn, id, version)
+    return rules.compute_status(
+        db.list_verdicts(conn, id),
+        version,
+        signed=signature is not None,
+        signer_id=signature["signer_id"] if signature else None,
+    )
 
 
 def _sign_refusal(request: Request, report: sqlite3.Row, user_id: str) -> str | None:
@@ -166,7 +171,12 @@ def report_context(
         "version_date": shown["created_at"],
         "current_version": current,
         "is_current": version == current,
-        "status": rules.compute_status(verdicts, current, signed=signature is not None),
+        "status": rules.compute_status(
+            verdicts,
+            current,
+            signed=signature is not None,
+            signer_id=signature["signer_id"] if signature else None,
+        ),
         "signature": signature,
         "sections": sections,
         "threads": threads,
@@ -182,18 +192,14 @@ def report_context(
     }
 
 
-def _thread_response(
-    request, conn, report, user_id, comment_id, reset_form=False, with_verdict=False
-):
-    ctx = report_context(conn, report, db.latest_version(conn, report["id"]), user_id)
+def _thread_response(request, conn, report, user_id, comment_id, reset_form=False, version=None):
+    shown = version if version is not None else db.latest_version(conn, report["id"])
+    ctx = report_context(conn, report, shown, user_id)
     ctx["thread"] = next(
         t for t in ctx["threads"] if comment_id in (t.root["id"], *(r["id"] for r in t.replies))
     )
     ctx["oob"] = True
     names = ["_thread.html", "_sidebar.html"]
-    if with_verdict:
-        ctx["verdict_oob"] = True
-        names.append("_verdict.html")
     section = next((s for s in ctx["sections"] if s.slug == ctx["thread"].section_slug), None)
     if reset_form and section:
         ctx["s"] = section
@@ -366,14 +372,19 @@ def set_blocking(
     request: Request,
     conn: Conn,
     user: User,
+    version: Annotated[int, Form()],
     blocking: Annotated[Literal["0", "1"], Form()],
 ):
     report = _require_report(conn, id)
     if not user[1]:
         return _name_prompt(request, f"/r/{id}", f"#vf_t{cid}")
-    if not db.set_blocking(conn, id, cid, blocking == "1"):
+    try:
+        changed = db.set_blocking(conn, id, cid, blocking == "1", expected_version=version)
+    except db.StaleVersion as stale:
+        return _stale(request, id, stale.latest)
+    if not changed:
         raise HTTPException(404, "comment not found")
-    return _thread_response(request, conn, report, user[0], cid, with_verdict=True)
+    return _thread_response(request, conn, report, user[0], cid, version=version)
 
 
 @router.post("/r/{id}/verdict")
@@ -391,25 +402,22 @@ def post_verdict(
     user_id, name = user
     if not name:
         return _name_prompt(request, f"/r/{id}")
-    latest = db.latest_version(conn, id)
-    if version != latest:
-        return _stale(request, id, latest)
-    ctx = report_context(conn, report, version, user_id)
-    signature = ctx["signature"]
-    if signature is None:
-        error = UNSIGNED
-    elif signature["signer_id"] == user_id:
-        error = SELF_REVIEW
-    elif verdict == "approve" and not rules.can_approve(ctx["threads"]):
-        error = BLOCKED
-    elif verdict == "request_changes" and not rules.can_request_changes(
-        ctx["threads"], user_id, summary
-    ):
-        error = REFUSED
-    else:
-        error = None
-    if error:
-        return _partial(request, ["_verdict.html"], ctx | {"error": error, "summary": summary})
+
+    def validate() -> str | None:
+        signature = db.get_signature(conn, id, version)
+        if signature is None:
+            return UNSIGNED
+        if signature["signer_id"] == user_id:
+            return SELF_REVIEW
+        threads = build_threads(db.list_comments(conn, id), [], version)
+        if verdict == "approve" and not rules.can_approve(threads):
+            return BLOCKED
+        if verdict == "request_changes" and not rules.can_request_changes(
+            threads, user_id, summary
+        ):
+            return REFUSED
+        return None
+
     try:
         row = db.add_verdict(
             conn,
@@ -420,9 +428,15 @@ def post_verdict(
             reviewer_name=name,
             verdict=verdict,
             summary=summary.strip(),
+            validate=validate,
         )
     except db.StaleVersion as stale:
         return _stale(request, id, stale.latest)
+    except db.VerdictRefused as refused:
+        ctx = report_context(conn, report, version, user_id)
+        return _partial(
+            request, ["_verdict.html"], ctx | {"error": str(refused), "summary": summary}
+        )
     settings = request.app.state.settings
     background.add_task(notify.send, settings, notify.verdict_text(report, row, settings.base_url))
     ctx = report_context(conn, report, version, user_id) | {"oob": True}

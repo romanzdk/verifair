@@ -35,10 +35,16 @@ def latest_verdicts(verdicts: list[sqlite3.Row], version: int) -> dict[str, sqli
     return latest
 
 
-def compute_status(verdicts: list[sqlite3.Row], current_version: int, signed: bool) -> str:
+def compute_status(
+    verdicts: list[sqlite3.Row], current_version: int, signed: bool, signer_id: str | None = None
+) -> str:
     if not signed:
         return "unsigned"
-    kinds = {row["verdict"] for row in latest_verdicts(verdicts, current_version).values()}
+    kinds = {
+        row["verdict"]
+        for reviewer_id, row in latest_verdicts(verdicts, current_version).items()
+        if reviewer_id != signer_id
+    }
     if "request_changes" in kinds:
         return "changes_requested"
     if "approve" in kinds:

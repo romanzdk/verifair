@@ -870,16 +870,16 @@ def test_approve_allowed_after_marking_thread_non_blocking(client):
     push(client)
     sign(client)
     cid = _open_thread(client)
-    r = client.post(f"/r/prorate/comments/{cid}/blocking", data={"blocking": "0"})
+    r = client.post(f"/r/prorate/comments/{cid}/blocking", data={"version": 1, "blocking": "0"})
     assert r.status_code == 200
     assert f'id="vf_t{cid}"' in r.text and 'class="badge tag-suggestion">Suggestion' in r.text
     assert "Mark blocking" in r.text and 'id="vf_sidebar"' in r.text
-    assert 'id="vf_verdict"' in r.text and r.text.count('hx-swap-oob="true"') >= 2
+    assert 'id="vf_verdict"' not in r.text and r.text.count('hx-swap-oob="true"') >= 2
     assert "0 blocking · 1 suggestion" in r.text
     assert api_threads(client)[0]["blocking"] is False
     assert "You approved v1" in _approve(client).text
 
-    back = client.post(f"/r/prorate/comments/{cid}/blocking", data={"blocking": "1"})
+    back = client.post(f"/r/prorate/comments/{cid}/blocking", data={"version": 1, "blocking": "1"})
     assert 'class="badge tag-blocking">Blocking' in back.text and "Mark non-blocking" in back.text
     assert api_threads(client)[0]["blocking"] is True
 
@@ -920,21 +920,28 @@ def test_blocking_toggle_root_only_and_needs_name(client):
     assert reply.status_code == 200
     rid = api_threads(client)[0]["replies"][0]["id"]
     assert (
-        client.post(f"/r/prorate/comments/{rid}/blocking", data={"blocking": "0"}).status_code
+        client.post(
+            f"/r/prorate/comments/{rid}/blocking", data={"version": 1, "blocking": "0"}
+        ).status_code
         == 404
     )
     assert (
-        client.post("/r/prorate/comments/999/blocking", data={"blocking": "0"}).status_code == 404
+        client.post(
+            "/r/prorate/comments/999/blocking", data={"version": 1, "blocking": "0"}
+        ).status_code
+        == 404
     )
     assert (
-        client.post(f"/r/prorate/comments/{cid}/blocking", data={"blocking": "x"}).status_code
+        client.post(
+            f"/r/prorate/comments/{cid}/blocking", data={"version": 1, "blocking": "x"}
+        ).status_code
         == 422
     )
 
     client.cookies.delete("vf_name")
     r = client.post(
         f"/r/prorate/comments/{cid}/blocking",
-        data={"blocking": "0"},
+        data={"version": 1, "blocking": "0"},
         headers={"HX-Request": "true"},
     )
     assert 'class="name-prompt"' in r.text and r.headers["HX-Retarget"] == f"#vf_t{cid}"
@@ -976,3 +983,178 @@ def test_moved_thread_shows_where_it_came_from(client):
     page = client.get("/r/prorate").text
     assert 'moved from "Intent"' in page and 'data-match-start="0"' in page
     assert 'data-found="true" data-section-slug="goal"' in page
+
+
+@pytest.mark.parametrize("mutation", ["comment", "reopen", "blocking"])
+def test_approval_rechecks_blockers_committed_before_insert(
+    client, settings, monkeypatch, mutation
+):
+    from contextlib import closing
+
+    from verifair import db
+
+    push(client)
+    sign(client)
+    cid = _open_thread(client, blocking="0" if mutation == "blocking" else "1")
+    if mutation != "blocking":
+        client.post(f"/r/prorate/comments/{cid}/resolve")
+    original = db.add_verdict
+
+    def interleave(conn, **kwargs):
+        with closing(db.connect(settings.db_path)) as other:
+            if mutation == "comment":
+                db.add_comment(
+                    other,
+                    report_id="prorate",
+                    version=1,
+                    author_id="carol000",
+                    author_name="Carol",
+                    body="A newly committed blocker",
+                )
+            elif mutation == "reopen":
+                db.reopen_thread(other, "prorate", cid)
+            else:
+                db.set_blocking(other, "prorate", cid, True)
+        return original(conn, **kwargs)
+
+    monkeypatch.setattr(db, "add_verdict", interleave)
+    response = client.post(
+        "/r/prorate/verdict",
+        data={"version": 1, "verdict": "approve", "summary": "Keep the race draft"},
+    )
+    assert BLOCKING_COPY in response.text
+    assert "Keep the race draft</textarea>" in response.text
+    assert api_report(client)["verdicts"] == []
+    assert any(t["blocking"] and not t["resolved"] for t in api_threads(client))
+
+
+def test_approval_holds_write_lock_during_validation(client, settings, monkeypatch):
+    import sqlite3
+    from contextlib import closing
+
+    from verifair import db, rules
+
+    push(client)
+    sign(client)
+    client.cookies.set("vf_name", "Bob")
+    original = rules.can_approve
+    attempted = []
+
+    def try_concurrent_writer(threads):
+        with closing(db.connect(settings.db_path)) as other:
+            other.execute("PRAGMA busy_timeout=0")
+            try:
+                db.add_comment(
+                    other,
+                    report_id="prorate",
+                    version=1,
+                    author_id="carol000",
+                    author_name="Carol",
+                    body="Concurrent blocker",
+                )
+            except sqlite3.OperationalError as error:
+                assert "locked" in str(error)
+                attempted.append("locked")
+            else:
+                attempted.append("committed")
+        return original(threads)
+
+    monkeypatch.setattr(rules, "can_approve", try_concurrent_writer)
+    assert "You approved v1" in _approve(client).text
+    assert attempted == ["locked"]
+    assert api_threads(client) == []
+
+
+def test_request_changes_rechecks_own_thread_before_insert(client, settings, monkeypatch):
+    from contextlib import closing
+
+    from verifair import db
+
+    push(client)
+    sign(client)
+    cid = _open_thread(client)
+    client.cookies.set("vf_id", "alice000")
+    client.cookies.set("vf_name", "Alice")
+    original = db.add_verdict
+
+    def interleave(conn, **kwargs):
+        with closing(db.connect(settings.db_path)) as other:
+            db.resolve_thread(other, "prorate", cid)
+        return original(conn, **kwargs)
+
+    monkeypatch.setattr(db, "add_verdict", interleave)
+    response = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "request_changes"})
+    assert REFUSED_COPY in response.text
+    assert api_report(client)["verdicts"] == []
+
+
+def test_stale_blocking_toggle_keeps_verdict_bound_to_viewed_version(client):
+    push(client)
+    sign(client)
+    cid = _open_thread(client)
+    page = client.get("/r/prorate").text
+    assert 'name="version" value="1"' in page
+    push(client, id="prorate", body="## Intent\nUnread second version")
+    sign(client, version=2)
+    client.cookies.set("vf_name", "Bob")
+    response = client.post(
+        f"/r/prorate/comments/{cid}/blocking",
+        data={"version": 1, "blocking": "0"},
+        headers={"HX-Trigger": f"vf_blocking_{cid}"},
+    )
+    assert STALE_COPY in response.text
+    assert 'id="vf_verdict"' not in response.text
+    assert 'name="version" value="2"' not in response.text
+    assert api_threads(client)[0]["blocking"] is True
+    assert STALE_COPY in _approve(client).text
+    assert api_report(client)["verdicts"] == []
+    assert 'hx-vals=\'{"blocking": "0", "version": "1"}\'' in page
+
+
+def test_blocking_toggle_checks_version_inside_write_transaction(client, settings, monkeypatch):
+    from contextlib import closing
+
+    from verifair import db
+
+    push(client)
+    cid = _open_thread(client)
+    original = db.set_blocking
+
+    def interleave(conn, *args, **kwargs):
+        with closing(db.connect(settings.db_path)) as other:
+            db.push_report(
+                other,
+                project="billing-service",
+                title="Prorate",
+                risk="high",
+                body="## Intent\nUnread second version",
+                id="prorate",
+            )
+        return original(conn, *args, **kwargs)
+
+    monkeypatch.setattr(db, "set_blocking", interleave)
+    response = client.post(
+        f"/r/prorate/comments/{cid}/blocking", data={"version": 1, "blocking": "0"}
+    )
+    assert STALE_COPY in response.text
+    assert api_threads(client)[0]["blocking"] is True
+    assert 'id="vf_verdict"' not in response.text
+
+
+def test_blocking_toggle_preserves_draft_verdict_form(client):
+    push(client)
+    sign(client)
+    cid = _open_thread(client)
+    rejected = client.post(
+        "/r/prorate/verdict",
+        data={"version": 1, "verdict": "approve", "summary": "Keep this unsent draft"},
+    )
+    assert "Keep this unsent draft</textarea>" in rejected.text
+    response = client.post(
+        f"/r/prorate/comments/{cid}/blocking", data={"version": 1, "blocking": "0"}
+    )
+    assert response.status_code == 200
+    assert 'id="vf_sidebar"' in response.text
+    assert 'id="vf_verdict"' not in response.text
+    assert 'name="summary"' not in response.text
+    assert "You approved v1" in _approve(client).text

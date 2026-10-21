@@ -357,6 +357,59 @@ def test_push_with_all_required_sections_ok(strict_client):
     assert push(strict_client, body=body).status_code == 201
 
 
+def test_required_heading_names_follow_markdown_closing_hashes(strict_client):
+    body = "  ## Verification ###\na\n\n## Rollback #####\nb\n\n## Security impact #\nc"
+    response = push(strict_client, body=body)
+    assert response.status_code == 201
+    page = strict_client.get("/r/prorate").text
+    assert 'data-section="Verification"' in page
+    assert 'data-section="Rollback"' in page
+    assert 'data-section="Security impact"' in page
+
+
+@pytest.mark.parametrize("fence", ["  ```", "   ~~~~", "```markdown"])
+def test_required_headings_inside_markdown_fences_do_not_count(strict_client, fence):
+    closer = "~~~" if "~" in fence else "```"
+    body = f"{fence}\n## Verification\na\n## Rollback\nb\n## Security impact\nc\n{closer}"
+    response = push(strict_client, body=body)
+    assert response.status_code == 422
+    assert response.json()["sections"] == ["Verification", "Rollback", "Security impact"]
+
+
+@pytest.mark.parametrize("required", ["Intro", "Report"])
+def test_synthetic_ui_sections_do_not_satisfy_required_headings(settings, required):
+    from dataclasses import replace
+
+    from fastapi.testclient import TestClient
+
+    from verifair.app import create_app
+
+    client = TestClient(create_app(replace(settings, required_sections=(required,))))
+    body = "preamble\n\n## Other\ntext" if required == "Intro" else "just text"
+    response = push(client, body=body)
+    assert response.status_code == 422
+    assert response.json()["sections"] == [required]
+    assert push(client, body=f"## {required}\nreal heading").status_code == 201
+
+
+@pytest.mark.parametrize("initial", [True, False])
+def test_existing_replies_inherit_live_root_type(client, settings, initial):
+    from contextlib import closing
+
+    push(client)
+    root = _comment(client, blocking=initial).json()
+    reply = _comment(client, parent_id=root["id"]).json()
+    nested = _comment(client, parent_id=reply["id"]).json()
+    with closing(db.connect(settings.db_path)) as conn:
+        db.set_blocking(conn, "prorate", root["id"], not initial)
+    [thread] = client.get("/api/reports/prorate/comments", headers=H).json()["threads"]
+    assert thread["blocking"] is not initial
+    assert [r["id"] for r in thread["replies"]] == [reply["id"], nested["id"]]
+    assert all(r["blocking"] is not initial for r in thread["replies"])
+    later = _comment(client, parent_id=nested["id"]).json()
+    assert later["blocking"] is not initial
+
+
 def test_empty_required_sections_disables_the_check(client):
     assert push(client, body="no headings at all").status_code == 201
 

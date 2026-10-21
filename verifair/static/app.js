@@ -21,9 +21,10 @@ function context(section, range, quote) {
   before.setStart(content, 0);
   before.setEnd(range.startContainer, range.startOffset);
   const lead = range.toString().match(/^\s*/)[0];
-  const at = collapse(before.toString() + lead).trimStart().length;
-  const end = at + collapse(quote).length;
-  return [text.slice(Math.max(0, at - CONTEXT), at), text.slice(end, end + CONTEXT)];
+  const at = Array.from(collapse(before.toString() + lead).trimStart()).length;
+  const end = at + Array.from(collapse(quote)).length;
+  const chars = Array.from(text);
+  return [chars.slice(Math.max(0, at - CONTEXT), at).join(""), chars.slice(end, end + CONTEXT).join("")];
 }
 
 function openForm(section, quote, range) {
@@ -77,33 +78,38 @@ document.addEventListener("click", (event) => {
   if (cancel) cancel.closest("form").hidden = true;
 });
 
-// Mirrors render.normalize on the server: text nodes joined, whitespace runs collapsed, so
-// offsets line up with the server's match_start.
 function indexText(root) {
   const chars = [];
   const points = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode;
-    for (let i = 0; i < node.data.length; i++) {
-      let ch = node.data[i];
+    for (let i = 0; i < node.data.length;) {
+      let ch = String.fromCodePoint(node.data.codePointAt(i));
+      const end = i + ch.length;
+      const start = i;
+      i = end;
       if (/\s/.test(ch)) {
         if (!chars.length || chars[chars.length - 1] === " ") continue;
         ch = " ";
       }
       chars.push(ch);
-      points.push([node, i]);
+      points.push([node, start, end]);
     }
   }
-  return { text: chars.join(""), points };
+  if (chars[chars.length - 1] === " ") {
+    chars.pop();
+    points.pop();
+  }
+  return { text: chars.join(""), chars, points };
 }
 
 // The server may have matched with whitespace ignored (e.g. across table cells), so the quote is
 // compared to the text at matchStart without spaces.
 function lastIndexAt(text, at, quote) {
-  const bare = quote.replace(/\s/g, "");
+  const bare = Array.from(quote.replace(/\s/g, ""));
   let seen = 0;
-  for (let i = at; bare && i < text.length; i++) {
+  for (let i = at; bare.length && i < text.length; i++) {
     if (text[i] === " ") continue;
     if (text[i] !== bare[seen]) return -1;
     if (++seen === bare.length) return i;
@@ -114,19 +120,20 @@ function lastIndexAt(text, at, quote) {
 function findRange(root, quote, matchStart) {
   const needle = collapse(quote).trim();
   if (!needle) return null;
-  const { text, points } = indexText(root);
+  const { text, chars, points } = indexText(root);
   let at = matchStart === undefined ? -1 : Number(matchStart);
-  let last = at >= 0 ? lastIndexAt(text, at, needle) : -1;
+  let last = at >= 0 ? lastIndexAt(chars, at, needle) : -1;
   if (last < 0) {
-    at = text.indexOf(needle);
-    if (at < 0) return null;
-    last = at + needle.length - 1;
+    const offset = text.indexOf(needle);
+    if (offset < 0) return null;
+    at = Array.from(text.slice(0, offset)).length;
+    last = at + Array.from(needle).length - 1;
   }
   const [startNode, startOffset] = points[at];
-  const [endNode, endOffset] = points[last];
+  const [endNode, , endOffset] = points[last];
   const range = document.createRange();
   range.setStart(startNode, startOffset);
-  range.setEnd(endNode, endOffset + 1);
+  range.setEnd(endNode, endOffset);
   return range;
 }
 

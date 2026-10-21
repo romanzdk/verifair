@@ -60,6 +60,80 @@ def test_trailing_hashes_are_stripped_from_heading():
     assert split_sections("## A ##\nx")[0].heading == "A"
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "## Real\n  ```\n## Still code\n  ```\ntext",
+        "## Real\n~~~~\n## Still code\n~~~\n## More code\n~~~~\ntext",
+        "## Real\n```\n## Still code\n~~~\n## More code\n```\ntext",
+        "## Real\n    ## Indented code\n",
+    ],
+)
+def test_section_boundaries_follow_markdown_tokens(body):
+    [section] = split_sections(body)
+    assert section.heading == "Real"
+    assert "<pre><code>" in section.html
+    assert "Still code" in section.text or "Indented code" in section.text
+
+
+def test_setext_h2_is_a_real_section_boundary():
+    sections = split_sections("Intro text\n\nVerification\n------------\nevidence")
+    assert [s.heading for s in sections] == ["Intro", "Verification"]
+    assert sections[1].text == "evidence"
+
+
+def test_overlapping_anchor_stops_at_first_maximum_context_score(monkeypatch):
+    from verifair import render
+
+    calls = []
+    original = render._score
+
+    def count_score(*args):
+        calls.append(args[1])
+        return original(*args)
+
+    monkeypatch.setattr(render, "_score", count_score)
+    assert find_anchor("a" * 262_144, "a" * 2000, "a" * 64, "a" * 64) == 64
+    assert len(calls) <= 65
+
+
+def test_anchor_does_not_truncate_late_best_match_or_replace_first_tie():
+    text = "a" * 20_000 + "b" + "a" * 2000 + "c" + "b" + "a" * 2000 + "c"
+    assert find_anchor(text, "a" * 2000, "b", "c") == 20_001
+    assert find_anchor("aaaa", "aa", "x", "y") == 0
+
+
+@pytest.mark.parametrize("last", ["a", "b"])
+def test_overlapping_anchor_quote_comparisons_have_linear_bound(last):
+    class CountedQuote(str):
+        reads = 0
+
+        def __getitem__(self, index):
+            if isinstance(index, int):
+                self.reads += 1
+            return super().__getitem__(index)
+
+    text = "a" * 262_144
+    quote = CountedQuote("a" * 1999 + last)
+    expected = 63 if last == "a" else None
+    assert find_anchor(text, quote, "b" + "a" * 63, "a" * 63 + "b") == expected
+    assert 0 < quote.reads <= 4 * (len(text) + len(quote))
+
+
+def test_anchor_matches_exhaustive_best_score_and_first_tie_oracle():
+    import random
+
+    randomizer = random.Random(41)
+    for _ in range(1000):
+        text = "".join(randomizer.choices("aaab 😀", k=40))
+        quote = text[randomizer.randrange(30) :][: randomizer.randrange(1, 9)]
+        prefix = "".join(randomizer.choices("ab 😀", k=randomizer.randrange(7)))
+        suffix = "".join(randomizer.choices("ab 😀", k=randomizer.randrange(7)))
+        hits = [i for i in range(len(text)) if text.startswith(quote, i)]
+        expected = max(hits, key=lambda i: _score(text, i, quote, prefix, suffix), default=None)
+        assert find_anchor(text, quote, prefix, suffix) == expected
+
+
 def test_normalize_collapses_whitespace():
     assert normalize("  a \n\t b  ") == "a b"
 

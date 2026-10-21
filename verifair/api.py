@@ -4,6 +4,7 @@ import secrets
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
+from itertools import islice
 from time import monotonic
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
@@ -15,7 +16,14 @@ from starlette.concurrency import run_in_threadpool
 
 from verifair import db, notify
 from verifair.deps import get_conn
-from verifair.render import Section, build_threads, normalize, occurrences, split_sections
+from verifair.render import (
+    Section,
+    build_threads,
+    iter_occurrences,
+    normalize,
+    section_headings,
+    split_sections,
+)
 from verifair.rules import compute_status
 
 
@@ -131,7 +139,7 @@ def _verdict_json(row: sqlite3.Row, current: int) -> dict:
 
 @router.post("/reports", status_code=201)
 def push_report(body: ReportIn, request: Request, conn: Conn, background: BackgroundTasks):
-    headings = {s.heading for s in split_sections(body.body)}
+    headings = set(section_headings(body.body))
     missing = [s for s in request.app.state.settings.required_sections if s not in headings]
     if missing:
         return JSONResponse({"detail": "missing sections", "sections": missing}, 422)
@@ -180,7 +188,12 @@ def get_report(id: str, conn: Conn):
         "session_url": report["session_url"],
         "signed_by": signature["signer_name"] if signature else None,
         "signed_at": signature["created_at"] if signature else None,
-        "status": compute_status(verdicts, current, signed=signature is not None),
+        "status": compute_status(
+            verdicts,
+            current,
+            signed=signature is not None,
+            signer_id=signature["signer_id"] if signature else None,
+        ),
         "current_version": current,
         "versions": [
             {"version": v["version"], "created_at": v["created_at"], "commit": v["commit"]}
@@ -272,7 +285,12 @@ def get_comments(id: str, conn: Conn, open: bool = False):
         result.append(
             _comment_json(t.root)
             | anchor
-            | {"replies": [_comment_json(r, resolved) | anchor for r in t.replies]}
+            | {
+                "replies": [
+                    _comment_json(r, resolved) | anchor | {"blocking": t.blocking}
+                    for r in t.replies
+                ]
+            }
         )
     return {"threads": result}
 
@@ -296,7 +314,12 @@ def post_comment(
         quote = normalize(body.quote or "")
         if quote and not (body.prefix or body.suffix):
             same = [s for s in sections if s.heading == body.section]
-            hits = sum(len(occurrences(s.text, quote)) for s in same)
+            hits = sum(
+                1
+                for _ in islice(
+                    (start for s in same for start in iter_occurrences(s.text, quote)), 2
+                )
+            )
             if hits > 1:
                 raise HTTPException(422, "ambiguous quote")
     try:

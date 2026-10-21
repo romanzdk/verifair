@@ -400,3 +400,46 @@ def test_set_blocking_root_only(conn):
     assert set_blocking(conn, "r1", 999, False) is False
     assert set_blocking(conn, "r1", root["id"], False) is True
     assert [c["blocking"] for c in list_comments(conn, "r1")] == [0, 1]
+
+
+def test_legacy_signer_verdict_is_history_without_effective_self_approval(settings):
+    from verifair.app import create_app
+
+    with connect(settings.db_path) as old:
+        old.executescript(V1_SCHEMA)
+        old.execute(
+            "INSERT INTO reports VALUES"
+            " ('r0', 'p', 'Legacy report', 'low', NULL, '[]', 'Alice',"
+            " '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+        )
+        old.execute(
+            "INSERT INTO versions VALUES"
+            " ('r0', 1, '## Verification\nLegacy evidence', '2026-01-01T00:00:00+00:00')"
+        )
+        old.execute(
+            "INSERT INTO verdicts VALUES"
+            " (1, 'r0', 1, 'alice000', 'Alice', 'approve', 'Old approval',"
+            " '2026-01-01T00:00:00+00:00')"
+        )
+    old.close()
+    upgraded = TestClient(create_app(settings), headers={"Sec-Fetch-Site": "same-origin"})
+    headers = {"Authorization": "Bearer t"}
+    assert upgraded.get("/api/reports/r0", headers=headers).json()["status"] == "unsigned"
+    upgraded.cookies.set("vf_id", "alice000")
+    upgraded.cookies.set("vf_name", "Alice")
+    signed = upgraded.post("/r/r0/sign", data={"version": 1})
+    assert signed.status_code == 200
+    report = upgraded.get("/api/reports/r0", headers=headers).json()
+    assert report["status"] == "awaiting_review"
+    assert report["signed_by"] == "Alice"
+    assert len(report["verdicts"]) == 1
+    assert report["verdicts"][0]["summary"] == "Old approval"
+    assert 'class="badge b-awaiting_review"' in upgraded.get("/r/r0").text
+    assert "Awaiting review · 1" in upgraded.get("/p/p").text
+    assert '<span class="badge b-awaiting_review">1</span>' in upgraded.get("/").text
+    upgraded.cookies.set("vf_id", "bob00000")
+    upgraded.cookies.set("vf_name", "Bob")
+    approved = upgraded.post("/r/r0/verdict", data={"version": 1, "verdict": "approve"})
+    assert "You approved v1" in approved.text
+    report = upgraded.get("/api/reports/r0", headers=headers).json()
+    assert report["status"] == "approved" and len(report["verdicts"]) == 2

@@ -33,7 +33,7 @@
       <button class="btn">Reply</button>
     </form>
     <button type="button" class="btn" id="vf_resolve_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/resolve" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML" hx-confirm="Resolve this thread? You can reopen it later.">Resolve</button>
-    <button type="button" class="btn" id="vf_blocking_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/blocking" hx-vals='{"blocking": "{{ 0 if thread.blocking else 1 }}"}' hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">{{ "Mark non-blocking" if thread.blocking else "Mark blocking" }}</button>
+    <button type="button" class="btn" id="vf_blocking_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/blocking" hx-vals='{"blocking": "{{ 0 if thread.blocking else 1 }}", "version": "{{ version }}"}' hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">{{ "Mark non-blocking" if thread.blocking else "Mark blocking" }}</button>
   </div>
   {% endif %}
 </div>

@@ -1,11 +1,13 @@
 import re
 import sqlite3
 import unicodedata
+from collections.abc import Iterator
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from os.path import commonprefix
 
 from markdown_it import MarkdownIt
+from markdown_it.token import Token
 
 # slugify never makes "_", so this cannot collide with a section slug
 GENERAL = "vf_general"
@@ -57,35 +59,37 @@ def _html_to_text(html: str) -> str:
     return normalize("".join(extractor.parts))
 
 
-def _split_raw(body: str) -> list[tuple[str, list[str]]]:
-    parts: list[tuple[str, list[str]]] = [("Intro", [])]
-    in_fence = False
-    for line in body.splitlines():
-        if line.startswith(("```", "~~~")):
-            in_fence = not in_fence
-        if not in_fence and line.startswith("## "):
-            heading = re.sub(r"\s+##\s*$", "", line[3:].strip()).strip()
-            parts.append((heading, []))
-        else:
-            parts[-1][1].append(line)
-    if len(parts) == 1:
-        return [("Report", parts[0][1])]
-    if not "".join(parts[0][1]).strip():
-        parts.pop(0)
-    return parts
+def _headings(tokens: list[Token]) -> Iterator[tuple[int, str]]:
+    for index, token in enumerate(tokens):
+        if token.type == "heading_open" and token.tag == "h2" and token.level == 0:
+            inline = tokens[index + 1]
+            html = _md.renderer.renderInline(inline.children or [], _md.options, {})
+            yield index, _html_to_text(html)
+
+
+def section_headings(body: str) -> list[str]:
+    return [heading for _, heading in _headings(_md.parse(body))]
 
 
 def split_sections(body: str) -> list[Section]:
+    tokens = _md.parse(body)
+    headings = list(_headings(tokens))
+    parts = [("Report", tokens)]
+    if headings:
+        parts = [("Intro", tokens[: headings[0][0]])] if headings[0][0] else []
+        for number, (index, heading) in enumerate(headings):
+            end = headings[number + 1][0] if number + 1 < len(headings) else len(tokens)
+            parts.append((heading, tokens[index + 3 : end]))
     sections: list[Section] = []
     used: set[str] = set()
-    for heading, lines in _split_raw(body):
+    for heading, content in parts:
         base = slug = slugify(heading)
         n = 1
         while slug in used:
             n += 1
             slug = f"{base}-{n}"
         used.add(slug)
-        html = _md.render("\n".join(lines))
+        html = _md.renderer.render(content, _md.options, {})
         sections.append(Section(heading, slug, html, _html_to_text(html)))
     return sections
 
@@ -96,18 +100,46 @@ def _score(text: str, start: int, quote: str, prefix: str, suffix: str) -> int:
     return before + len(commonprefix([text[end : end + len(suffix)], suffix]))
 
 
+def iter_occurrences(text: str, quote: str) -> Iterator[int]:
+    if not quote:
+        yield from range(len(text) + 1)
+        return
+    failure = [0] * len(quote)
+    matched = 0
+    for index in range(1, len(quote)):
+        while matched and quote[index] != quote[matched]:
+            matched = failure[matched - 1]
+        if quote[index] == quote[matched]:
+            matched += 1
+        failure[index] = matched
+    matched = 0
+    for index, char in enumerate(text):
+        while matched and char != quote[matched]:
+            matched = failure[matched - 1]
+        if char == quote[matched]:
+            matched += 1
+        if matched == len(quote):
+            yield index - len(quote) + 1
+            matched = failure[matched - 1]
+
+
 def occurrences(text: str, quote: str) -> list[int]:
-    return [m.start() for m in re.finditer(f"(?={re.escape(quote)})", text)]
+    return list(iter_occurrences(text, quote))
 
 
 def find_anchor(
     section_text: str, quote: str, prefix: str | None, suffix: str | None
 ) -> int | None:
-    return max(
-        occurrences(section_text, quote),
-        key=lambda s: _score(section_text, s, quote, prefix or "", suffix or ""),
-        default=None,
-    )
+    prefix, suffix = prefix or "", suffix or ""
+    maximum = len(prefix) + len(suffix)
+    best, best_score = None, -1
+    for start in iter_occurrences(section_text, quote):
+        score = _score(section_text, start, quote, prefix, suffix)
+        if score > best_score:
+            best, best_score = start, score
+        if score == maximum:
+            break
+    return best
 
 
 def _squash(text: str) -> str:

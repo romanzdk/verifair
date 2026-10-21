@@ -1,7 +1,7 @@
 import json
 import logging
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
@@ -77,6 +77,10 @@ class ProjectMismatch(Exception):
 
 
 class AlreadySigned(Exception):
+    pass
+
+
+class VerdictRefused(Exception):
     pass
 
 
@@ -348,9 +352,12 @@ def add_verdict(
     verdict: str,
     summary: str = "",
     expected_version: int | None = None,
+    validate: Callable[[], str | None] | None = None,
 ) -> sqlite3.Row:
     with _write(conn):
         _check_version(conn, report_id, expected_version)
+        if validate is not None and (error := validate()):
+            raise VerdictRefused(error)
         cur = conn.execute(
             "INSERT INTO verdicts (report_id, version, reviewer_id, reviewer_name, verdict,"
             " summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -372,8 +379,16 @@ def list_verdicts(conn: sqlite3.Connection, report_id: str) -> list[sqlite3.Row]
     ).fetchall()
 
 
-def set_blocking(conn: sqlite3.Connection, report_id: str, comment_id: int, blocking: bool) -> bool:
+def set_blocking(
+    conn: sqlite3.Connection,
+    report_id: str,
+    comment_id: int,
+    blocking: bool,
+    *,
+    expected_version: int | None = None,
+) -> bool:
     with _write(conn):
+        _check_version(conn, report_id, expected_version)
         cur = conn.execute(
             "UPDATE comments SET blocking=? WHERE id=? AND report_id=? AND parent_id IS NULL",
             (int(blocking), comment_id, report_id),

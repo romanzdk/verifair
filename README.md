@@ -58,7 +58,7 @@ The commands below use the report `id` as `$ID`.
 - `ticket_url`, `session_url` and `links[].url` must start with `http://` or `https://`.
 - Optional `author` (up to 60 characters): the human who owns the report and should sign it. The default is `agent`, which means anyone with a name may sign.
 - Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
-- The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as an H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
+- The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as a top-level H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
 - Unknown JSON keys are rejected with 422.
 
 A push sends a "draft" message to Slack (if configured). The "ready for review" message is sent when the version is signed.
@@ -103,7 +103,7 @@ VERIFAIR_API_TOKEN=change-me VERIFAIR_URL=https://verifair.example.com VERIFAIR_
 }
 ```
 
-- `status` is `unsigned`, `awaiting_review`, `changes_requested` or `approved`. It is `unsigned` until someone signs `current_version`; after that it only counts verdicts on `current_version`.
+- `status` is `unsigned`, `awaiting_review`, `changes_requested` or `approved`. It is `unsigned` until someone signs `current_version`; after that it only counts verdicts on `current_version` from people other than its signer. Earlier verdicts by the signer remain in the history, including after a database upgrade.
 - `signed_by` and `signed_at` describe the signature on `current_version`, or are `null`. `agent`, `model` and `session_url` are `null` when the push did not send them.
 - `verdict` is `approve` or `request_changes`. `current` is true when the verdict was given on `current_version`.
 
@@ -238,7 +238,7 @@ An unknown section also lists the valid headings: `{"detail": "unknown section",
 
 ### Required sections
 
-A push is refused with 422 if the body lacks a required H2 heading. The list comes from `VERIFAIR_REQUIRED_SECTIONS`. The default is `Verification,Rollback,Security impact`. Set it to an empty string to turn the check off.
+A push is refused with 422 if the body lacks a required top-level H2 heading. Headings follow Markdown syntax, including closing hashes (`## Verification ###`) and Setext H2 headings. Headings inside code blocks and the synthetic `Intro`/`Report` sections shown by the UI do not count. The list comes from `VERIFAIR_REQUIRED_SECTIONS`. The default is `Verification,Rollback,Security impact`. Set it to an empty string to turn the check off.
 
 ### Provenance
 
@@ -263,6 +263,7 @@ For example `Assisted-by: claude:opus`. Agents do not add `Signed-off-by`. Only 
 
 - A new thread is blocking by default. A reviewer can tick "Non-blocking (suggestion)" when writing it, and switch a thread between blocking and non-blocking later.
 - Approve is refused while any blocking thread is open. Resolve the thread or mark it non-blocking first.
+- Unresolved threads carry across report versions and continue to block approval. `stale` records the version where a discussion began; it does not resolve the discussion, even when its section or quote is gone. Close obsolete concerns explicitly or mark them non-blocking.
 - Request changes needs a summary, or an open blocking thread of your own.
 - The sidebar counts open blocking threads and suggestions.
 
@@ -278,13 +279,20 @@ The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind
 ## Deploying
 
 - The web UI has no login. Anyone who can open it can comment and give verdicts. Run it on a private network or behind an auth proxy (SSO, basic auth). The Docker example above only listens on `127.0.0.1`.
+- HTTPS is required for browser access outside loopback, including private-network hostnames. Local development may use HTTP on `localhost`, `127.0.0.1` or `[::1]`. Put a TLS reverse proxy in front of the loopback listener for shared deployments. Ordinary HTTP hostnames can load pages but browser writes return 403 because browsers omit the required `Sec-Fetch-Site` header on those origins.
 - To identify users from an auth proxy, set `VERIFAIR_IDENTITY_HEADER` to the header the proxy adds, for example `X-Forwarded-Email` with oauth2-proxy. The header value becomes the user id and the part before `@` the display name. The name prompt goes away, and signing and approvals are tied to that identity. The proxy must strip this header from client requests, or anyone can pose as anyone. Requests without the header fall back to the name cookie, so keep the app reachable only through the proxy.
-- Set `VERIFAIR_BASE_URL` to the public URL. It is used in notification links and in the push response.
+- Set `VERIFAIR_BASE_URL` to the public HTTPS URL, for example `https://verifair.example.com`. It is used in notification links and in the push response, and enables secure cookies. Keep the browser on this origin and have the reverse proxy preserve `Sec-Fetch-Site`.
 - Serve it at the root of a domain. Sub-paths (like `/verifair/`) are not supported.
 - `/data` must be a volume on local disk. SQLite runs in WAL mode and does not work well on network file systems.
 - Back up with `sqlite3 /data/verifair.db ".backup /backup/verifair.db"`, not `cp`, which can copy a half-written file.
 - Run one replica only.
 - The image trusts `X-Forwarded-*` headers from any address. Set `FORWARDED_ALLOW_IPS` to your proxy's IP.
+
+### Upgrading an existing HTTP deployment
+
+Before upgrading a shared deployment, configure a trusted TLS certificate and an HTTPS reverse proxy for its hostname. Redirect the old HTTP URL to HTTPS, set `VERIFAIR_BASE_URL` to that HTTPS origin, and restart verifair behind the proxy with its existing database volume. Update agent URLs and bookmarked report links to HTTPS. A healthy `/healthz` response or a readable page on HTTP does not confirm that browser writes work.
+
+After restarting, open the HTTPS URL in a browser, set your name if needed, and submit a comment on a draft report to check that writes pass through the proxy. Existing non-loopback HTTP deployments need this change before the upgrade; private-network placement alone does not enable browser writes. The API continues to use its bearer token, and `/healthz` can still be checked over the internal loopback HTTP listener.
 
 ## Related projects
 
