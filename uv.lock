@@ -773,7 +773,6 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "httpx2" },
     { name = "jinja2" },
     { name = "markdown" },
     { name = "python-multipart" },
@@ -782,6 +781,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx2" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -790,7 +790,6 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.157.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "httpx2", specifier = ">=2.16.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "markdown", specifier = ">=3.11.2" },
     { name = "python-multipart", specifier = ">=0.0.32" },
@@ -799,6 +798,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx2", specifier = ">=2.16.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.17.1" },
 ]
