@@ -1,3 +1,5 @@
+import pytest
+
 H = {"Authorization": "Bearer t"}
 SAMPLE = "## Intent\nFull new price.\n\n## Edge cases\nFirst day."
 
@@ -135,3 +137,18 @@ def test_push_and_comment_notify_when_slack_configured(tmp_path, monkeypatch):
     client.post("/api/reports/prorate/comments", json={"body": "Why?", "author": "bot"}, headers=H)
     assert len(sent) == 2
     assert sent[1].startswith("bot commented on Prorate › report: Why?")
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"id": "feature/foo"}, {"id": ""}, {"id": ".."}, {"project": ""}, {"project": "  "}],
+)
+def test_push_rejects_ids_and_projects_that_are_not_url_safe(client, overrides):
+    assert push(client, **overrides).status_code == 422
+
+
+def test_push_accepts_dotted_project_and_id(client):
+    r = push(client, project="my-service.v2", id="my-service.v2_fix")
+    assert r.status_code == 201
+    assert client.get("/r/my-service.v2_fix").status_code == 200
+    assert client.get("/p/my-service.v2").status_code == 200

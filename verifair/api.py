@@ -27,12 +27,15 @@ class Link(BaseModel):
     url: str
 
 
+SLUG = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+
+
 class ReportIn(BaseModel):
-    project: str
+    project: str = Field(pattern=SLUG)
     title: str = Field(min_length=1)
     risk: Literal["low", "medium", "high"]
     body: str = Field(min_length=1)
-    id: str | None = None
+    id: str | None = Field(default=None, pattern=SLUG)
     ticket_url: str | None = None
     links: list[Link] = []
     author: str = "agent"
