@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.db
+.ruff_cache/
+.pytest_cache/
+.superpowers/
