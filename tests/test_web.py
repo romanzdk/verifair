@@ -3,7 +3,7 @@ import re
 import pytest
 
 H = {"Authorization": "Bearer t"}
-REFUSED_COPY = "Add a summary or leave at least one open comment first."
+REFUSED_COPY = "Add a summary, or start a comment thread of your own and leave it open."
 SAMPLE = "## Intent\nFull new price.\n\n## Edge cases\nChange on the first day."
 
 
@@ -34,7 +34,7 @@ def test_project_page_tabs_and_unknown_404(client):
     push(client)
     push(client, title="Retry webhooks", risk="low", ticket_url=None)
     client.cookies.set("vf_name", "Alice")
-    client.post("/r/retry-webhooks/verdict", data={"verdict": "approve"})
+    client.post("/r/retry-webhooks/verdict", data={"version": 1, "verdict": "approve"})
 
     r = client.get("/p/billing-service")
     assert r.status_code == 200
@@ -47,7 +47,11 @@ def test_project_page_tabs_and_unknown_404(client):
     assert "Retry webhooks" in everything.text and "Prorate" in everything.text
 
     assert client.get("/p/nope").status_code == 404
-    assert client.get("/p/billing-service?tab=bogus").status_code == 422
+    assert "All · 2" in r.text
+    bogus = client.get("/p/billing-service?tab=bogus")
+    assert (
+        bogus.status_code == 200 and "Prorate" in bogus.text and "Retry webhooks" not in bogus.text
+    )
 
 
 def test_report_page_renders_sections_nav_links_and_sets_id_cookie(client):
@@ -69,7 +73,7 @@ def test_report_page_renders_sections_nav_links_and_sets_id_cookie(client):
 
 def test_comment_without_name_returns_prompt_and_stores_nothing(client):
     push(client)
-    r = client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
+    r = client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     assert r.status_code == 200
     assert "Set your name" in r.text and 'action="/me"' in r.text
     assert api_threads(client) == []
@@ -80,7 +84,12 @@ def test_comment_reply_resolve_via_htmx(client):
     client.cookies.set("vf_name", "Alice")
     r = client.post(
         "/r/prorate/comments",
-        data={"section": "Edge cases", "quote": "first day", "body": "Which first day?"},
+        data={
+            "version": 1,
+            "section": "Edge cases",
+            "quote": "first day",
+            "body": "Which first day?",
+        },
     )
     assert r.status_code == 200
     [thread] = api_threads(client)
@@ -93,7 +102,9 @@ def test_comment_reply_resolve_via_htmx(client):
     assert f'id="vf_t{cid}"' in r.text and "first day" in r.text and "Which first day?" in r.text
     assert 'data-found="true"' in r.text and 'data-section-slug="edge-cases"' in r.text
 
-    reply = client.post(f"/r/prorate/comments/{cid}/reply", data={"body": "Cycle start."})
+    reply = client.post(
+        f"/r/prorate/comments/{cid}/reply", data={"version": 1, "body": "Cycle start."}
+    )
     assert "Which first day?" in reply.text and "Cycle start." in reply.text
     assert len(api_threads(client)[0]["replies"]) == 1
 
@@ -103,26 +114,35 @@ def test_comment_reply_resolve_via_htmx(client):
 
     page = client.get("/r/prorate")
     assert 'class="thread resolved"' in page.text and "0 open threads" in page.text
-    assert client.post("/r/prorate/comments/999/reply", data={"body": "x"}).status_code == 404
+    assert (
+        client.post("/r/prorate/comments/999/reply", data={"version": 1, "body": "x"}).status_code
+        == 404
+    )
     assert client.post("/r/prorate/comments/999/resolve").status_code == 404
 
 
 def test_verdict_request_changes_refused_without_summary_or_thread(client):
     push(client)
     client.cookies.set("vf_name", "Alice")
-    r = client.post("/r/prorate/verdict", data={"verdict": "request_changes", "summary": " "})
+    r = client.post(
+        "/r/prorate/verdict", data={"version": 1, "verdict": "request_changes", "summary": " "}
+    )
     assert r.status_code == 200
     assert REFUSED_COPY in r.text
     g = client.get("/api/reports/prorate", headers=H).json()
     assert (g["status"], g["verdicts"]) == ("awaiting_review", [])
-    assert client.post("/r/prorate/verdict", data={"verdict": "maybe"}).status_code == 422
+    assert (
+        client.post("/r/prorate/verdict", data={"version": 1, "verdict": "maybe"}).status_code
+        == 422
+    )
 
 
 def test_verdict_request_changes_allowed_with_summary(client):
     push(client)
     client.cookies.set("vf_name", "Alice")
     r = client.post(
-        "/r/prorate/verdict", data={"verdict": "request_changes", "summary": "Round half-up."}
+        "/r/prorate/verdict",
+        data={"version": 1, "verdict": "request_changes", "summary": "Round half-up."},
     )
     assert "You requested changes on v1" in r.text
     assert client.get("/api/reports/prorate", headers=H).json()["status"] == "changes_requested"
@@ -131,7 +151,7 @@ def test_verdict_request_changes_allowed_with_summary(client):
 def test_verdict_approve_changes_status_and_sidebar(client):
     push(client)
     client.cookies.set("vf_name", "Alice")
-    r = client.post("/r/prorate/verdict", data={"verdict": "approve"})
+    r = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
     assert r.status_code == 200
     assert "You approved v1" in r.text
     assert 'id="vf_sidebar"' in r.text and 'id="vf_status"' in r.text
@@ -156,7 +176,9 @@ def test_old_version_is_read_only(client):
 def test_comment_escapes_html(client):
     push(client)
     client.cookies.set("vf_name", "Alice")
-    r = client.post("/r/prorate/comments", data={"section": "Intent", "body": "<b>x</b>"})
+    r = client.post(
+        "/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "<b>x</b>"}
+    )
     assert "&lt;b&gt;x&lt;/b&gt;" in r.text and "<b>x</b>" not in r.text
     assert "&lt;b&gt;x&lt;/b&gt;" in client.get("/r/prorate").text
 
@@ -174,8 +196,8 @@ def test_web_posts_notify(tmp_path, monkeypatch):
     client = TestClient(create_app(settings))
     push(client)
     client.cookies.set("vf_name", "Alice")
-    client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
-    client.post("/r/prorate/verdict", data={"verdict": "approve", "summary": "Fine."})
+    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
+    client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve", "summary": "Fine."})
     assert sent[1].startswith("Alice commented on Prorate › Intent: Why?")
     assert sent[2].startswith("Alice approved Prorate v1: Fine.")
 
@@ -194,7 +216,9 @@ def test_headings_cannot_collide_with_app_ids(client):
     headings = ["Intent", "Verdict", "Sidebar", "Popover", "T1", "Cform Intent", "Threads Intent"]
     push(client, body="\n\n".join(f"## {h}\ntext" for h in headings))
     client.cookies.set("vf_name", "Alice")
-    thread = client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
+    thread = client.post(
+        "/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"}
+    )
     assert 'id="vf_t' in thread.text and 'id="vf_c' in thread.text
     r = client.get("/r/prorate")
     for slug in ["verdict", "sidebar", "popover", "t1", "cform-intent", "threads-intent"]:
@@ -206,11 +230,18 @@ def test_headings_cannot_collide_with_app_ids(client):
 def test_blank_comment_and_reply_422(client):
     push(client)
     client.cookies.set("vf_name", "Alice")
-    blank = client.post("/r/prorate/comments", data={"section": "Intent", "body": "  \n "})
+    blank = client.post(
+        "/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "  \n "}
+    )
     assert blank.status_code == 422 and api_threads(client) == []
-    client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
+    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     cid = api_threads(client)[0]["id"]
-    assert client.post(f"/r/prorate/comments/{cid}/reply", data={"body": " "}).status_code == 422
+    assert (
+        client.post(
+            f"/r/prorate/comments/{cid}/reply", data={"version": 1, "body": " "}
+        ).status_code
+        == 422
+    )
     assert api_threads(client)[0]["replies"] == []
 
 
@@ -223,7 +254,7 @@ def test_name_form_next_keeps_query(client):
 def test_comment_time_is_labelled_utc(client):
     push(client)
     client.cookies.set("vf_name", "Alice")
-    r = client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
+    r = client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     assert re.search(r'class="when">[^<]* \d\d:\d\d UTC<', r.text)
 
 
@@ -267,18 +298,18 @@ def test_request_changes_gate_counts_own_thread_carried_from_older_version(clien
     push(client)
     client.cookies.set("vf_id", "alice")
     client.cookies.set("vf_name", "Alice")
-    client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
+    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     push(client, id="prorate", body="## Intent\nChanged.")
 
     client.cookies.set("vf_id", "bob")
     client.cookies.set("vf_name", "Bob")
-    refused = client.post("/r/prorate/verdict", data={"verdict": "request_changes"})
+    refused = client.post("/r/prorate/verdict", data={"version": 2, "verdict": "request_changes"})
     assert REFUSED_COPY in refused.text
     assert client.get("/api/reports/prorate", headers=H).json()["verdicts"] == []
 
     client.cookies.set("vf_id", "alice")
     client.cookies.set("vf_name", "Alice")
-    allowed = client.post("/r/prorate/verdict", data={"verdict": "request_changes"})
+    allowed = client.post("/r/prorate/verdict", data={"version": 2, "verdict": "request_changes"})
     assert "You requested changes on v2" in allowed.text
     g = client.get("/api/reports/prorate", headers=H).json()
     assert (g["status"], g["verdicts"][0]["version"]) == ("changes_requested", 2)
@@ -288,10 +319,133 @@ def test_htmx_comment_without_name_retargets_form_and_stores_nothing(client):
     push(client)
     r = client.post(
         "/r/prorate/comments",
-        data={"section": "Intent", "body": "Why?"},
+        data={"version": 1, "section": "Intent", "body": "Why?"},
         headers={"HX-Request": "true", "HX-Trigger": "vf_cform_intent"},
     )
     assert r.headers["HX-Retarget"] == "#vf_cform_intent"
     assert r.headers["HX-Reswap"] == "outerHTML"
     assert 'class="name-prompt"' in r.text
     assert api_threads(client) == []
+
+
+STALE_COPY = "A newer version of this report was pushed. Reload to review v2."
+
+
+def test_writes_from_an_outdated_page_store_nothing(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
+    cid = api_threads(client)[0]["id"]
+    push(client, id="prorate", body="## Intent\nChanged.")
+
+    comment = client.post(
+        "/r/prorate/comments",
+        data={"version": 1, "section": "Intent", "body": "Late"},
+        headers={"HX-Request": "true", "HX-Trigger": "vf_cform_intent"},
+    )
+    assert comment.status_code == 200 and STALE_COPY in comment.text
+    assert 'href="/r/prorate"' in comment.text
+    assert comment.headers["HX-Retarget"] == "#vf_cform_intent"
+    reply = client.post(f"/r/prorate/comments/{cid}/reply", data={"version": 1, "body": "Late"})
+    assert STALE_COPY in reply.text
+    verdict = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
+    assert verdict.status_code == 200 and STALE_COPY in verdict.text
+    refused = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "request_changes"})
+    assert STALE_COPY in refused.text
+
+    [thread] = api_threads(client)
+    assert thread["replies"] == []
+    assert client.get("/api/reports/prorate", headers=H).json()["verdicts"] == []
+    assert client.post(f"/r/prorate/comments/{cid}/resolve").status_code == 200
+    assert api_threads(client)[0]["resolved"] is True
+
+
+def test_forms_carry_the_page_version(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
+    page = client.get("/r/prorate").text
+    assert page.count('<input type="hidden" name="version" value="1">') == 4
+    missing = client.post("/r/prorate/verdict", data={"verdict": "approve"})
+    assert missing.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("path", "data"),
+    [
+        ("/r/prorate/comments", {"section": "Intent", "body": "x" * 20001}),
+        ("/r/prorate/comments", {"section": "Intent", "body": "x", "quote": "q" * 2001}),
+        ("/r/prorate/comments", {"section": "s" * 2001, "body": "x"}),
+        ("/r/prorate/verdict", {"verdict": "approve", "summary": "s" * 2001}),
+    ],
+)
+def test_web_form_limits_422(client, path, data):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    assert client.post(path, data={"version": 1} | data).status_code == 422
+    assert api_threads(client) == []
+    assert client.get("/api/reports/prorate", headers=H).json()["verdicts"] == []
+
+
+def test_comment_response_resets_the_form_without_inline_js(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    r = client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
+    assert re.search(r'<form class="cform" id="vf_cform_intent" hidden hx-swap-oob="true"', r.text)
+    assert "hx-on" not in r.text and "hx-on" not in client.get("/r/prorate").text
+
+
+def test_resolve_needs_confirm_and_reply_reopens(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
+    cid = api_threads(client)[0]["id"]
+    assert 'hx-confirm="Resolve this thread?"' in client.get("/r/prorate").text
+    client.post(f"/r/prorate/comments/{cid}/resolve")
+    again = client.post(f"/r/prorate/comments/{cid}/resolve")
+    assert again.status_code == 200 and 'class="thread resolved"' in again.text
+    reopened = client.post(f"/r/prorate/comments/{cid}/reply", data={"version": 1, "body": "No."})
+    assert 'class="thread resolved"' not in reopened.text and "No." in reopened.text
+    assert api_threads(client)[0]["resolved"] is False
+
+
+def test_resolve_without_name_retargets_thread_card(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
+    cid = api_threads(client)[0]["id"]
+    client.cookies.delete("vf_name")
+    r = client.post(
+        f"/r/prorate/comments/{cid}/resolve",
+        headers={"HX-Request": "true", "HX-Trigger": f"vf_resolve_{cid}"},
+    )
+    assert r.headers["HX-Retarget"] == f"#vf_t{cid}"
+    assert api_threads(client)[0]["resolved"] is False
+
+
+def test_sidebar_marks_stale_verdicts_and_shows_summary(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve", "summary": "Fine."})
+    current = client.get("/r/prorate").text
+    assert "b-stale" not in current and "Fine." in current
+    push(client, id="prorate", body="## Intent\nChanged.")
+    page = client.get("/r/prorate").text
+    assert 'class="badge b-approved b-stale"' in page and "approved v1" in page
+    assert "Fine." in page
+    old = client.get("/r/prorate/v/1").text
+    assert ">Current: Awaiting review<" in old
+    assert ">Awaiting review<" in page and "Current: " not in page
+
+
+def test_report_page_a11y_attributes(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
+    page = client.get("/r/prorate").text
+    assert 'aria-label="Comment on Intent"' in page and 'aria-label="Comment on Edge cases"' in page
+    assert 'aria-label="Reply"' in page and 'aria-label="Summary for the author"' in page
+    assert 'aria-live="polite"' in page
+    assert 'aria-label="1 open thread"' in page
+    assert page.count('hx-disabled-elt="find button"') == 3
+    assert 'hx-disabled-elt="#vf_verdict button"' in page

@@ -1,11 +1,12 @@
 import re
 import sqlite3
+import unicodedata
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
-import markdown
+from markdown_it import MarkdownIt
 
-from verifair.db import slugify
+_md = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable("table")
 
 
 @dataclass
@@ -32,6 +33,11 @@ class _TextExtractor(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         self.parts.append(data)
+
+
+def slugify(text: str) -> str:
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60].strip("-") or "report"
 
 
 def normalize(text: str) -> str:
@@ -72,7 +78,7 @@ def split_sections(body: str) -> list[Section]:
             n += 1
             slug = f"{base}-{n}"
         used.add(slug)
-        html = markdown.markdown("\n".join(lines), extensions=["tables", "fenced_code"])
+        html = _md.render("\n".join(lines))
         sections.append(Section(heading, slug, html, _html_to_text(html)))
     return sections
 
@@ -80,26 +86,26 @@ def split_sections(body: str) -> list[Section]:
 def build_threads(
     comments: list[sqlite3.Row], sections: list[Section], current_version: int
 ) -> list[Thread]:
-    by_heading: dict[str, Section] = {}
+    by_heading: dict[str, list[Section]] = {}
     for s in sections:
-        by_heading.setdefault(s.heading, s)
+        by_heading.setdefault(s.heading, []).append(s)
     replies: dict[int, list[sqlite3.Row]] = {}
     for c in comments:
         if c["parent_id"] is not None:
             replies.setdefault(c["parent_id"], []).append(c)
     threads = []
-    for root in sorted(comments, key=lambda c: (c["created_at"], c["id"])):
+    for root in sorted(comments, key=lambda c: c["id"]):
         if root["parent_id"] is not None:
             continue
-        section = by_heading.get(root["section"])
-        quote = root["quote"]
-        found = section is not None and (not quote or normalize(quote) in normalize(section.text))
+        candidates = by_heading.get(root["section"], [])
+        quote = normalize(root["quote"] or "")
+        section = next((s for s in candidates if quote in normalize(s.text)), None)
+        found = section is not None
+        section = section or next(iter(candidates), None)
         threads.append(
             Thread(
                 root=root,
-                replies=sorted(
-                    replies.get(root["id"], []), key=lambda r: (r["created_at"], r["id"])
-                ),
+                replies=sorted(replies.get(root["id"], []), key=lambda r: r["id"]),
                 section_slug=section.slug if section else None,
                 found=found,
                 stale=root["version"] != current_version,

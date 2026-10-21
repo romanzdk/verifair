@@ -16,11 +16,12 @@
   {% endfor %}
   {% if is_current %}
   <div class="tact">
-    <form class="reply" id="vf_reply_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/reply" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">
-      <textarea name="body" required placeholder="Reply" rows="1"></textarea>
+    <form class="reply" id="vf_reply_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/reply" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML" hx-disabled-elt="find button">
+      <input type="hidden" name="version" value="{{ version }}">
+      <textarea name="body" required maxlength="20000" placeholder="Reply" aria-label="Reply" rows="1"></textarea>
       <button class="btn">Reply</button>
     </form>
-    <button type="button" class="btn" id="vf_resolve_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/resolve" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">Resolve</button>
+    <button type="button" class="btn" id="vf_resolve_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/resolve" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML" hx-confirm="Resolve this thread?">Resolve</button>
   </div>
   {% endif %}
 </div>

@@ -1,6 +1,7 @@
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Annotated
 
 import pytest
@@ -10,9 +11,10 @@ from fastapi.testclient import TestClient
 from verifair import db
 from verifair.db import (
     ProjectMismatch,
+    StaleVersion,
     add_comment,
+    add_verdict,
     connect,
-    get_conn,
     get_report,
     init_schema,
     list_comments,
@@ -22,6 +24,7 @@ from verifair.db import (
     push_report,
     resolve_thread,
 )
+from verifair.deps import get_conn
 
 
 @pytest.fixture
@@ -82,10 +85,89 @@ def test_reply_inherits_anchor_and_resolve_root_only(conn):
     )
     assert (reply["section"], reply["quote"]) == ("Intent", "full new price")
     assert len(list_comments(conn, "r1", open_only=True)) == 2
-    assert resolve_thread(conn, "r1", reply["id"]) is False
-    assert resolve_thread(conn, "r1", root["id"]) is True
+    assert resolve_thread(conn, "r1", reply["id"]) == root["id"]
     assert list_comments(conn, "r1", open_only=True) == []
     assert len(list_comments(conn, "r1")) == 2
+    assert resolve_thread(conn, "r1", 999) is None
+
+
+def _resolved_at(conn, id):
+    return conn.execute("SELECT resolved_at FROM comments WHERE id=?", (id,)).fetchone()[0]
+
+
+def test_resolve_twice_keeps_first_time_and_reply_reopens(conn):
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    kw = {"report_id": "r1", "version": 1, "author_id": "u1", "author_name": "Alice"}
+    root = add_comment(conn, body="?", **kw)
+    resolve_thread(conn, "r1", root["id"])
+    conn.execute("UPDATE comments SET resolved_at='2000-01-01' WHERE id=?", (root["id"],))
+    assert resolve_thread(conn, "r1", root["id"]) == root["id"]
+    assert _resolved_at(conn, root["id"]) == "2000-01-01"
+    add_comment(conn, body="still wrong", parent_id=root["id"], **kw)
+    assert _resolved_at(conn, root["id"]) is None
+
+
+def test_list_comments_orders_by_id(conn):
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    kw = {"report_id": "r1", "version": 1, "author_id": "u1", "author_name": "Alice"}
+    root = add_comment(conn, body="?", **kw)
+    reply = add_comment(conn, body="!", parent_id=root["id"], **kw)
+    conn.execute("UPDATE comments SET created_at='2000-01-01' WHERE id=?", (reply["id"],))
+    assert [c["id"] for c in list_comments(conn, "r1")] == [root["id"], reply["id"]]
+
+
+def test_writes_check_expected_version_atomically(conn):
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    push_report(conn, project="p", title="T", risk="low", body="b2", id="r1")
+    kw = {"report_id": "r1", "version": 1, "author_id": "u1", "author_name": "Alice"}
+    with pytest.raises(StaleVersion) as exc:
+        add_comment(conn, body="?", expected_version=1, **kw)
+    assert exc.value.latest == 2
+    with pytest.raises(StaleVersion):
+        add_verdict(
+            conn,
+            report_id="r1",
+            version=1,
+            reviewer_id="u1",
+            reviewer_name="Alice",
+            verdict="approve",
+            expected_version=1,
+        )
+    assert list_comments(conn, "r1") == []
+    assert conn.execute("SELECT COUNT(*) FROM verdicts").fetchone()[0] == 0
+    assert not conn.in_transaction
+
+
+def test_schema_checks_and_indexes(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        push_report(conn, project="p", title="T", risk="extreme", body="b")
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    with pytest.raises(sqlite3.IntegrityError):
+        add_verdict(
+            conn, report_id="r1", version=1, reviewer_id="u", reviewer_name="U", verdict="maybe"
+        )
+    indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert {"comments_report_parent", "verdicts_report", "reports_project"} <= indexes
+
+
+def test_db_module_does_not_depend_on_fastapi():
+    assert "fastapi" not in Path(db.__file__).read_text()
+
+
+def test_writes_log_one_info_line(conn, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    add_comment(conn, report_id="r1", version=1, author_id="u1", author_name="Alice", body="?")
+    add_verdict(
+        conn, report_id="r1", version=1, reviewer_id="u1", reviewer_name="Alice", verdict="approve"
+    )
+    with pytest.raises(ProjectMismatch):
+        push_report(conn, project="q", title="T", risk="low", body="b", id="r1")
+    messages = [r.getMessage() for r in caplog.records if r.name == "verifair"]
+    assert len(messages) == 4
+    assert messages[0].startswith("report pushed") and "r1" in messages[0]
+    assert messages[1].startswith("comment added") and messages[2].startswith("verdict added")
+    assert messages[3].startswith("push rejected")
 
 
 def test_list_reports_newest_first_with_latest_version(conn):

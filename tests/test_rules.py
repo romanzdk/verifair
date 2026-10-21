@@ -74,7 +74,7 @@ def test_reviewers_label_and_agent_excluded(conn):
     _comment(conn, "alice")
     _verdict(conn, "bob", "approve", version=1)
     result = reviewers(
-        conn.execute("SELECT * FROM comments ORDER BY id").fetchall(), _verdicts(conn), 2
+        conn.execute("SELECT * FROM comments ORDER BY id").fetchall(), _verdicts(conn)
     )
     assert [(r.id, r.name, r.verdict, r.verdict_version, r.label) for r in result] == [
         ("alice", "Alice", None, None, "reviewing"),
@@ -86,7 +86,7 @@ def test_reviewers_use_latest_name_and_verdict(conn):
     _comment(conn, "alice", name="Al")
     _verdict(conn, "alice", "request_changes", version=1, name="Alice")
     _verdict(conn, "alice", "approve", version=2, name="Alice B")
-    (r,) = reviewers([], _verdicts(conn), 2)
+    (r,) = reviewers([], _verdicts(conn))
     assert (r.name, r.verdict, r.verdict_version, r.label) == (
         "Alice B",
         "approve",
@@ -97,8 +97,30 @@ def test_reviewers_use_latest_name_and_verdict(conn):
 
 def test_reviewers_requested_changes_label(conn):
     _verdict(conn, "alice", "request_changes", version=1)
-    (r,) = reviewers([], _verdicts(conn), 1)
+    (r,) = reviewers([], _verdicts(conn))
     assert r.label == "requested changes v1"
+
+
+def test_reviewer_carries_latest_verdict_summary(conn):
+    add_verdict(
+        conn,
+        report_id="r",
+        version=1,
+        reviewer_id="alice",
+        reviewer_name="Alice",
+        verdict="approve",
+        summary="Fine.",
+    )
+    (r,) = reviewers([], _verdicts(conn))
+    assert r.summary == "Fine."
+
+
+def test_latest_verdict_is_by_id_not_created_at(conn):
+    _verdict(conn, "alice", "request_changes")
+    _verdict(conn, "alice", "approve")
+    conn.execute("UPDATE verdicts SET created_at = '2000-01-01' WHERE verdict = 'approve'")
+    assert compute_status(_verdicts(conn), 1) == "approved"
+    assert reviewers([], _verdicts(conn))[0].verdict == "approve"
 
 
 def _threads(conn):

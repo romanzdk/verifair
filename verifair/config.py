@@ -17,6 +17,6 @@ def load_settings() -> Settings:
     return Settings(
         api_token=api_token,
         db_path=os.environ.get("VERIFAIR_DB_PATH", "./verifair.db"),
-        base_url=os.environ.get("VERIFAIR_BASE_URL", "http://localhost:8000"),
+        base_url=os.environ.get("VERIFAIR_BASE_URL", "http://localhost:8000").rstrip("/"),
         slack_webhook_url=os.environ.get("VERIFAIR_SLACK_WEBHOOK_URL") or None,
     )

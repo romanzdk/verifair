@@ -9,7 +9,7 @@
 <header class="head">
   <h1>{{ report.title }}</h1>
   <div class="meta">
-    <span id="vf_status" class="badge b-{{ status }}">{{ STATUS_LABELS[status] }}</span>
+    <span id="vf_status" class="badge b-{{ status }}">{% if not is_current %}Current: {% endif %}{{ STATUS_LABELS[status] }}</span>
     <span class="badge r-{{ report.risk }}">Risk: {{ report.risk }}</span>
     <span>by <b>{{ report.author }}</b></span>
     <span>v{{ version }} · {{ version_date|date }}</span>
@@ -22,22 +22,13 @@
     {% if inline_name_prompt %}{% with next=here %}{% include "_name_prompt.html" %}{% endwith %}{% endif %}
     {% for s in sections %}
     <section id="{{ s.slug }}" data-section="{{ s.heading }}">
-      <h2><span class="num">{{ loop.index }}</span>{{ s.heading }}{% if is_current %} <button type="button" class="cc" data-comment-section>💬 comment</button>{% endif %}</h2>
+      <h2><span class="num">{{ loop.index }}</span>{{ s.heading }}{% if is_current %} <button type="button" class="cc" data-comment-section aria-label="Comment on {{ s.heading }}">💬 comment</button>{% endif %}</h2>
       <div class="content">{{ s.html|safe }}</div>
       <div class="threads" id="vf_threads_{{ s.slug }}">
         {% for thread in threads_by_section.get(s.slug, []) %}{% include "_thread.html" %}{% endfor %}
       </div>
       {% if is_current %}
-      <form class="cform" id="vf_cform_{{ s.slug }}" hidden hx-post="{{ url }}/comments" hx-target="#vf_threads_{{ s.slug }}" hx-swap="beforeend" hx-on::after-request="if (event.detail.successful) { this.reset(); this.hidden = true }">
-        <input type="hidden" name="section" value="{{ s.heading }}">
-        <input type="hidden" name="quote" value="">
-        <div class="q" hidden></div>
-        <textarea name="body" required placeholder="Comment on {{ s.heading }}"></textarea>
-        <div class="tact">
-          <button class="btn p">Comment</button>
-          <button type="button" class="btn" data-cancel>Cancel</button>
-        </div>
-      </form>
+      {% include "_cform.html" %}
       {% endif %}
     </section>
     {% endfor %}

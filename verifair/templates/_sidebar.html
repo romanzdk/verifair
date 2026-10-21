@@ -1,12 +1,13 @@
 <aside class="side" id="vf_sidebar"{% if oob %} hx-swap-oob="true"{% endif %}>
   <h4>On this page</h4>
   <ul>
-    {% for s in sections %}<li><a href="#{{ s.slug }}">{{ loop.index }} {{ s.heading }}</a>{% if open_by_section[s.slug] %} <span class="n">{{ open_by_section[s.slug] }}</span>{% endif %}</li>{% endfor %}
-    {% if threads_by_section.get(None) %}<li><a href="#vf_earlier">Earlier versions</a>{% if open_by_section[None] %} <span class="n">{{ open_by_section[None] }}</span>{% endif %}</li>{% endif %}
+    {% for s in sections %}<li><a href="#{{ s.slug }}">{{ loop.index }} {{ s.heading }}</a>{% if open_by_section[s.slug] %}{% with n = open_by_section[s.slug] %} <span class="n" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endfor %}
+    {% if threads_by_section.get(None) %}<li><a href="#vf_earlier">Earlier versions</a>{% if open_by_section[None] %}{% with n = open_by_section[None] %} <span class="n" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endif %}
   </ul>
   <h4>Reviewers</h4>
   {% for r in reviewers %}
-  <div class="rev"><span class="av">{{ r.name[:1]|upper }}</span>{{ r.name }} · {% if r.verdict %}<span class="badge {{ 'b-approved' if r.verdict == 'approve' else 'b-changes_requested' }}">{{ r.label }}</span>{% else %}{{ r.label }}{% endif %}</div>
+  <div class="rev"><span class="av">{{ r.name[:1]|upper }}</span>{{ r.name }} · {% if r.verdict %}<span class="badge {{ 'b-approved' if r.verdict == 'approve' else 'b-changes_requested' }}{% if r.verdict_version != current_version %} b-stale{% endif %}">{{ r.label }}</span>{% else %}{{ r.label }}{% endif %}</div>
+  {% if r.summary %}<p class="dismiss rev-summary">{{ r.summary }}</p>{% endif %}
   {% else %}
   <p class="dismiss">Nobody yet.</p>
   {% endfor %}

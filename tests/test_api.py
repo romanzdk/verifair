@@ -57,28 +57,38 @@ def test_comment_roundtrip_and_open_filter(client):
     push(client)
     root = client.post(
         "/api/reports/prorate/comments",
-        json={"body": "Why?", "author": "bot", "section": "intent", "quote": "Full new price."},
+        json={"body": "Why?", "author": "bot", "section": "Intent", "quote": "Full new price."},
         headers=H,
     )
     assert root.status_code == 201
-    assert root.json()["body"] == "Why?" and root.json()["author"] == "bot"
     cid = root.json()["id"]
+    assert root.json() == {
+        "id": cid,
+        "version": 1,
+        "parent_id": None,
+        "section": "Intent",
+        "quote": "Full new price.",
+        "author": "bot",
+        "author_id": "agent",
+        "author_type": "agent",
+        "body": "Why?",
+        "created_at": root.json()["created_at"],
+        "resolved": False,
+    }
     reply = client.post(
         "/api/reports/prorate/comments", json={"body": "Because.", "parent_id": cid}, headers=H
     )
     assert reply.status_code == 201
+    assert set(reply.json()) == set(root.json()) and reply.json()["parent_id"] == cid
 
     threads = client.get("/api/reports/prorate/comments", headers=H).json()["threads"]
     assert len(threads) == 1
     t = threads[0]
-    assert (t["id"], t["version"], t["section"], t["quote"]) == (
-        cid,
-        1,
-        "intent",
-        "Full new price.",
-    )
-    assert (t["author"], t["body"], t["resolved"]) == ("bot", "Why?", False)
-    assert [(x["author"], x["body"]) for x in t["replies"]] == [("agent", "Because.")]
+    assert {k: v for k, v in t.items() if k != "replies"} == root.json() | {
+        "stale": False,
+        "found": True,
+    }
+    assert t["replies"] == [reply.json()]
 
     done = client.post(f"/api/reports/prorate/comments/{cid}/resolve", headers=H)
     assert (done.status_code, done.json()) == (200, {"resolved": True})
@@ -87,7 +97,127 @@ def test_comment_roundtrip_and_open_filter(client):
     everything = client.get("/api/reports/prorate/comments?open=false", headers=H).json()
     assert len(everything["threads"]) == 1
     assert everything["threads"][0]["resolved"] is True
-    assert len(everything["threads"][0]["replies"]) == 1
+    assert everything["threads"][0]["replies"][0]["resolved"] is True
+
+
+def test_threads_report_stale_and_found_against_current_version(client):
+    push(client)
+    for quote in ["Full new price.", None]:
+        client.post(
+            "/api/reports/prorate/comments",
+            json={"body": "Why?", "section": "Intent", "quote": quote},
+            headers=H,
+        )
+    push(client, id="prorate", body="## Intent\nChanged.")
+    quoted, plain = client.get("/api/reports/prorate/comments", headers=H).json()["threads"]
+    assert (quoted["stale"], quoted["found"]) == (True, False)
+    assert (plain["stale"], plain["found"]) == (True, True)
+
+
+def test_unknown_section_422(client):
+    push(client)
+    r = client.post(
+        "/api/reports/prorate/comments", json={"body": "x", "section": "intent"}, headers=H
+    )
+    assert (r.status_code, r.json()) == (422, {"detail": "unknown section"})
+    push(client, id="prorate", body="## Other\nx")
+    r = client.post(
+        "/api/reports/prorate/comments", json={"body": "x", "section": "Intent"}, headers=H
+    )
+    assert r.status_code == 422
+    assert client.get("/api/reports/prorate/comments", headers=H).json() == {"threads": []}
+
+
+def _comment(client, **body):
+    return client.post("/api/reports/prorate/comments", json={"body": "x"} | body, headers=H)
+
+
+def test_resolve_by_reply_id_twice_and_reply_reopens(client):
+    push(client)
+    root = _comment(client).json()["id"]
+    reply = _comment(client, parent_id=root).json()["id"]
+    assert client.post(f"/api/reports/prorate/comments/{reply}/resolve", headers=H).json() == {
+        "resolved": True
+    }
+    [t] = client.get("/api/reports/prorate/comments", headers=H).json()["threads"]
+    assert t["resolved"] is True
+    again = client.post(f"/api/reports/prorate/comments/{root}/resolve", headers=H)
+    assert (again.status_code, again.json()) == (200, {"resolved": True})
+    _comment(client, parent_id=root)
+    [t] = client.get("/api/reports/prorate/comments?open=true", headers=H).json()["threads"]
+    assert t["resolved"] is False and len(t["replies"]) == 2
+
+
+def test_reply_older_than_root_does_not_break_listing(client, settings):
+    from verifair.db import connect
+
+    push(client)
+    root = _comment(client).json()["id"]
+    reply = _comment(client, parent_id=root).json()["id"]
+    conn = connect(settings.db_path)
+    conn.execute("UPDATE comments SET created_at='2000-01-01T00:00:00+00:00' WHERE id=?", (reply,))
+    conn.close()
+    r = client.get("/api/reports/prorate/comments", headers=H)
+    assert r.status_code == 200
+    assert [x["id"] for x in r.json()["threads"][0]["replies"]] == [reply]
+
+
+def test_verdicts_carry_reviewer_id_and_current(client):
+    push(client)
+    client.cookies.set("vf_id", "alice")
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/verdict", data={"verdict": "approve", "version": 1})
+    push(client, id="prorate")
+    [v] = client.get("/api/reports/prorate", headers=H).json()["verdicts"]
+    assert v == {
+        "reviewer": "Alice",
+        "reviewer_id": "alice",
+        "verdict": "approve",
+        "version": 1,
+        "summary": "",
+        "created_at": v["created_at"],
+        "current": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"title": "   "},
+        {"title": "x" * 201},
+        {"body": " \n "},
+        {"ticket_url": "javascript:alert(1)"},
+        {"ticket_url": "ftp://x/y"},
+        {"links": [{"label": "x", "url": "javascript:alert(1)"}]},
+        {"author": "x" * 61},
+        {"unexpected": 1},
+        {"links": [{"label": "x", "url": "https://x", "extra": 1}]},
+    ],
+)
+def test_push_validation_422(client, overrides):
+    assert push(client, **overrides).status_code == 422
+
+
+def test_push_strips_title(client):
+    push(client, title="  Prorate  ")
+    assert client.get("/api/reports/prorate", headers=H).json()["title"] == "Prorate"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"body": "  "},
+        {"body": "x" * 20001},
+        {"body": "x", "quote": "q" * 2001},
+        {"body": "x", "section": "s" * 2001},
+        {"body": "x", "author": "a" * 61},
+        {"body": "x", "unexpected": 1},
+    ],
+)
+def test_comment_validation_422(client, body):
+    push(client)
+    r = client.post("/api/reports/prorate/comments", json=body, headers=H)
+    assert r.status_code == 422
 
 
 def test_new_root_comment_goes_on_current_version(client):

@@ -1,18 +1,20 @@
 import json
-import re
+import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from fastapi import Request
+from verifair.render import slugify
+
+log = logging.getLogger("verifair")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reports (
     id TEXT PRIMARY KEY,
     project TEXT NOT NULL,
     title TEXT NOT NULL,
-    risk TEXT NOT NULL,
+    risk TEXT NOT NULL CHECK (risk IN ('low', 'medium', 'high')),
     ticket_url TEXT,
     links TEXT NOT NULL DEFAULT '[]',
     author TEXT NOT NULL,
@@ -45,15 +47,24 @@ CREATE TABLE IF NOT EXISTS verdicts (
     version INTEGER NOT NULL,
     reviewer_id TEXT NOT NULL,
     reviewer_name TEXT NOT NULL,
-    verdict TEXT NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('approve', 'request_changes')),
     summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS comments_report_parent ON comments(report_id, parent_id);
+CREATE INDEX IF NOT EXISTS verdicts_report ON verdicts(report_id);
+CREATE INDEX IF NOT EXISTS reports_project ON reports(project);
 """
 
 
 class ProjectMismatch(Exception):
     pass
+
+
+class StaleVersion(Exception):
+    def __init__(self, latest: int) -> None:
+        super().__init__(f"latest version is {latest}")
+        self.latest = latest
 
 
 def _now() -> str:
@@ -78,20 +89,13 @@ def _write(conn: sqlite3.Connection) -> Iterator[None]:
         yield
 
 
+def _check_version(conn: sqlite3.Connection, report_id: str, expected: int | None) -> None:
+    if expected is not None and (latest := latest_version(conn, report_id)) != expected:
+        raise StaleVersion(latest)
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
-
-
-def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
-    conn = connect(request.app.state.settings.db_path)
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-def slugify(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60].strip("-") or "report"
 
 
 def _unique_id(conn: sqlite3.Connection, base: str) -> str:
@@ -120,6 +124,9 @@ def push_report(
         existing = get_report(conn, id) if id else None
         if existing:
             if existing["project"] != project:
+                log.info(
+                    "push rejected id=%s project=%s owner=%s", id, project, existing["project"]
+                )
                 raise ProjectMismatch(f"report {id!r} belongs to project {existing['project']!r}")
             version = latest_version(conn, id) + 1
             conn.execute(
@@ -139,6 +146,7 @@ def push_report(
             "INSERT INTO versions (report_id, version, body, created_at) VALUES (?, ?, ?, ?)",
             (id, version, body, now),
         )
+    log.info("report pushed id=%s project=%s version=%d", id, project, version)
     return id, version
 
 
@@ -190,8 +198,10 @@ def add_comment(
     parent_id: int | None = None,
     section: str | None = None,
     quote: str | None = None,
+    expected_version: int | None = None,
 ) -> sqlite3.Row:
     with _write(conn):
+        _check_version(conn, report_id, expected_version)
         if parent_id is not None:
             parent = conn.execute(
                 "SELECT * FROM comments WHERE id=? AND report_id=?", (parent_id, report_id)
@@ -200,11 +210,20 @@ def add_comment(
                 raise ValueError(f"parent comment {parent_id} not found on report {report_id!r}")
             parent_id = parent["parent_id"] or parent["id"]
             version, section, quote = parent["version"], parent["section"], parent["quote"]
+            conn.execute("UPDATE comments SET resolved_at=NULL WHERE id=?", (parent_id,))
         cur = conn.execute(
             "INSERT INTO comments (report_id, version, parent_id, section, quote, author_id,"
             " author_name, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (report_id, version, parent_id, section, quote, author_id, author_name, body, _now()),
         )
+    log.info(
+        "comment added id=%d report=%s version=%d parent=%s author_id=%s",
+        cur.lastrowid,
+        report_id,
+        version,
+        parent_id,
+        author_id,
+    )
     return conn.execute("SELECT * FROM comments WHERE id=?", (cur.lastrowid,)).fetchone()
 
 
@@ -217,16 +236,22 @@ def list_comments(
     )
     if open_only:
         sql += " AND root.resolved_at IS NULL"
-    return conn.execute(sql + " ORDER BY c.created_at, c.id", (report_id,)).fetchall()
+    return conn.execute(sql + " ORDER BY c.id", (report_id,)).fetchall()
 
 
-def resolve_thread(conn: sqlite3.Connection, report_id: str, comment_id: int) -> bool:
+def resolve_thread(conn: sqlite3.Connection, report_id: str, comment_id: int) -> int | None:
     with _write(conn):
-        cur = conn.execute(
-            "UPDATE comments SET resolved_at=? WHERE id=? AND report_id=? AND parent_id IS NULL",
-            (_now(), comment_id, report_id),
+        row = conn.execute(
+            "SELECT COALESCE(parent_id, id) FROM comments WHERE id=? AND report_id=?",
+            (comment_id, report_id),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            "UPDATE comments SET resolved_at=? WHERE id=? AND resolved_at IS NULL",
+            (_now(), row[0]),
         )
-    return cur.rowcount > 0
+    return row[0]
 
 
 def add_verdict(
@@ -238,17 +263,26 @@ def add_verdict(
     reviewer_name: str,
     verdict: str,
     summary: str = "",
+    expected_version: int | None = None,
 ) -> sqlite3.Row:
     with _write(conn):
+        _check_version(conn, report_id, expected_version)
         cur = conn.execute(
             "INSERT INTO verdicts (report_id, version, reviewer_id, reviewer_name, verdict,"
             " summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (report_id, version, reviewer_id, reviewer_name, verdict, summary, _now()),
         )
+    log.info(
+        "verdict added report=%s version=%d reviewer_id=%s verdict=%s",
+        report_id,
+        version,
+        reviewer_id,
+        verdict,
+    )
     return conn.execute("SELECT * FROM verdicts WHERE id=?", (cur.lastrowid,)).fetchone()
 
 
 def list_verdicts(conn: sqlite3.Connection, report_id: str) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT * FROM verdicts WHERE report_id=? ORDER BY created_at, id", (report_id,)
+        "SELECT * FROM verdicts WHERE report_id=? ORDER BY id", (report_id,)
     ).fetchall()

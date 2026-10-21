@@ -19,15 +19,16 @@ class Reviewer:
     verdict: str | None
     verdict_version: int | None
     label: str
+    summary: str = ""
 
 
-def _recency(row: sqlite3.Row) -> tuple[str, int]:
-    return row["created_at"], row["id"]
+def _by_id(row: sqlite3.Row) -> int:
+    return row["id"]
 
 
 def latest_verdicts(verdicts: list[sqlite3.Row], version: int) -> dict[str, sqlite3.Row]:
     latest: dict[str, sqlite3.Row] = {}
-    for row in sorted(verdicts, key=_recency):
+    for row in sorted(verdicts, key=_by_id):
         if row["version"] == version:
             latest[row["reviewer_id"]] = row
     return latest
@@ -42,17 +43,16 @@ def compute_status(verdicts: list[sqlite3.Row], current_version: int) -> str:
     return "awaiting_review"
 
 
-def reviewers(
-    comments: list[sqlite3.Row], verdicts: list[sqlite3.Row], current_version: int
-) -> list[Reviewer]:
+def reviewers(comments: list[sqlite3.Row], verdicts: list[sqlite3.Row]) -> list[Reviewer]:
     names: dict[str, str] = {}
     latest: dict[str, sqlite3.Row] = {}
     rows = [(r, r["author_id"], r["author_name"]) for r in comments]
     rows += [(r, r["reviewer_id"], r["reviewer_name"]) for r in verdicts]
-    for _, person_id, name in sorted(rows, key=lambda item: _recency(item[0])):
+    # ids are per table, so only the timestamp can order a comment against a verdict
+    for _, person_id, name in sorted(rows, key=lambda item: item[0]["created_at"]):
         if person_id != "agent":
             names[person_id] = name
-    for row in sorted(verdicts, key=_recency):
+    for row in sorted(verdicts, key=_by_id):
         latest[row["reviewer_id"]] = row
     result = []
     for person_id, name in names.items():
@@ -61,7 +61,9 @@ def reviewers(
             result.append(Reviewer(person_id, name, None, None, "reviewing"))
         else:
             label = f"{_VERDICT_LABELS[row['verdict']]} v{row['version']}"
-            result.append(Reviewer(person_id, name, row["verdict"], row["version"], label))
+            result.append(
+                Reviewer(person_id, name, row["verdict"], row["version"], label, row["summary"])
+            )
     return sorted(result, key=lambda r: r.name)
 
 

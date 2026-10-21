@@ -4,7 +4,7 @@
 {% block content %}
 <nav class="tabs">
   {% for key in tabs %}<a href="?tab={{ key }}"{% if tab == key %} class="on"{% endif %}>{{ STATUS_LABELS[key] }} · {{ counts[key] }}</a>{% endfor %}
-  <a href="?tab=all"{% if tab == "all" %} class="on"{% endif %}>All</a>
+  <a href="?tab=all"{% if tab == "all" %} class="on"{% endif %}>All · {{ total }}</a>
 </nav>
 <div class="list">
   <div class="row h"><div>Change</div><div>Risk</div><div>Author</div><div>Status</div></div>
