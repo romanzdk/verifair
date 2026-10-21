@@ -69,7 +69,7 @@ function highlight() {
       range.setStart(node, match.index);
       range.setEnd(node, match.index + match[0].length);
       const mark = document.createElement("mark");
-      mark.id = `vf_m${thread.id.slice(1)}`;
+      mark.id = thread.id.replace("vf_t", "vf_m");
       range.surroundContents(mark);
       return;
     }

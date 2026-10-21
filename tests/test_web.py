@@ -85,7 +85,7 @@ def test_comment_reply_resolve_via_htmx(client):
         "Edge cases",
         "first day",
     )
-    assert f'id="t{cid}"' in r.text and "first day" in r.text and "Which first day?" in r.text
+    assert f'id="vf_t{cid}"' in r.text and "first day" in r.text and "Which first day?" in r.text
     assert 'data-found="true"' in r.text and 'data-section-slug="edge-cases"' in r.text
 
     reply = client.post(f"/r/prorate/comments/{cid}/reply", data={"body": "Cycle start."})
@@ -188,11 +188,16 @@ def test_set_name(client):
 
 
 def test_headings_cannot_collide_with_app_ids(client):
-    push(client, body="## Verdict\nShip it.\n\n## Sidebar\nNotes.\n\n## Popover\nMore.")
+    headings = ["Intent", "Verdict", "Sidebar", "Popover", "T1", "Cform Intent", "Threads Intent"]
+    push(client, body="\n\n".join(f"## {h}\ntext" for h in headings))
+    client.cookies.set("vf_name", "Alice")
+    thread = client.post("/r/prorate/comments", data={"section": "Intent", "body": "Why?"})
+    assert 'id="vf_t' in thread.text and 'id="vf_c' in thread.text
     r = client.get("/r/prorate")
-    assert r.text.count('id="verdict"') == 1 and r.text.count('id="sidebar"') == 1
-    assert r.text.count('id="popover"') == 1
+    for slug in ["verdict", "sidebar", "popover", "t1", "cform-intent", "threads-intent"]:
+        assert r.text.count(f'id="{slug}"') == 1, slug
     assert 'hx-post="/r/prorate/verdict"' in r.text and 'id="vf_verdict"' in r.text
+    assert 'id="vf_cform_intent"' in r.text and 'hx-target="#vf_threads_intent"' in r.text
 
 
 def test_blank_comment_and_reply_422(client):

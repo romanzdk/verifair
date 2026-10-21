@@ -1,14 +1,14 @@
 {% set root = thread.root %}
 {% if root.resolved_at %}
-<div class="thread resolved" id="t{{ root.id }}" data-section-slug="{{ thread.section_slug or '' }}">
+<div class="thread resolved" id="vf_t{{ root.id }}" data-section-slug="{{ thread.section_slug or '' }}">
   <span class="ok">✓</span> Resolved · <b>{{ root.author_name }}</b>: {{ root.body|truncate(80) }}{% if thread.replies %} · {{ thread.replies|length }} repl{{ "ies" if thread.replies|length != 1 else "y" }}{% endif %}
 </div>
 {% else %}
-<div class="thread" id="t{{ root.id }}" data-quote="{{ root.quote or '' }}" data-found="{{ 'true' if thread.found and root.quote else 'false' }}" data-section-slug="{{ thread.section_slug or '' }}">
+<div class="thread" id="vf_t{{ root.id }}" data-quote="{{ root.quote or '' }}" data-found="{{ 'true' if thread.found and root.quote else 'false' }}" data-section-slug="{{ thread.section_slug or '' }}">
   {% if root.quote %}<div class="q">"{{ root.quote }}"{% if thread.stale %} <span class="stale">on v{{ root.version }}</span>{% endif %}</div>
   {% elif thread.stale %}<div class="q"><span class="stale">on v{{ root.version }}</span></div>{% endif %}
   {% for c in [root] + thread.replies %}
-  <div class="msg{% if c.author_id == 'agent' %} agent{% endif %}" id="c{{ c.id }}">
+  <div class="msg{% if c.author_id == 'agent' %} agent{% endif %}" id="vf_c{{ c.id }}">
     <span class="av">{{ "🤖" if c.author_id == "agent" else c.author_name[:1]|upper }}</span>
     <div><span class="who">{{ c.author_name }}</span><span class="when">{{ c.created_at|date }} {{ c.created_at[11:16] }}</span>
       <div class="text">{{ c.body }}</div></div>
@@ -16,11 +16,11 @@
   {% endfor %}
   {% if is_current %}
   <div class="tact">
-    <form class="reply" id="vf_reply_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/reply" hx-target="#t{{ root.id }}" hx-swap="outerHTML">
+    <form class="reply" id="vf_reply_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/reply" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">
       <textarea name="body" required placeholder="Reply" rows="1"></textarea>
       <button class="btn">Reply</button>
     </form>
-    <button type="button" class="btn" id="vf_resolve_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/resolve" hx-target="#t{{ root.id }}" hx-swap="outerHTML">Resolve</button>
+    <button type="button" class="btn" id="vf_resolve_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/resolve" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">Resolve</button>
   </div>
   {% endif %}
 </div>

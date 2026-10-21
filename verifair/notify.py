@@ -17,7 +17,7 @@ def report_pushed_text(report: Mapping, version: int, base_url: str) -> str:
 
 def comment_text(report: Mapping, comment: Mapping, base_url: str) -> str:
     section = comment["section"] or "report"
-    url = f"{base_url}/r/{report['id']}#c{comment['id']}"
+    url = f"{base_url}/r/{report['id']}#vf_c{comment['id']}"
     return (
         f"{comment['author_name']} commented on {report['title']} › {section}: "
         f"{comment['body'][:140]} {url}"

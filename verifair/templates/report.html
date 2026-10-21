@@ -22,11 +22,11 @@
     <section id="{{ s.slug }}" data-section="{{ s.heading }}">
       <h2><span class="num">{{ loop.index }}</span>{{ s.heading }}{% if is_current %} <button type="button" class="cc" data-comment-section>💬 comment</button>{% endif %}</h2>
       <div class="content">{{ s.html|safe }}</div>
-      <div class="threads" id="threads-{{ s.slug }}">
+      <div class="threads" id="vf_threads_{{ s.slug }}">
         {% for thread in threads_by_section.get(s.slug, []) %}{% include "_thread.html" %}{% endfor %}
       </div>
       {% if is_current %}
-      <form class="cform" id="cform-{{ s.slug }}" hidden hx-post="{{ url }}/comments" hx-target="#threads-{{ s.slug }}" hx-swap="beforeend" hx-on::after-request="if (event.detail.successful) { this.reset(); this.hidden = true }">
+      <form class="cform" id="vf_cform_{{ s.slug }}" hidden hx-post="{{ url }}/comments" hx-target="#vf_threads_{{ s.slug }}" hx-swap="beforeend" hx-on::after-request="if (event.detail.successful) { this.reset(); this.hidden = true }">
         <input type="hidden" name="section" value="{{ s.heading }}">
         <input type="hidden" name="quote" value="">
         <div class="q" hidden></div>

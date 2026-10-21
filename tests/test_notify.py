@@ -20,14 +20,14 @@ def test_report_pushed_text():
 def test_comment_text_with_section_and_truncation():
     comment = {"id": 7, "author_name": "bot", "section": "intent", "body": "a" * 200}
     assert notify.comment_text(REPORT, comment, "http://x") == (
-        f"bot commented on Prorate › intent: {'a' * 140} http://x/r/prorate#c7"
+        f"bot commented on Prorate › intent: {'a' * 140} http://x/r/prorate#vf_c7"
     )
 
 
 def test_comment_text_without_section():
     comment = {"id": 1, "author_name": "bot", "section": None, "body": "Hi"}
     assert notify.comment_text(REPORT, comment, "http://x") == (
-        "bot commented on Prorate › report: Hi http://x/r/prorate#c1"
+        "bot commented on Prorate › report: Hi http://x/r/prorate#vf_c1"
     )
 
 
