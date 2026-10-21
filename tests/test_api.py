@@ -111,3 +111,27 @@ def test_unknown_parent_and_comment_404(client):
     r = client.post("/api/reports/prorate/comments", json={"body": "x", "parent_id": 99}, headers=H)
     assert (r.status_code, r.json()) == (404, {"detail": "parent not found"})
     assert client.post("/api/reports/prorate/comments/99/resolve", headers=H).status_code == 404
+
+
+def test_push_and_comment_notify_when_slack_configured(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from verifair import notify
+    from verifair.app import create_app
+    from verifair.config import Settings
+
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda settings, text: sent.append(text))
+    settings = Settings(
+        api_token="t",
+        db_path=str(tmp_path / "n.db"),
+        base_url="http://localhost:8000",
+        slack_webhook_url="https://hooks.example/x",
+    )
+    client = TestClient(create_app(settings))
+    push(client)
+    assert len(sent) == 1
+    assert sent[0].startswith("New report v1 in billing-service")
+    client.post("/api/reports/prorate/comments", json={"body": "Why?", "author": "bot"}, headers=H)
+    assert len(sent) == 2
+    assert sent[1].startswith("bot commented on Prorate › report: Why?")

@@ -3,10 +3,10 @@ import secrets
 import sqlite3
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from verifair import db
+from verifair import db, notify
 from verifair.rules import compute_status
 
 
@@ -68,7 +68,7 @@ def _comment_json(row: sqlite3.Row) -> dict:
 
 
 @router.post("/reports", status_code=201)
-def push_report(body: ReportIn, request: Request, conn: Conn):
+def push_report(body: ReportIn, request: Request, conn: Conn, background: BackgroundTasks):
     try:
         id, version = db.push_report(
             conn,
@@ -83,7 +83,11 @@ def push_report(body: ReportIn, request: Request, conn: Conn):
         )
     except db.ProjectMismatch:
         raise HTTPException(409, "id belongs to another project") from None
-    base_url = request.app.state.settings.base_url
+    settings = request.app.state.settings
+    base_url = settings.base_url
+    background.add_task(
+        notify.send, settings, notify.report_pushed_text(db.get_report(conn, id), version, base_url)
+    )
     return {"id": id, "version": version, "url": f"{base_url}/r/{id}"}
 
 
@@ -139,8 +143,10 @@ def get_comments(id: str, conn: Conn, open: bool = False):
 
 
 @router.post("/reports/{id}/comments", status_code=201)
-def post_comment(id: str, body: CommentIn, conn: Conn):
-    _require_report(conn, id)
+def post_comment(
+    id: str, body: CommentIn, request: Request, conn: Conn, background: BackgroundTasks
+):
+    report = _require_report(conn, id)
     try:
         row = db.add_comment(
             conn,
@@ -155,6 +161,8 @@ def post_comment(id: str, body: CommentIn, conn: Conn):
         )
     except ValueError:
         raise HTTPException(404, "parent not found") from None
+    settings = request.app.state.settings
+    background.add_task(notify.send, settings, notify.comment_text(report, row, settings.base_url))
     return _comment_json(row)
 
 
