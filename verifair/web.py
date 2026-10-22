@@ -680,7 +680,11 @@ def _access(
         "nonce": secrets.token_urlsafe(16),
     }
     if member is not None:
-        ctx |= {"tokens": db.list_tokens(conn, member["id"]), "is_admin": member["role"] == "admin"}
+        ctx |= {
+            "me": member["id"],
+            "tokens": db.list_tokens(conn, member["id"]),
+            "is_admin": member["role"] == "admin",
+        }
         if ctx["is_admin"]:
             ctx |= {"users": db.list_users(conn), "all_tokens": db.list_tokens(conn)}
     return _page(request, user, "access.html", ctx, status)

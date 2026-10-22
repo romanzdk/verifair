@@ -401,3 +401,29 @@ def test_access_tables_stack_with_cell_labels_on_narrow_screens(shared_client, c
     link = css.split(".landing-access-link {")[1].split("}")[0]
     assert "display: inline-flex" in link and "min-height: 32px" in link
     assert "align-items: center" in link and "padding:" in link
+
+
+def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, conn, as_user):
+    as_user("bob@example.com")
+    db.add_user(conn, id="gone@example.com", name="Gone", role="member")
+    db.update_user(conn, "gone@example.com", active=False)
+    _token(conn, "bob@example.com", 'bob "ci"')
+    page = shared_client.get("/access", headers=ADMIN).text
+    assert '<button class="btn" aria-label="Save role for bob@example.com">Save</button>' in page
+    assert (
+        '<button class="btn" aria-label="Deactivate bob@example.com"'
+        ' data-confirm="Deactivate bob@example.com? Their agent tokens will be revoked.">'
+        "Deactivate</button>"
+    ) in page
+    assert '<button class="btn" aria-label="Reactivate gone@example.com">Reactivate</button>' in (
+        page
+    )
+    assert (
+        '<button class="btn" aria-label="Revoke token bob &#34;ci&#34;"'
+        ' data-confirm="Revoke token bob &#34;ci&#34;?">Revoke</button>'
+    ) in page
+    assert page.count("(you)") == 1
+    assert "<code>admin@example.com</code> <small>(you)</small>" in page
+    js = (Path(web.__file__).parent / "static" / "landing.js").read_text()
+    assert 'addEventListener("submit"' in js and "event.submitter?.dataset.confirm" in js
+    assert "!confirm(message)" in js and "event.preventDefault()" in js
