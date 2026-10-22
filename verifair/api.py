@@ -24,18 +24,23 @@ from verifair.render import (
     section_headings,
     split_sections,
 )
-from verifair.rules import MODERATION, NO_OWNER, compute_status
+from verifair.rules import NO_OWNER, compute_status
 
 NOT_OWNER = "This report belongs to another member."
+SHARED_TOKEN = "The shared token is not accepted in shared mode. Use a member agent token."
+AGENT_RESOLVE = "Agent tokens can only resolve threads the agent started on its owner's reports."
 
 
 def require_token(request: Request) -> None:
     settings = request.app.state.settings
     given = request.headers.get("Authorization", "")
-    request.state.token_owner = None
+    request.state.token_owner = request.state.token = None
     if settings.identity_header:
         scheme, _, token = given.partition(" ")
+        if scheme == "Bearer" and token and not token.lstrip().startswith("vf_"):
+            raise HTTPException(401, SHARED_TOKEN)
         if scheme == "Bearer" and token:
+            request.state.token = token
             with closing(db.connect(settings.db_path)) as conn:
                 request.state.token_owner = db.authenticate_token(conn, token)
         if request.state.token_owner is None:
@@ -183,12 +188,13 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             raise HTTPException(403, "author_id must be the token owner.")
         if reviewers is not None:
             reviewers = [reviewer.lower() for reviewer in reviewers]
-        for reviewer in reviewers or ():
+        inactive = []
+        for reviewer in dict.fromkeys(reviewers or ()):
             member = db.get_user(conn, reviewer)
             if member is None or not member["active"]:
-                return JSONResponse(
-                    {"detail": f"Reviewer {reviewer} is not an active member."}, 422
-                )
+                inactive.append(reviewer)
+        if inactive:
+            return JSONResponse({"detail": "inactive reviewers", "reviewers": inactive}, 422)
         author = owner["name"]
     try:
         id, version = db.push_report(
@@ -265,9 +271,12 @@ def _poll_wait(
     kind: str,
     since: datetime | None,
     after: dict[str, int] | None,
+    token: str | None,
 ) -> tuple[dict | None, dict[str, int]]:
     with closing(db.connect(path)) as conn:
         conn.execute("BEGIN")
+        if token is not None and db.authenticate_token(conn, token) is None:
+            raise HTTPException(401, "invalid token")
         _require_report(conn, id)
         current = db.latest_version(conn, id)
         rows = {}
@@ -314,7 +323,13 @@ async def wait_for_event(
     after = None
     while True:
         event, after = await run_in_threadpool(
-            _poll_wait, request.app.state.settings.db_path, id, kind, since, after
+            _poll_wait,
+            request.app.state.settings.db_path,
+            id,
+            kind,
+            since,
+            after,
+            request.state.token,
         )
         if event is not None:
             return {"since": cursor, **event}
@@ -390,7 +405,7 @@ def post_comment(
             report_id=id,
             version=db.latest_version(conn, id),
             author_id="agent",
-            author_name=body.author,
+            author_name=f"{owner['name']}'s agent" if owner is not None else body.author,
             body=body.body,
             parent_id=body.parent_id,
             section=body.section,
@@ -418,7 +433,7 @@ def resolve_comment(id: str, cid: int, request: Request, conn: Conn):
         if root is None:
             raise HTTPException(404, "comment not found")
         if root["author_id"] != "agent":
-            raise HTTPException(403, MODERATION)
+            raise HTTPException(403, AGENT_RESOLVE)
         by = "agent"
     if db.resolve_thread(conn, id, cid, by=by) is None:
         raise HTTPException(404, "comment not found")

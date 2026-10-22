@@ -74,7 +74,7 @@ The commands below use the report `id` as `$ID`. In shared mode, use your own ag
 - Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
 - The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as a top-level H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
 - Unknown JSON keys are rejected with 422.
-- In shared mode the token owner owns the report. `author_id` can be left out; if sent, it must be the token owner, or the push gets 403 `"author_id must be the token owner."`. A push to an `id` that belongs to another member's report gets 403 `"This report belongs to another member."`, also when the token owner is an admin. A push to an `id` whose report has no owner gets 403 `"This report has no owner. Push it again with an agent token under a new id."`. Every requested reviewer must be an active member, or the push gets 422 `"Reviewer {id} is not an active member."`.
+- In shared mode the token owner owns the report. `author_id` can be left out; if sent, it must be the token owner, or the push gets 403 `"author_id must be the token owner."`. A push to an `id` that belongs to another member's report gets 403 `"This report belongs to another member."`, also when the token owner is an admin. A push to an `id` whose report has no owner gets 403 `"This report has no owner. Push it again with an agent token under a new id."`. Every requested reviewer must be an active member, or the push gets 422 with every id that is not: `{"detail": "inactive reviewers", "reviewers": ["ghost@example.com"]}`.
 
 A push sends a "draft" message to Slack (if configured). The "ready for review" message is sent when the version is signed.
 
@@ -190,11 +190,12 @@ curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comment
 - `section` and `quote` are limited to 2,000 characters each; `prefix` and `suffix` to 64 each. A quote repeated within the named section without nonempty context is rejected with 422 `"ambiguous quote"`. Add `prefix` or `suffix` to disambiguate it.
 - Without `section` the thread is a general comment on the whole report.
 - `blocking` defaults to `true`. Send `false` for a nit that should not hold up approval. Replies always take `blocking` from their thread.
+- In shared mode `author` is ignored. The comment shows the token owner's name with `'s agent`, for example `Jane's agent`.
 - In shared mode an agent token can only comment on its owner's reports. Other reports return 403 `"This report belongs to another member."`, and reports with no owner return 403 `"This report has no owner. Push it again with an agent token under a new id."`.
 
 To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comment_id` can be the first comment or any reply; the whole thread is resolved. The response is `{"resolved": true}`. Calling it again does nothing. Reviewers can reopen a resolved thread in the web UI.
 
-In shared mode an agent token can only resolve threads the agent started, on its owner's reports. Any other thread returns 403 `"Only the person who started this thread or an admin can do that."`.
+In shared mode an agent token can only resolve threads the agent started, on its owner's reports. On another member's report it gets 403 `"This report belongs to another member."`. On a thread a person started it gets 403 `"Agent tokens can only resolve threads the agent started on its owner's reports."`.
 
 ## Wait for feedback
 
@@ -213,6 +214,7 @@ curl -sS --fail-with-body --max-time 60 -G \
 - `timeout` is seconds, greater than zero and at most 55; the default is 55. Fractions are accepted.
 - `since` is an ISO datetime. Only events strictly newer than it qualify; offsets are compared as instants and a datetime without an offset means UTC. Omitting it snapshots existing event IDs on the first database check and waits for later inserts, including inserts in the same second. Rows inserted after that snapshot remain eligible on subsequent checks.
 - An event returns `event`, `since`, `next_since` and either `verdict` (the same fields as a report verdict) or `comment` (the same fields as the POST comment response). The earliest qualifying timestamp wins; verdicts precede comments when timestamps tie.
+- In shared mode every check also checks the token again. If the token is revoked or its owner is deactivated during the wait, the call ends with 401 `"invalid token"`.
 - A timeout returns `{"event": "timeout", "since": "...", "next_since": "..."}` with the same timestamp in both fields. `since` is the supplied instant normalized to UTC, or the UTC request start time when omitted. On an event, `next_since` is the event’s `created_at`.
 
 This endpoint signals feedback; it does not provide a lossless event stream. Stored event timestamps have second precision, so reusing `next_since` excludes other events from that same second. Read the report and comment endpoints after a signal to collect all feedback.
@@ -221,13 +223,13 @@ This endpoint signals feedback; it does not provide a lossless event stream. Sto
 
 | Status | `detail` |
 | --- | --- |
-| 401 | `"invalid token"` |
-| 403 | shared mode only: `"This report belongs to another member."`, `"author_id must be the token owner."` or `"Only the person who started this thread or an admin can do that."` |
+| 401 | `"invalid token"`. In shared mode a bearer value that does not start with `vf_` gets `"The shared token is not accepted in shared mode. Use a member agent token."` |
+| 403 | shared mode only: `"This report belongs to another member."`, `"This report has no owner. Push it again with an agent token under a new id."`, `"author_id must be the token owner."` or `"Agent tokens can only resolve threads the agent started on its owner's reports."` |
 | 404 | `"report not found"`, `"parent not found"` or `"comment not found"` |
 | 409 | `"id belongs to another project"` |
-| 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"ambiguous quote"`, `"unknown section"`, `"missing sections"` or, in shared mode, `"Reviewer {id} is not an active member."` |
+| 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"ambiguous quote"`, `"unknown section"`, `"missing sections"` or, in shared mode, `"inactive reviewers"` |
 
-An unknown section also lists the valid headings: `{"detail": "unknown section", "sections": ["Intent", "Edge cases"]}`. Missing sections lists the required headings the body lacks, in the configured order.
+An unknown section also lists the valid headings: `{"detail": "unknown section", "sections": ["Intent", "Edge cases"]}`. Missing sections lists the required headings the body lacks, in the configured order. Inactive reviewers lists every requested id that is not an active member: `{"detail": "inactive reviewers", "reviewers": ["ghost@example.com"]}`.
 
 ## Configuration
 
@@ -347,7 +349,7 @@ Every member creates their own agent tokens on `/access`. A token looks like `vf
 - The `/access` page lists your tokens. Revoke a token there when you no longer need it. Admins can revoke anyone's token.
 - Deactivating a member revokes their tokens.
 - A token acts for its owner, but never with admin power, even when the owner is an admin. It cannot push to or comment on another member's report, and it cannot resolve threads that a person started.
-- The shared `VERIFAIR_API_TOKEN` is refused in shared mode.
+- The shared `VERIFAIR_API_TOKEN` is refused in shared mode with 401 `The shared token is not accepted in shared mode. Use a member agent token.`
 
 ### Report ownership
 

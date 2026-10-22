@@ -16,8 +16,9 @@ from verifair.app import create_app
 H = {"Authorization": "Bearer t"}
 SAMPLE = "## Intent\nFull new price.\n\n## Edge cases\nFirst day."
 NOT_OWNER = "This report belongs to another member."
-MODERATION = "Only the person who started this thread or an admin can do that."
 NO_OWNER = "This report has no owner. Push it again with an agent token under a new id."
+SHARED_TOKEN = "The shared token is not accepted in shared mode. Use a member agent token."
+AGENT_RESOLVE = "Agent tokens can only resolve threads the agent started on its owner's reports."
 
 
 def push(client, auth=H, **overrides):
@@ -43,9 +44,13 @@ def test_missing_shared_token_never_authenticates(settings):
         settings, api_token=None, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss"
     )
     client = TestClient(create_app(shared))
-    for headers in [{"Authorization": "Bearer None"}, {"Authorization": "Bearer "}, {}]:
+    for headers, detail in [
+        ({"Authorization": "Bearer None"}, SHARED_TOKEN),
+        ({"Authorization": "Bearer "}, "invalid token"),
+        ({}, "invalid token"),
+    ]:
         r = client.get("/api/reports/x", headers=headers)
-        assert (r.status_code, r.json()) == (401, {"detail": "invalid token"}), headers
+        assert (r.status_code, r.json()) == (401, {"detail": detail}), headers
 
 
 def test_push_and_get_report(client):
@@ -846,8 +851,9 @@ def admin(shared_client, shared_settings):
 def test_shared_mode_refuses_the_shared_token_and_accepts_member_tokens(shared_settings):
     client = TestClient(create_app(replace(shared_settings, api_token="t")))
     alice = _agent(shared_settings, "alice@example.com")
-    r = push(client, auth=H)
-    assert (r.status_code, r.json()) == (401, {"detail": "invalid token"})
+    for auth in (H, {"Authorization": "Bearer change-me"}):
+        r = push(client, auth=auth)
+        assert (r.status_code, r.json()) == (401, {"detail": SHARED_TOKEN})
     assert push(client, auth=alice).status_code == 201
 
 
@@ -921,13 +927,18 @@ def test_shared_mode_reviewers_must_be_active_members(shared_client, shared_sett
     with closing(db.connect(shared_settings.db_path)) as conn:
         db.add_user(conn, id="gone@example.com", name="gone", role="member")
         db.update_user(conn, "gone@example.com", active=False)
-    for reviewers, unknown in [
-        (["bob@example.com", "ghost@example.com", "zed@example.com"], "ghost@example.com"),
-        (["gone@example.com"], "gone@example.com"),
+    for reviewers, bad in [
+        (
+            ["bob@example.com", "ghost@example.com", "zed@example.com", "Ghost@example.com"],
+            ["ghost@example.com", "zed@example.com"],
+        ),
+        (["gone@example.com"], ["gone@example.com"]),
     ]:
         r = push(shared_client, auth=alice, reviewers=reviewers)
-        detail = f"Reviewer {unknown} is not an active member."
-        assert (r.status_code, r.json()) == (422, {"detail": detail})
+        assert (r.status_code, r.json()) == (
+            422,
+            {"detail": "inactive reviewers", "reviewers": bad},
+        )
     assert shared_client.get("/api/reports/prorate", headers=alice).status_code == 404
     ok = push(shared_client, auth=alice, reviewers=["bob@example.com", "admin@example.com"])
     assert ok.status_code == 201
@@ -943,7 +954,11 @@ def test_agents_comment_only_on_their_owners_reports(shared_client, alice, bob, 
         assert (r.status_code, r.json()) == (403, {"detail": NOT_OWNER})
     ok = shared_client.post(url, json={"body": "Hi", "author": "Claude"}, headers=alice)
     assert ok.status_code == 201
-    assert (ok.json()["author_id"], ok.json()["author"]) == ("agent", "Claude")
+    assert (ok.json()["author_id"], ok.json()["author"]) == ("agent", "alice's agent")
+    reply = shared_client.post(
+        url, json={"body": "Re", "parent_id": ok.json()["id"]}, headers=alice
+    )
+    assert reply.json()["author"] == "alice's agent"
     assert len(shared_client.get(url, headers=bob).json()["threads"]) == 1
 
 
@@ -965,10 +980,10 @@ def test_agents_resolve_only_agent_threads_on_their_owners_reports(
         return shared_client.post(f"{url}/{cid}/resolve", headers=auth)
 
     for cid, auth, detail in [
-        (human_thread, alice, MODERATION),
+        (human_thread, alice, AGENT_RESOLVE),
         (human_thread, bob, NOT_OWNER),
         (human_thread, admin, NOT_OWNER),
-        (owners_thread, alice, MODERATION),
+        (owners_thread, alice, AGENT_RESOLVE),
         (agent_thread, bob, NOT_OWNER),
         (agent_thread, admin, NOT_OWNER),
     ]:
@@ -1020,3 +1035,18 @@ def test_local_mode_push_keeps_the_case_of_ids(client):
     assert push(client, author_id="Alice000", reviewers=["Bob00000"]).status_code == 201
     report = client.get("/api/reports/prorate", headers=H).json()
     assert (report["author_id"], report["reviewers"]) == ("Alice000", ["Bob00000"])
+
+
+def test_shared_mode_wait_stops_when_the_token_is_revoked(shared_client, shared_settings, alice):
+    push(shared_client, auth=alice)
+
+    def revoke(conn):
+        [token] = db.list_tokens(conn, "alice@example.com")
+        db.revoke_token(conn, token["id"])
+
+    thread = _later(shared_settings, 0.6, revoke)
+    start = time.monotonic()
+    r = shared_client.get("/api/reports/prorate/wait?timeout=10", headers=alice)
+    thread.join()
+    assert time.monotonic() - start < 3
+    assert (r.status_code, r.json()) == (401, {"detail": "invalid token"})
