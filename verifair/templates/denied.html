@@ -16,7 +16,7 @@
       <p>{{ message }}</p>
     </div>
   </header>
-  <p>{% if back %}<a href="{{ back }}">Back to Access</a> · {% endif %}<a href="/">Go to projects</a></p>
+  {% if back or home %}<p>{% if back %}<a href="{{ back }}">Back to Access</a>{% if home %} · {% endif %}{% endif %}{% if home %}<a href="/">Go to projects</a>{% endif %}</p>{% endif %}
 </main>
 </body>
 </html>

@@ -298,6 +298,7 @@ def test_member_deactivated_mid_request_gets_the_denied_page(
     assert r.status_code == 403 and r.headers["content-type"].startswith("text/html")
     assert r.headers["cache-control"] == "no-store"
     assert "Ask an admin to reactivate bob@example.com." in r.text
+    assert '<a href="/">' not in r.text
     assert db.list_tokens(conn) == []
 
 
@@ -470,17 +471,27 @@ def test_add_member_inputs_check_the_id_in_the_browser(shared_client):
     assert 'class="error"' not in card and "autofocus" not in page
 
 
-def test_denied_page_has_a_heading_and_links_back(shared_client, as_user):
+def test_denied_page_has_a_heading_and_links_back(shared_client, conn, as_user):
     bob = as_user("bob@example.com")
-    for r, back in [
-        (shared_client.post("/access/users", data={"id": "e", "name": "E"}, headers=bob), True),
-        (shared_client.get("/", headers={"X-Forwarded-Email": "x@example.com"}), False),
+    as_user("gone@example.com")
+    db.update_user(conn, "gone@example.com", active=False)
+    for r, back, home in [
+        (
+            shared_client.post("/access/users", data={"id": "e", "name": "E"}, headers=bob),
+            True,
+            True,
+        ),
+        (shared_client.get("/", headers={"X-Forwarded-Email": "x@example.com"}), False, False),
+        (shared_client.get("/", headers={"X-Forwarded-Email": "gone@example.com"}), False, False),
     ]:
         assert r.status_code == 403
         assert '<main class="landing-wrap">' in r.text and "<h1>No access</h1>" in r.text
-        assert 'href="/static/landing.css"' in r.text and '<a href="/">' in r.text
+        assert 'href="/static/landing.css"' in r.text
+        assert ('<a href="/">' in r.text) is home
         assert ('<a href="/access">' in r.text) is back
         assert "<script" not in r.text and 'class="topbar"' not in r.text
+    signin = shared_client.get("/", headers={"X-Forwarded-Email": ""})
+    assert signin.status_code == 401 and '<a href="/">Go to projects</a>' in signin.text
 
 
 def test_new_token_has_a_copy_button_and_the_note_describes_the_field(shared_client):
