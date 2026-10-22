@@ -1542,6 +1542,10 @@ def test_thread_markup_for_allowed_users_matches_local_mode(shared_settings, mod
 REOPEN_CONFIRM = (
     ' hx-confirm="Reopen this thread? Only its starter or an admin can resolve it again."'
 )
+AGENT_REOPEN_CONFIRM = (
+    ' hx-confirm="Reopen this thread? Only its starter, the report owner for agent threads,'
+    ' or an admin can resolve it again."'
+)
 
 
 def test_reopen_asks_first_only_when_the_user_cannot_resolve_it_again(
@@ -1563,8 +1567,12 @@ def test_reopen_asks_first_only_when_the_user_cannot_resolve_it_again(
         ("owner", False, True),
         ("admin", True, True),
     ]:
-        for cid, ok in ((human, human_ok), (agent, agent_ok)):
-            assert (REOPEN_CONFIRM in reopen(who, cid)) is not ok, (who, cid)
+        for cid, ok, confirm, other in (
+            (human, human_ok, REOPEN_CONFIRM, AGENT_REOPEN_CONFIRM),
+            (agent, agent_ok, AGENT_REOPEN_CONFIRM, REOPEN_CONFIRM),
+        ):
+            button = reopen(who, cid)
+            assert (confirm in button) is not ok and other not in button, (who, cid)
 
     conn = db.connect(shared_settings.db_path)
     report = db.get_report(conn, "r")
@@ -1577,7 +1585,10 @@ def test_reopen_asks_first_only_when_the_user_cannot_resolve_it_again(
 
     admin, dave = threads("admin@example.com"), threads("dave@example.com")
     assert all('id="vf_reopen_' in html and "hx-confirm" not in html for html in admin.values())
-    assert {cid: html.replace(REOPEN_CONFIRM, "") for cid, html in dave.items()} == admin
+    assert {
+        cid: html.replace(REOPEN_CONFIRM, "").replace(AGENT_REOPEN_CONFIRM, "")
+        for cid, html in dave.items()
+    } == admin
     conn.close()
 
 
