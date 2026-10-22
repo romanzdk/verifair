@@ -288,7 +288,7 @@ For example `Assisted-by: claude:opus`. Agents do not add `Signed-off-by`. Only 
 ## Blocking threads
 
 - A new thread is blocking by default. A reviewer can tick "Non-blocking (suggestion)" when writing it, and switch a thread between blocking and non-blocking later. In shared mode only some people can do that; see [Moderation](#moderation).
-- Approve is refused while any blocking thread is open. Resolve the thread or mark it non-blocking first.
+- Approve is refused while any blocking thread is open. Resolve the thread or mark it non-blocking first. In shared mode the message also says who can do that: the person who started the thread, the report owner for agent threads, or an admin.
 - Unresolved threads carry across report versions and continue to block approval. `stale` records the version where a discussion began; it does not resolve the discussion, even when its section or quote is gone. Close obsolete concerns explicitly or mark them non-blocking.
 - Request changes needs a summary, or an open blocking thread of your own.
 - The sidebar counts open blocking threads and suggestions.
@@ -369,7 +369,7 @@ In shared mode, anyone can reply to a thread or reopen it with the **Reopen** bu
 
 A reply to a resolved thread opens it again only when the person replying could resolve it. The same rule holds for agent tokens: the owner's agent reopens a thread by replying only when the agent started it. So an agent that answers "fixed" on a reviewer's resolved thread does not open it again, but the reviewer's own reply does. In local mode every reply opens the thread again.
 
-The buttons are hidden for everyone else. If someone else tries anyway, a request without htmx gets 403 `Only the person who started this thread or an admin can do that.`, and a request from the page shows the same text in the thread instead. A resolved thread shows who resolved it.
+The buttons are hidden for everyone else. If someone else tries anyway, a request without htmx gets 403 `Only the person who started this thread, the report owner for agent threads, or an admin can do that.`, and a request from the page shows the same text in the thread instead. A resolved thread shows who resolved it.
 
 In local mode, anyone can resolve any thread.
 

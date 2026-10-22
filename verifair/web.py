@@ -41,9 +41,10 @@ SCOPES = {"all": "All changes", "author": "My changes", "reviewer": "My reviews"
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
+BLOCKED_LOCAL = "Resolve the open blocking threads first, or mark them non-blocking."
 BLOCKED = (
-    "Resolve the open blocking threads first. Ask the person who started each one, or an admin,"
-    " to resolve it or mark it non-blocking."
+    "Resolve the open blocking threads first. Ask the person who started each one, the report"
+    " owner for agent threads, or an admin to resolve it or mark it non-blocking."
 )
 Body = Annotated[str, Form(max_length=20000)]
 Anchor = Annotated[str, Form(max_length=2000)]
@@ -584,7 +585,7 @@ def post_verdict(
             return SELF_REVIEW
         threads = build_threads(db.list_comments(conn, id), [], version)
         if verdict == "approve" and not rules.can_approve(threads):
-            return BLOCKED
+            return BLOCKED if _shared(request) else BLOCKED_LOCAL
         if verdict == "request_changes" and not rules.can_request_changes(
             threads, user_id, summary
         ):

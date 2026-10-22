@@ -1013,9 +1013,10 @@ def test_resigning_keeps_the_first_signer_and_does_not_notify(client, monkeypatc
     assert (g["status"], g["signed_by"]) == ("approved", "Signer")
 
 
-BLOCKING_COPY = (
-    "Resolve the open blocking threads first. Ask the person who started each one, or an admin,"
-    " to resolve it or mark it non-blocking."
+BLOCKING_COPY = "Resolve the open blocking threads first, or mark them non-blocking."
+SHARED_BLOCKING_COPY = (
+    "Resolve the open blocking threads first. Ask the person who started each one, the report"
+    " owner for agent threads, or an admin to resolve it or mark it non-blocking."
 )
 
 
@@ -1344,7 +1345,10 @@ def test_blocking_toggle_preserves_draft_verdict_form(client):
     assert "You approved v1" in _approve(client).text
 
 
-MODERATION_COPY = "Only the person who started this thread or an admin can do that."
+MODERATION_COPY = (
+    "Only the person who started this thread, the report owner for agent threads, or an admin"
+    " can do that."
+)
 
 
 @pytest.fixture
@@ -1429,6 +1433,16 @@ def test_shared_mode_moderation_refused_for_other_member(
     assert _moderation_state(shared_settings, human) == (0, None, 1)
     assert _moderation_state(shared_settings, agent) == (0, None, 1)
     assert shared_client.post("/r/r/comments/999/resolve", headers=dave).status_code == 404
+
+
+def test_shared_mode_blocked_approval_names_who_can_resolve(shared_client, moderation):
+    people, _, _ = moderation
+    assert shared_client.post("/r/r/sign", data={"version": 1}, headers=people["owner"]).is_success
+    r = shared_client.post(
+        "/r/r/verdict", data={"version": 1, "verdict": "approve"}, headers=people["dave"]
+    )
+    assert f'<p class="error" role="alert">{SHARED_BLOCKING_COPY}</p>' in r.text
+    assert BLOCKING_COPY not in r.text
 
 
 def test_shared_mode_refusal_on_resolved_thread_opens_the_card(shared_client, moderation):
