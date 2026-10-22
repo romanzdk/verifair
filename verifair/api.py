@@ -177,10 +177,13 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
         return JSONResponse({"detail": "missing sections", "sections": missing}, 422)
     owner = request.state.token_owner
     author = body.author if "author" in body.model_fields_set else None
+    reviewers = body.reviewers
     if owner is not None:
-        if body.author_id not in (None, owner["id"]):
+        if body.author_id is not None and body.author_id.lower() != owner["id"]:
             raise HTTPException(403, "author_id must be the token owner.")
-        for reviewer in body.reviewers or ():
+        if reviewers is not None:
+            reviewers = [reviewer.lower() for reviewer in reviewers]
+        for reviewer in reviewers or ():
             member = db.get_user(conn, reviewer)
             if member is None or not member["active"]:
                 return JSONResponse(
@@ -199,7 +202,7 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             links=[link.model_dump() for link in body.links],
             author=author,
             author_id=body.author_id,
-            reviewers=body.reviewers,
+            reviewers=reviewers,
             agent=body.agent,
             model=body.model,
             session_url=body.session_url,

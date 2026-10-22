@@ -1002,3 +1002,21 @@ def test_agents_cannot_comment_on_or_resolve_threads_of_unowned_reports(
         assert (r.status_code, r.json()) == (403, {"detail": NO_OWNER})
     [thread] = shared_client.get(url, headers=alice).json()["threads"]
     assert (thread["resolved"], thread["replies"]) == (False, [])
+
+
+def test_shared_mode_push_lower_cases_author_id_and_reviewers(shared_client, alice, bob):
+    r = push(
+        shared_client,
+        auth=alice,
+        author_id="Alice@Example.com",
+        reviewers=["Bob@Example.com", "BOB@example.com"],
+    )
+    assert r.status_code == 201
+    report = shared_client.get("/api/reports/prorate", headers=alice).json()
+    assert (report["author_id"], report["reviewers"]) == ("alice@example.com", ["bob@example.com"])
+
+
+def test_local_mode_push_keeps_the_case_of_ids(client):
+    assert push(client, author_id="Alice000", reviewers=["Bob00000"]).status_code == 201
+    report = client.get("/api/reports/prorate", headers=H).json()
+    assert (report["author_id"], report["reviewers"]) == ("Alice000", ["Bob00000"])

@@ -559,7 +559,7 @@ def _check_role(role: str) -> None:
 
 def add_user(conn: sqlite3.Connection, *, id: str, name: str, role: str) -> sqlite3.Row:
     _check_role(role)
-    now = _now()
+    id, now = id.lower(), _now()
     with _write(conn):
         try:
             conn.execute(
@@ -610,7 +610,7 @@ def update_user(
 
 
 def bootstrap_admin(conn: sqlite3.Connection, admin_id: str) -> bool:
-    now = _now()
+    admin_id, now = admin_id.lower(), _now()
     with _write(conn):
         cur = conn.execute(
             "INSERT INTO users (id, name, role, created_at, updated_at)"

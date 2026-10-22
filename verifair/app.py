@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -12,27 +13,35 @@ CSP = (
     "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
     " frame-ancestors 'none'"
 )
+log = logging.getLogger("verifair")
 SIGN_IN = "Sign in through your company login to use verifair."
 
 
-def _active_member(db_path: str, user_id: str):
+def _get_user(db_path: str, user_id: str):
     conn = db.connect(db_path)
     try:
-        member = db.get_user(conn, user_id)
+        return db.get_user(conn, user_id)
     finally:
         conn.close()
-    return member if member is not None and member["active"] else None
 
 
 async def _membership_denial(request: Request, settings: Settings):
-    user_id = request.headers.get(settings.identity_header, "").strip()
-    if not user_id or user_id == "agent":
-        message, status = SIGN_IN, 401
+    values = request.headers.getlist(settings.identity_header)
+    user_id = values[0].strip().lower() if len(values) == 1 else ""
+    message, status = SIGN_IN, 401
+    if len(values) > 1:
+        reason = "duplicate-header"
+    elif user_id in ("", "agent"):
+        reason = "missing-header"
     else:
-        request.state.member = await run_in_threadpool(_active_member, settings.db_path, user_id)
-        if request.state.member is not None:
+        user = await run_in_threadpool(_get_user, settings.db_path, user_id)
+        if user is not None and user["active"]:
+            request.state.member = user
             return None
-        message, status = web.NOT_MEMBER.format(id=user_id), 403
+        reason = "not-member" if user is None else "inactive"
+        status = 403
+        message = (web.NOT_MEMBER if user is None else web.DEACTIVATED).format(id=user_id)
+    log.info("membership denied reason=%s path=%s", reason, request.url.path)
     return web.templates.TemplateResponse(
         request, "denied.html", {"message": message}, status_code=status
     )

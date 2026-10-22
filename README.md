@@ -69,7 +69,7 @@ The commands below use the report `id` as `$ID`. In shared mode, use your own ag
 - `project` and `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`: letters, digits, `.`, `_` and `-`, starting with a letter or digit, up to 100 characters.
 - `ticket_url`, `session_url` and `links[].url` must start with `http://` or `https://`.
 - Optional `author` (up to 60 characters): the human author's display name. Defaults to `agent`. Use `author_id` to link ownership to a stable identity. In shared mode `author` is ignored and the report shows the token owner's name.
-- Optional `author_id`: the owner's stable identity, separate from the display name in `author`. Optional `reviewers`: up to 50 stable identities to request reviews from. Each ID must be 1–256 characters and cannot be `agent`; it must match the user's identity exactly. Duplicate reviewers are stored once.
+- Optional `author_id`: the owner's stable identity, separate from the display name in `author`. Optional `reviewers`: up to 50 stable identities to request reviews from. Each ID must be 1–256 characters and cannot be `agent`. In local mode it must match the user's identity exactly; in shared mode verifair turns `author_id` and `reviewers` into lower case first. Duplicate reviewers are stored once.
 - On later versions, omitted `author`, `author_id` and `reviewers` retain their previous values. In local mode a supplied `author_id` transfers ownership; a supplied reviewer list replaces the requests, and `reviewers: []` clears them. `null` for `author_id` or `reviewers` also leaves the existing value unchanged. Requests belong to the change and survive signing, verdicts and new versions.
 - Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
 - The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as a top-level H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
@@ -302,7 +302,7 @@ verifair has two modes. `VERIFAIR_IDENTITY_HEADER` switches between them.
 2. The proxy must set the identity header on every request. It must strip any value the client sent and write its own. Otherwise anyone can pose as anyone.
 3. Make verifair reachable only through the proxy. Anyone who can reach it directly can send any header.
 4. Set `VERIFAIR_IDENTITY_HEADER` to the header name, for example `X-Forwarded-Email`.
-5. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID` to your own id, exactly as the proxy sends it, for example `jane@example.com`. On a database with no members, startup makes this id the first admin. Once members exist, it adds no one.
+5. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID` to your own id as the proxy sends it, for example `jane@example.com`. Case does not matter. On a database with no members, startup makes this id the first admin. Once members exist, it adds no one.
 6. `VERIFAIR_API_TOKEN` is not needed. If it is set, shared mode refuses it.
 
 ```bash
@@ -313,7 +313,7 @@ uv run uvicorn verifair.asgi:app
 
 Startup fails when the database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set. It also fails when the id is not a plain id (no spaces, `/` or `\`, and not `agent`).
 
-A request without the header gets 401. A signed-in person who is not an active member gets 403 with a note to ask an admin. `/healthz` and `/static/` stay public. `/api/` uses tokens. Every other page, including `/docs` and `/openapi.json`, needs membership.
+A request without the header, or with the header sent more than once, gets 401. A signed-in person who was never added gets 403 with a note to ask an admin to add their id. A deactivated member gets 403 `Your access to this workspace was turned off. Ask an admin to reactivate {id}.` Each refusal is logged at INFO as `membership denied reason=... path=...`, where the reason is `missing-header`, `duplicate-header`, `not-member` or `inactive`. `/healthz` and `/static/` stay public. `/api/` uses tokens. Every other page, including `/docs` and `/openapi.json`, needs membership.
 
 ### What members and admins can do
 
@@ -330,7 +330,7 @@ A request without the header gets 401. A signed-in person who is not an active m
 
 ### Members and roles
 
-Admins manage members on the **Access** page (`/access`, linked next to **Your identity** on the landing pages). To add a member, enter their id exactly as the proxy sends it (case matters), a display name, and a role: `admin` or `member`. The members table changes roles and deactivates or reactivates people. Members are never deleted, so their history stays.
+Admins manage members on the **Access** page (`/access`, linked next to **Your identity** on the landing pages). To add a member, enter their id as the proxy sends it, a display name, and a role: `admin` or `member`. Ids are matched without regard to case: verifair stores them in lower case and turns the header value into lower case too, so `Jane@Example.com` and `jane@example.com` are the same member. The members table changes roles and deactivates or reactivates people. Members are never deleted, so their history stays.
 
 A deactivated member is refused on their next request, and all their tokens are revoked. Reactivating them does not bring old tokens back.
 

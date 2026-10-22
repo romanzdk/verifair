@@ -49,13 +49,14 @@ MEMBER_EXISTS = "That member already exists."
 MEMBER_INPUT = "Enter an id (1–200 characters) and a name (1–60 characters)."
 MEMBER_PLAIN = "Use a plain id such as jane@example.com."
 NOT_MEMBER = "You are not a member of this workspace yet. Ask an admin to add {id}."
+DEACTIVATED = "Your access to this workspace was turned off. Ask an admin to reactivate {id}."
 LABEL_INPUT = "Enter a label (1–60 characters)."
 ADMIN_ONLY = "Only an admin can manage members."
 OWNER_ONLY = "Only the token owner or an admin can revoke it."
 
 
 def plain_id(value: str) -> bool:
-    return PLAIN_ID.fullmatch(value) is not None and value not in (".", "..", "agent")
+    return PLAIN_ID.fullmatch(value) is not None and value.lower() not in (".", "..", "agent")
 
 
 def _shared(request: Request) -> bool:
@@ -702,7 +703,7 @@ def add_member(
 ):
     if member["role"] != "admin":
         return _denied(request, ADMIN_ONLY)
-    id, name = id.strip(), name.strip()
+    id, name = id.strip().lower(), name.strip()
     if not (1 <= len(id) <= 200 and 1 <= len(name) <= 60):
         return _access(request, conn, user, error=MEMBER_INPUT, status=422)
     if not plain_id(id):
@@ -753,7 +754,7 @@ def new_token(
     try:
         token, row = db.create_token(conn, owner_id=member["id"], label=label)
     except ValueError:
-        return _denied(request, NOT_MEMBER.format(id=member["id"]))
+        return _denied(request, DEACTIVATED.format(id=member["id"]))
     log.info("access action=create_token actor=%s target=%s", user[0], row["id"])
     return _access(request, conn, user, token=token)
 

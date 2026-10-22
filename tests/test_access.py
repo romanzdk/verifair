@@ -273,7 +273,7 @@ def test_member_deactivated_mid_request_gets_the_denied_page(
     r = shared_client.post("/access/tokens", data={"label": "laptop"}, headers=bob)
     assert r.status_code == 403 and r.headers["content-type"].startswith("text/html")
     assert r.headers["cache-control"] == "no-store"
-    assert "Ask an admin to add bob@example.com." in r.text
+    assert "Ask an admin to reactivate bob@example.com." in r.text
     assert db.list_tokens(conn) == []
 
 
@@ -341,3 +341,22 @@ def test_existing_id_with_a_slash_is_encoded_in_row_actions(shared_client, conn)
         "/access/users/team%2Fops", data={"role": "admin"}, headers=ADMIN, follow_redirects=False
     )
     assert r.status_code == 303 and db.get_user(conn, "team/ops")["role"] == "admin"
+
+
+def test_member_ids_are_stored_lower_case_and_compared_case_insensitively(shared_client, conn):
+    r = shared_client.post(
+        "/access/users",
+        data={"id": " Bob@X.com ", "name": "Bob"},
+        headers=ADMIN,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com", "bob@x.com"]
+    r = shared_client.post(
+        "/access/users", data={"id": "bob@x.com", "name": "Again"}, headers=ADMIN
+    )
+    assert r.status_code == 409 and EXISTS in r.text
+    r = shared_client.post("/access/users", data={"id": "Agent", "name": "A"}, headers=ADMIN)
+    assert r.status_code == 422 and db.get_user(conn, "agent") is None
+    with pytest.raises(ValueError):
+        db.add_user(conn, id="BOB@x.com", name="Bob", role="member")

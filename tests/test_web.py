@@ -733,8 +733,56 @@ def test_shared_mode_non_members_are_403_and_deactivation_takes_effect(
             assert r.headers["content-security-policy"] == CSP
             escaped = who.replace("<", "&lt;").replace(">", "&gt;")
             copy = f"You are not a member of this workspace yet. Ask an admin to add {escaped}."
+            if who == "gone@example.com":
+                copy = (
+                    "Your access to this workspace was turned off."
+                    " Ask an admin to reactivate gone@example.com."
+                )
             assert copy in r.text
             assert "<b>" not in r.text
+
+
+def test_shared_mode_header_is_matched_case_insensitively(shared_client, as_user):
+    page = shared_client.get("/access", headers={"X-Forwarded-Email": " Admin@Example.COM "})
+    assert page.status_code == 200 and "Add member" in page.text
+    as_user("bob@example.com")
+    bob = shared_client.get("/", headers={"X-Forwarded-Email": "BOB@example.com"})
+    assert bob.status_code == 200 and '<span class="me">bob</span>' in bob.text
+    for value in ("Agent", "AGENT"):
+        r = shared_client.get("/", headers={"X-Forwarded-Email": value})
+        assert r.status_code == 401 and SIGN_IN_COPY in r.text
+
+
+def test_shared_mode_duplicate_identity_header_is_401(shared_settings):
+    pair = [("X-Forwarded-Email", "admin@example.com"), ("X-Forwarded-Email", "eve@example.com")]
+    for values in (pair, pair[:1] * 2):
+        r = _anonymous(shared_settings).get("/access", headers=values)
+        assert r.status_code == 401 and SIGN_IN_COPY in r.text
+
+
+def test_shared_mode_denials_are_logged_with_reason_and_path(
+    shared_client, shared_settings, as_user, caplog
+):
+    from verifair import db
+
+    caplog.set_level("INFO", logger="verifair")
+    as_user("gone@example.com")
+    conn = db.connect(shared_settings.db_path)
+    db.update_user(conn, "gone@example.com", active=False)
+    conn.close()
+    anonymous = _anonymous(shared_settings)
+    anonymous.get("/r/x")
+    anonymous.get("/", headers=[("X-Forwarded-Email", "a"), ("X-Forwarded-Email", "b")])
+    anonymous.get("/p/q", headers={"X-Forwarded-Email": "stranger@example.com"})
+    anonymous.get("/access", headers={"X-Forwarded-Email": "gone@example.com"})
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("membership ")]
+    assert lines == [
+        "membership denied reason=missing-header path=/r/x",
+        "membership denied reason=duplicate-header path=/",
+        "membership denied reason=not-member path=/p/q",
+        "membership denied reason=inactive path=/access",
+    ]
+    assert all(r.levelname == "INFO" for r in caplog.records if "membership" in r.getMessage())
 
 
 def test_shared_mode_member_is_the_users_row_and_gets_no_cookies(

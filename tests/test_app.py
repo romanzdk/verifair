@@ -49,6 +49,19 @@ def test_shared_mode_startup_bootstraps_the_first_admin(shared_settings):
     assert users() == [("admin@example.com", "admin", "admin")]
 
 
+def test_bootstrap_admin_id_is_stored_lower_case(shared_settings):
+    create_app(replace(shared_settings, bootstrap_admin_id="Admin@Example.com"))
+    conn = db.connect(shared_settings.db_path)
+    assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
+    conn.close()
+
+
+@pytest.mark.parametrize("value", ["Agent", "AGENT"])
+def test_bootstrap_admin_id_agent_is_refused_in_any_case(shared_settings, value):
+    with pytest.raises(RuntimeError, match="plain id"):
+        create_app(replace(shared_settings, bootstrap_admin_id=value))
+
+
 def test_local_mode_startup_needs_no_users(settings):
     create_app(replace(settings, bootstrap_admin_id="admin@example.com"))
     conn = db.connect(settings.db_path)
