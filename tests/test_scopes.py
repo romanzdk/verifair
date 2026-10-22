@@ -231,3 +231,19 @@ def test_schema_upgrade_recovers_owner_from_latest_signature_only(settings):
     assert db.get_report(conn, "signed")["author_id"] == "bob00000"
     assert db.get_report(conn, "draft")["author_id"] is None
     conn.close()
+
+
+def test_shared_my_changes_ignores_a_legacy_author_equal_to_the_user(team):
+    conn = db.connect(team.app.state.settings.db_path)
+    db.push_report(
+        conn,
+        id="legacy",
+        project="billing",
+        title="legacy",
+        risk="low",
+        body="## Intent\nx",
+        author="alice@example.com",
+    )
+    conn.close()
+    assert 'href="/r/legacy"' in team.get("/p/billing", headers=ALICE).text
+    assert 'href="/r/legacy"' not in team.get("/p/billing?scope=author", headers=ALICE).text

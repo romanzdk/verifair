@@ -24,7 +24,7 @@ from verifair.render import (
     section_headings,
     split_sections,
 )
-from verifair.rules import MODERATION, compute_status
+from verifair.rules import MODERATION, NO_OWNER, compute_status
 
 NOT_OWNER = "This report belongs to another member."
 
@@ -127,6 +127,13 @@ def _require_report(conn: sqlite3.Connection, id: str) -> sqlite3.Row:
     return report
 
 
+def _require_owner(report: sqlite3.Row, owner: sqlite3.Row | None) -> None:
+    if owner is not None and report["author_id"] is None:
+        raise HTTPException(403, NO_OWNER)
+    if owner is not None and report["author_id"] != owner["id"]:
+        raise HTTPException(403, NOT_OWNER)
+
+
 def _current_sections(conn: sqlite3.Connection, id: str) -> list[Section]:
     return split_sections(db.get_version(conn, id, db.latest_version(conn, id))["body"])
 
@@ -199,6 +206,8 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             commit=body.commit,
             owner_id=owner["id"] if owner is not None else None,
         )
+    except db.NoOwner:
+        raise HTTPException(403, NO_OWNER) from None
     except db.NotOwner:
         raise HTTPException(403, NOT_OWNER) from None
     except db.ProjectMismatch:
@@ -344,9 +353,7 @@ def post_comment(
     id: str, body: CommentIn, request: Request, conn: Conn, background: BackgroundTasks
 ):
     report = _require_report(conn, id)
-    owner = request.state.token_owner
-    if owner is not None and report["author_id"] != owner["id"]:
-        raise HTTPException(403, NOT_OWNER)
+    _require_owner(report, request.state.token_owner)
     if body.parent_id is not None and any(
         value is not None for value in (body.section, body.quote, body.prefix, body.suffix)
     ):
@@ -397,10 +404,11 @@ def resolve_comment(id: str, cid: int, request: Request, conn: Conn):
     owner = request.state.token_owner
     by = None
     if owner is not None:
+        _require_owner(report, owner)
         root = db.thread_root(conn, id, cid)
         if root is None:
             raise HTTPException(404, "comment not found")
-        if root["author_id"] != "agent" or report["author_id"] != owner["id"]:
+        if root["author_id"] != "agent":
             raise HTTPException(403, MODERATION)
         by = "agent"
     if db.resolve_thread(conn, id, cid, by=by) is None:

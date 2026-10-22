@@ -120,6 +120,10 @@ class NotOwner(Exception):
     pass
 
 
+class NoOwner(Exception):
+    pass
+
+
 class StaleVersion(Exception):
     def __init__(self, latest: int) -> None:
         super().__init__(f"latest version is {latest}")
@@ -216,6 +220,8 @@ def push_report(
     with _write(conn):
         existing = get_report(conn, id) if id else None
         if existing:
+            if owner_id is not None and existing["author_id"] is None:
+                raise NoOwner(f"report {id!r} has no owner")
             if owner_id is not None and existing["author_id"] != owner_id:
                 raise NotOwner(f"report {id!r} belongs to another member")
             if existing["project"] != project:
@@ -308,13 +314,21 @@ def list_projects(conn: sqlite3.Connection) -> list[str]:
 
 
 def list_reports(
-    conn: sqlite3.Connection, project: str, *, scope: str = "all", user_id: str | None = None
+    conn: sqlite3.Connection,
+    project: str,
+    *,
+    scope: str = "all",
+    user_id: str | None = None,
+    legacy_author: bool = True,
 ) -> list[sqlite3.Row]:
     conditions = ["r.project=?"]
     parameters = [project]
-    if scope == "author":
+    if scope == "author" and legacy_author:
         conditions.append("(r.author_id=? OR (r.author_id IS NULL AND r.author=?))")
         parameters.extend((user_id, user_id))
+    elif scope == "author":
+        conditions.append("r.author_id=?")
+        parameters.append(user_id)
     elif scope == "reviewer":
         conditions.append(
             "EXISTS (SELECT 1 FROM review_requests q WHERE q.report_id=r.id AND q.reviewer_id=?)"

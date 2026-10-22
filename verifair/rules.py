@@ -11,6 +11,7 @@ STATUS_LABELS = {
 }
 
 MODERATION = "Only the person who started this thread or an admin can do that."
+NO_OWNER = "This report has no owner. Push it again with an agent token under a new id."
 
 _VERDICT_LABELS = {"approve": "approved", "request_changes": "requested changes"}
 

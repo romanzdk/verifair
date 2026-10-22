@@ -17,6 +17,7 @@ H = {"Authorization": "Bearer t"}
 SAMPLE = "## Intent\nFull new price.\n\n## Edge cases\nFirst day."
 NOT_OWNER = "This report belongs to another member."
 MODERATION = "Only the person who started this thread or an admin can do that."
+NO_OWNER = "This report has no owner. Push it again with an agent token under a new id."
 
 
 def push(client, auth=H, **overrides):
@@ -897,9 +898,13 @@ def test_push_to_another_members_report_is_refused_even_for_admins(
     assert push(shared_client, auth=alice).status_code == 201
     with closing(db.connect(shared_settings.db_path)) as conn:
         db.push_report(conn, project="billing-service", title="Legacy", risk="low", body=SAMPLE)
-    for auth, id in [(bob, "prorate"), (admin, "prorate"), (alice, "legacy")]:
+    for auth, id, detail in [
+        (bob, "prorate", NOT_OWNER),
+        (admin, "prorate", NOT_OWNER),
+        (alice, "legacy", NO_OWNER),
+    ]:
         r = push(shared_client, auth=auth, id=id, title="Taken over")
-        assert (r.status_code, r.json()) == (403, {"detail": NOT_OWNER}), id
+        assert (r.status_code, r.json()) == (403, {"detail": detail}), id
     for id, title, owner in [
         ("prorate", "Prorate", "alice@example.com"),
         ("legacy", "Legacy", None),
@@ -959,16 +964,16 @@ def test_agents_resolve_only_agent_threads_on_their_owners_reports(
     def resolve(cid, auth):
         return shared_client.post(f"{url}/{cid}/resolve", headers=auth)
 
-    for cid, auth in [
-        (human_thread, alice),
-        (human_thread, bob),
-        (human_thread, admin),
-        (owners_thread, alice),
-        (agent_thread, bob),
-        (agent_thread, admin),
+    for cid, auth, detail in [
+        (human_thread, alice, MODERATION),
+        (human_thread, bob, NOT_OWNER),
+        (human_thread, admin, NOT_OWNER),
+        (owners_thread, alice, MODERATION),
+        (agent_thread, bob, NOT_OWNER),
+        (agent_thread, admin, NOT_OWNER),
     ]:
         r = resolve(cid, auth)
-        assert (r.status_code, r.json()) == (403, {"detail": MODERATION}), cid
+        assert (r.status_code, r.json()) == (403, {"detail": detail}), cid
     assert resolve(999, alice).status_code == 404
     reply = shared_client.post(
         url, json={"body": "Done", "parent_id": agent_thread}, headers=alice
@@ -978,3 +983,22 @@ def test_agents_resolve_only_agent_threads_on_their_owners_reports(
         rows = {c["id"]: c for c in db.list_comments(conn, "prorate")}
     assert rows[agent_thread]["resolved_by"] == "agent"
     assert rows[human_thread]["resolved_at"] is rows[owners_thread]["resolved_at"] is None
+
+
+def test_agents_cannot_comment_on_or_resolve_threads_of_unowned_reports(
+    shared_client, shared_settings, alice
+):
+    with closing(db.connect(shared_settings.db_path)) as conn:
+        db.push_report(conn, project="p", title="Legacy", risk="low", body=SAMPLE)
+        cid = db.add_comment(
+            conn, report_id="legacy", version=1, author_id="agent", author_name="a", body="x"
+        )["id"]
+    url = "/api/reports/legacy/comments"
+    for r in [
+        shared_client.post(url, json={"body": "Hi"}, headers=alice),
+        shared_client.post(url, json={"body": "Hi", "parent_id": cid}, headers=alice),
+        shared_client.post(f"{url}/{cid}/resolve", headers=alice),
+    ]:
+        assert (r.status_code, r.json()) == (403, {"detail": NO_OWNER})
+    [thread] = shared_client.get(url, headers=alice).json()["threads"]
+    assert (thread["resolved"], thread["replies"]) == (False, [])

@@ -924,16 +924,26 @@ def test_identity_header_cookie_user_may_not_sign(proxied):
     assert r.status_code == 401 and api_report(proxied)["status"] == "unsigned"
 
 
-def test_identity_header_anyone_may_sign_agent_authored_report(proxied):
+NO_OWNER_COPY = "This report has no owner. Push it again with an agent token under a new id."
+
+
+@pytest.mark.parametrize("author", [None, "alice@example.com"])
+def test_identity_header_nobody_may_sign_a_report_without_owner(proxied, author):
     from verifair import db
 
     conn = db.connect(proxied.app.state.settings.db_path)
-    db.push_report(conn, project="billing-service", title="Prorate", risk="high", body=SAMPLE)
-    conn.close()
-    r = proxied.post(
-        "/r/prorate/sign", data={"version": 1}, headers={"X-Forwarded-Email": "bob@example.com"}
+    db.push_report(
+        conn, project="billing-service", title="Prorate", risk="high", body=SAMPLE, author=author
     )
-    assert r.status_code == 200 and api_report(proxied)["signed_by"] == "bob"
+    conn.close()
+    for who in ("alice@example.com", "bob@example.com"):
+        headers = {"X-Forwarded-Email": who}
+        page = proxied.get("/r/prorate", headers=headers).text
+        assert NO_OWNER_COPY in page and "Sign this version" not in page
+        r = proxied.post("/r/prorate/sign", data={"version": 1}, headers=headers)
+        assert r.status_code == 403 and NO_OWNER_COPY in r.text
+    report = api_report(proxied)
+    assert (report["status"], report["author_id"]) == ("unsigned", None)
 
 
 def test_resigning_keeps_the_first_signer_and_does_not_notify(client, monkeypatch):

@@ -28,6 +28,7 @@ from verifair.db import (
     get_user,
     get_version,
     init_schema,
+    latest_version,
     list_comments,
     list_projects,
     list_reports,
@@ -189,6 +190,25 @@ def test_writes_log_one_info_line(conn, caplog):
     assert messages[0].startswith("report pushed") and "r1" in messages[0]
     assert messages[1].startswith("comment added") and messages[2].startswith("verdict added")
     assert messages[3].startswith("push rejected")
+
+
+def test_push_by_an_owner_to_an_unowned_report_is_refused(conn):
+    push_report(conn, project="p", title="T", risk="low", body="v1", id="r1")
+    with pytest.raises(db.NoOwner):
+        push_report(conn, project="p", title="T", risk="low", body="v2", id="r1", owner_id="a")
+    assert (get_report(conn, "r1")["author_id"], latest_version(conn, "r1")) == (None, 1)
+    assert not conn.in_transaction
+
+
+def test_author_scope_matches_the_legacy_author_only_when_asked(conn):
+    push_report(conn, project="p", title="Legacy", risk="low", body="a", author="alice")
+    push_report(conn, project="p", title="Owned", risk="low", body="b", author_id="alice")
+
+    def mine(**kwargs):
+        return [r["id"] for r in list_reports(conn, "p", scope="author", user_id="alice", **kwargs)]
+
+    assert sorted(mine()) == ["legacy", "owned"]
+    assert mine(legacy_author=False) == ["owned"]
 
 
 def test_list_reports_newest_first_with_latest_version(conn):

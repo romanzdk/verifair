@@ -161,9 +161,12 @@ def _status(conn: sqlite3.Connection, id: str, version: int) -> str:
 
 
 def _sign_refusal(request: Request, report: sqlite3.Row, user_id: str) -> str | None:
-    author = report["author"]
-    owner = report["author_id"] or (author if author not in ("", "agent") else None)
-    if request.state.user_from_header and owner and user_id != owner:
+    owner, author = report["author_id"], report["author"]
+    if not request.state.user_from_header:
+        return None
+    if owner is None:
+        return rules.NO_OWNER
+    if user_id != owner:
         return f"Only {author if author != 'agent' else owner} can sign this report."
     return None
 
@@ -301,7 +304,9 @@ def index(request: Request, conn: Conn, user: User, scope: str = "all"):
     priority = {status: i for i, status in enumerate(TABS)}
     for project in db.list_projects(conn):
         reports = sorted(
-            db.list_reports(conn, project, scope=scope, user_id=user[0]),
+            db.list_reports(
+                conn, project, scope=scope, user_id=user[0], legacy_author=not _shared(request)
+            ),
             key=lambda r: (r["updated_at"], r["id"]),
             reverse=True,
         )
@@ -358,7 +363,9 @@ def project_page(
     if project not in db.list_projects(conn):
         raise HTTPException(404, "project not found")
     reports = sorted(
-        db.list_reports(conn, project, scope=scope, user_id=user[0]),
+        db.list_reports(
+            conn, project, scope=scope, user_id=user[0], legacy_author=not _shared(request)
+        ),
         key=lambda r: (r["updated_at"], r["id"]),
         reverse=True,
     )

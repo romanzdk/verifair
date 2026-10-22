@@ -30,7 +30,7 @@ Everyone sees all projects and changes by default. The landing pages also offer 
 
 Open **Your identity** on either landing page to copy the ID to give your agent. Set `author_id` to the owner's ID and `reviewers` to the requested reviewers' IDs when publishing. In shared mode the agent token sets the owner, so `author_id` can be left out. Display names do not determine ownership. Review requests help people find work; anyone with access can still read and review a report, and the existing signature and approval rules apply.
 
-Local identities belong to a browser. With the auth proxy described under Deploying, the trusted identity header supplies the same ID across devices. For reports without an explicit owner, signing records the signer as the owner. Existing signed reports get their owner from their latest recorded signature when the database is upgraded. Unsigned legacy reports still support an `author` value equal to the user's exact identity, as required by the original proxy integration.
+Local identities belong to a browser. With the auth proxy described under Deploying, the trusted identity header supplies the same ID across devices. Existing signed reports get their owner from their latest recorded signature when the database is upgraded. In local mode, signing a report without an owner records the signer as the owner, and **My changes** also lists unowned reports whose `author` equals your identity. In shared mode only `author_id` counts, and a report without an owner is frozen (see [Report ownership](#report-ownership)).
 
 ## Push a report
 
@@ -74,7 +74,7 @@ The commands below use the report `id` as `$ID`. In shared mode, use your own ag
 - Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
 - The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as a top-level H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
 - Unknown JSON keys are rejected with 422.
-- In shared mode the token owner owns the report. `author_id` can be left out; if sent, it must be the token owner, or the push gets 403 `"author_id must be the token owner."`. A push to an `id` that belongs to another member's report gets 403 `"This report belongs to another member."`, also when the token owner is an admin. Every requested reviewer must be an active member, or the push gets 422 `"Reviewer {id} is not an active member."`.
+- In shared mode the token owner owns the report. `author_id` can be left out; if sent, it must be the token owner, or the push gets 403 `"author_id must be the token owner."`. A push to an `id` that belongs to another member's report gets 403 `"This report belongs to another member."`, also when the token owner is an admin. A push to an `id` whose report has no owner gets 403 `"This report has no owner. Push it again with an agent token under a new id."`. Every requested reviewer must be an active member, or the push gets 422 `"Reviewer {id} is not an active member."`.
 
 A push sends a "draft" message to Slack (if configured). The "ready for review" message is sent when the version is signed.
 
@@ -190,7 +190,7 @@ curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comment
 - `section` and `quote` are limited to 2,000 characters each; `prefix` and `suffix` to 64 each. A quote repeated within the named section without nonempty context is rejected with 422 `"ambiguous quote"`. Add `prefix` or `suffix` to disambiguate it.
 - Without `section` the thread is a general comment on the whole report.
 - `blocking` defaults to `true`. Send `false` for a nit that should not hold up approval. Replies always take `blocking` from their thread.
-- In shared mode an agent token can only comment on its owner's reports. Other reports return 403 `"This report belongs to another member."`.
+- In shared mode an agent token can only comment on its owner's reports. Other reports return 403 `"This report belongs to another member."`, and reports with no owner return 403 `"This report has no owner. Push it again with an agent token under a new id."`.
 
 To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comment_id` can be the first comment or any reply; the whole thread is resolved. The response is `{"resolved": true}`. Calling it again does nothing. Reviewers can reopen a resolved thread in the web UI.
 
@@ -277,7 +277,7 @@ For example `Assisted-by: claude:opus`. Agents do not add `Signed-off-by`. Only 
 - A version must be signed before anyone can approve or request changes on it. Until then the status is `unsigned`.
 - The first signature on a version is kept. Signing again does nothing.
 - Without `VERIFAIR_IDENTITY_HEADER`, anyone who has set a name can sign. The name is only a cookie, so this is a convenience, not a control.
-- With `VERIFAIR_IDENTITY_HEADER`, only the owner can sign: `author_id` must equal the header value (for example the email). Without `author_id`, a person in the legacy `author` field must match the header instead. A report with `author: "agent"` and no owner can be signed by anyone; the signer becomes its owner.
+- With `VERIFAIR_IDENTITY_HEADER`, only the owner can sign: `author_id` must equal the header value (for example the email). A report with no `author_id` cannot be signed: `This report has no owner. Push it again with an agent token under a new id.`
 - The person who signed a version cannot approve it or request changes on it. Someone else has to.
 - Only with the identity header behind an auth proxy is signing a real control. See Deploying.
 
@@ -350,6 +350,8 @@ Every member creates their own agent tokens on `/access`. A token looks like `vf
 ### Report ownership
 
 The token owner owns every report the token pushes. Report ids are chosen by the client. If an id is already used by another member's report, the push gets 403 `This report belongs to another member.` Pick a different id, or leave `id` out and verifair makes a new one. Ownership cannot be transferred.
+
+A report with no owner (an old report pushed with the shared token and never signed) is frozen in shared mode. Nobody can sign it, push a new version to it, or comment on it with an agent token. People can still read it and comment in the browser. To go on, push it again with an agent token under a new id.
 
 ### Moderation
 
