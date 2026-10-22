@@ -460,3 +460,16 @@ def test_add_member_inputs_check_the_id_in_the_browser(shared_client):
     assert 'name="name" value="" maxlength="60"' in card
     assert '<option value="member" selected>' in card
     assert 'class="error"' not in card
+
+
+def test_denied_page_has_a_heading_and_links_back(shared_client, as_user):
+    bob = as_user("bob@example.com")
+    for r, back in [
+        (shared_client.post("/access/users", data={"id": "e", "name": "E"}, headers=bob), True),
+        (shared_client.get("/", headers={"X-Forwarded-Email": "x@example.com"}), False),
+    ]:
+        assert r.status_code == 403
+        assert '<main class="landing-wrap">' in r.text and "<h1>No access</h1>" in r.text
+        assert 'href="/static/landing.css"' in r.text and '<a href="/">' in r.text
+        assert ('<a href="/access">' in r.text) is back
+        assert "<script" not in r.text and 'class="topbar"' not in r.text

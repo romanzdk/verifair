@@ -694,8 +694,9 @@ def _access(
     return _page(request, user, "access.html", ctx, status)
 
 
-def _denied(request: Request, message: str):
-    return templates.TemplateResponse(request, "denied.html", {"message": message}, status_code=403)
+def _denied(request: Request, message: str, back: str | None = "/access"):
+    ctx = {"message": message, "back": back}
+    return templates.TemplateResponse(request, "denied.html", ctx, status_code=403)
 
 
 def access_member(request: Request) -> sqlite3.Row:
@@ -789,7 +790,7 @@ def new_token(
     except db.AlreadyCreated:
         return _access(request, conn, user, token_note=ALREADY_CREATED)
     except ValueError:
-        return _denied(request, DEACTIVATED.format(id=member["id"]))
+        return _denied(request, DEACTIVATED.format(id=member["id"]), back=None)
     log.info("access action=create_token actor=%s target=%s", user[0], row["id"])
     return _access(request, conn, user, token=token)
 

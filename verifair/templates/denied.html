@@ -3,11 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>verifair</title>
+<title>No access · verifair</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/landing.css">
 </head>
-<body>
-<main><p>{{ message }}</p></main>
+<body class="landing-page">
+<main class="landing-wrap">
+  <header class="landing-heading">
+    <div>
+      <h1>No access</h1>
+      <p>{{ message }}</p>
+    </div>
+  </header>
+  <p>{% if back %}<a href="{{ back }}">Back to Access</a> · {% endif %}<a href="/">Go to projects</a></p>
+</main>
 </body>
 </html>
