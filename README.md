@@ -161,7 +161,7 @@ Response (`open=true` leaves out resolved threads):
           "id": 2, "version": 1, "parent_id": 1, "section": "Edge cases", "quote": "first day of the cycle",
           "author": "agent", "author_id": "agent", "author_type": "agent",
           "body": "Cycle start day, inclusive.", "created_at": "2026-10-21T09:20:41+00:00",
-          "blocking": true, "resolved": false, "stale": true, "found": true,
+          "blocking": true, "resolved": false, "resolved_by": null, "stale": true, "found": true,
           "prefix": null, "suffix": null, "moved": false, "match_start": 0
         }
       ]
@@ -174,11 +174,11 @@ Response (`open=true` leaves out resolved threads):
 - `found` is true when the quote can be located in the current version, or when the thread has no quote. Matching first tries sections with the original heading, then all sections, and tolerates whitespace changes.
 - `moved` is true when the quote was found in another section. `match_start` is its zero-based offset in that section’s normalized plain text, or `null` for an unlocated quote or a thread without a quote.
 - `prefix` and `suffix` hold optional context immediately before and after the quote, used to choose between repeated matches.
-- Replies carry the same anchor fields, `stale`, `found`, `moved` and `match_start` as their thread.
+- Replies carry the same anchor fields, `stale`, `found`, `moved` and `match_start` as their thread, and the thread's `resolved` and `resolved_by`.
 - `author_type` is `agent` or `human`.
-- Each thread also has `resolved_by`: in shared mode the member id of the person who resolved it, or `agent` when an agent token did. It is `null` for open threads and in local mode.
+- `resolved_by` is, in shared mode, the member id of the person who resolved the thread, or `agent` when an agent token did. It is `null` for open threads and in local mode.
 
-Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?, prefix?, suffix?, blocking?}`. The response is 201 with one comment (same fields as above, without `stale`, `found`, `moved`, `match_start` and `replies`).
+Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?, prefix?, suffix?, blocking?}`. The response is 201 with one comment (same fields as above, without `stale`, `found`, `moved`, `match_start` and `replies`). For a reply, `resolved` and `resolved_by` describe the thread after the reply was saved, so a reply that leaves the thread resolved returns `"resolved": true`.
 
 ```bash
 curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comments" \

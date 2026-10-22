@@ -145,7 +145,8 @@ def _current_sections(conn: sqlite3.Connection, id: str) -> list[Section]:
     return split_sections(db.get_version(conn, id, db.latest_version(conn, id))["body"])
 
 
-def _comment_json(row: sqlite3.Row, resolved: bool | None = None) -> dict:
+def _comment_json(row: sqlite3.Row, root: sqlite3.Row | None = None) -> dict:
+    root = row if root is None else root
     return {
         "id": row["id"],
         "version": row["version"],
@@ -158,7 +159,8 @@ def _comment_json(row: sqlite3.Row, resolved: bool | None = None) -> dict:
         "body": row["body"],
         "created_at": row["created_at"],
         "blocking": bool(row["blocking"]),
-        "resolved": row["resolved_at"] is not None if resolved is None else resolved,
+        "resolved": root["resolved_at"] is not None,
+        "resolved_by": root["resolved_by"],
         "prefix": row["prefix"],
         "suffix": row["suffix"],
     }
@@ -348,7 +350,6 @@ def get_comments(id: str, conn: Conn, open: bool = False):
     threads = build_threads(comments, _current_sections(conn, id), db.latest_version(conn, id))
     result = []
     for t in threads:
-        resolved = t.root["resolved_at"] is not None
         anchor = {
             "stale": t.stale,
             "found": t.found if t.root["quote"] else True,
@@ -359,10 +360,8 @@ def get_comments(id: str, conn: Conn, open: bool = False):
             _comment_json(t.root)
             | anchor
             | {
-                "resolved_by": t.root["resolved_by"],
                 "replies": [
-                    _comment_json(r, resolved) | anchor | {"blocking": t.blocking}
-                    for r in t.replies
+                    _comment_json(r, t.root) | anchor | {"blocking": t.blocking} for r in t.replies
                 ],
             }
         )
@@ -422,7 +421,7 @@ def post_comment(
         raise HTTPException(404, "parent not found") from None
     settings = request.app.state.settings
     background.add_task(notify.send, settings, notify.comment_text(report, row, settings.base_url))
-    return _comment_json(row)
+    return _comment_json(row, db.thread_root(conn, id, row["id"]))
 
 
 @router.post("/reports/{id}/comments/{cid}/resolve")

@@ -112,6 +112,7 @@ def test_comment_roundtrip_and_open_filter(client):
         "created_at": root.json()["created_at"],
         "blocking": True,
         "resolved": False,
+        "resolved_by": None,
         "prefix": None,
         "suffix": None,
     }
@@ -125,9 +126,7 @@ def test_comment_roundtrip_and_open_filter(client):
     assert len(threads) == 1
     t = threads[0]
     anchor = {"stale": False, "found": True, "moved": False, "match_start": 0}
-    assert {k: v for k, v in t.items() if k != "replies"} == root.json() | anchor | {
-        "resolved_by": None
-    }
+    assert {k: v for k, v in t.items() if k != "replies"} == root.json() | anchor
     assert t["replies"] == [reply.json() | anchor]
 
     done = client.post(f"/api/reports/prorate/comments/{cid}/resolve", headers=H)
@@ -664,9 +663,10 @@ def test_wait_for_filters_event_kind(client, settings):
 
 def test_wait_any_returns_existing_item_after_since(client):
     push(client)
-    _comment(client)
+    posted = _comment(client).json()
     r = _wait(client, "since=2000-01-01T00:00:00%2B00:00&timeout=1")
     assert r.json()["event"] == "comment"
+    assert r.json()["comment"] == posted
 
 
 def test_wait_since_filters_out_older_items(client):
@@ -1052,3 +1052,34 @@ def test_shared_mode_wait_stops_when_the_token_is_revoked(shared_client, shared_
     thread.join()
     assert time.monotonic() - start < 3
     assert (r.status_code, r.json()) == (401, {"detail": "invalid token"})
+
+
+def test_reply_response_shows_the_thread_state_after_the_reply(
+    shared_client, shared_settings, alice
+):
+    push(shared_client, auth=alice)
+    url = "/api/reports/prorate/comments"
+    agent_thread = shared_client.post(url, json={"body": "Note"}, headers=alice).json()["id"]
+    with closing(db.connect(shared_settings.db_path)) as conn:
+        human_thread = db.add_comment(
+            conn,
+            report_id="prorate",
+            version=1,
+            author_id="bob@example.com",
+            author_name="Bob",
+            body="Why?",
+        )["id"]
+        db.resolve_thread(conn, "prorate", human_thread, by="bob@example.com")
+        db.resolve_thread(conn, "prorate", agent_thread, by="alice@example.com")
+    kept = shared_client.post(url, json={"body": "Fixed", "parent_id": human_thread}, headers=alice)
+    assert (kept.json()["resolved"], kept.json()["resolved_by"]) == (True, "bob@example.com")
+    opened = shared_client.post(
+        url, json={"body": "Again", "parent_id": agent_thread}, headers=alice
+    )
+    assert (opened.json()["resolved"], opened.json()["resolved_by"]) == (False, None)
+    threads = {t["id"]: t for t in shared_client.get(url, headers=alice).json()["threads"]}
+    [reply] = threads[human_thread]["replies"]
+    assert {k: reply[k] for k in ("resolved", "resolved_by")} == {
+        "resolved": True,
+        "resolved_by": "bob@example.com",
+    }

@@ -1489,7 +1489,7 @@ def test_resolved_summary_names_who_resolved(shared_client, shared_settings, mod
         human: "carol@example.com",
         agent: "agent",
     }
-    assert all("resolved_by" not in reply for t in threads for reply in t["replies"])
+    assert all(reply["resolved_by"] == t["resolved_by"] for t in threads for reply in t["replies"])
 
 
 def test_local_mode_anyone_moderates_and_resolver_is_not_shown(client):
