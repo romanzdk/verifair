@@ -447,10 +447,14 @@ def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, da
     before, card = r.text.split("<h2>Add member</h2>")
     card = card.split("</section>")[0]
     assert f'<p class="error" role="alert">{copy}</p>' in card and copy not in before
-    assert f'name="id" value="{data["id"]}"' in card
+    assert before.endswith('<section class="landing-access" id="add-member">\n  ')
+    assert '<form method="post" action="/access/users#add-member"' in card
+    assert f'name="id" value="{data["id"]}" autofocus' in card
     assert f'name="name" value="{data["name"]}"' in card
     assert '<option value="admin" selected>' in card
     assert '<option value="member" selected>' not in card
+    js = (Path(web.__file__).parent / "static" / "landing.js").read_text()
+    assert 'addEventListener("load", () => document.querySelector("[autofocus]")?.focus());' in js
 
 
 def test_add_member_inputs_check_the_id_in_the_browser(shared_client):
@@ -459,7 +463,7 @@ def test_add_member_inputs_check_the_id_in_the_browser(shared_client):
     assert f'name="id" value="" maxlength="200" pattern="[^\\s\\/\\\\]+" title="{PLAIN}"' in card
     assert 'name="name" value="" maxlength="60"' in card
     assert '<option value="member" selected>' in card
-    assert 'class="error"' not in card
+    assert 'class="error"' not in card and "autofocus" not in page
 
 
 def test_denied_page_has_a_heading_and_links_back(shared_client, as_user):

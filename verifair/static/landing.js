@@ -17,6 +17,9 @@
       }
     });
   });
+  // Browsers skip autofocus when the URL has a fragment, and scrolling to the fragment moves
+  // focus, so focus the field once that is done
+  addEventListener("load", () => document.querySelector("[autofocus]")?.focus());
   document.addEventListener("submit", event => {
     const message = event.submitter?.dataset.confirm;
     if (message && !confirm(message)) event.preventDefault();
