@@ -348,7 +348,10 @@ def test_add_member_refuses_ids_that_are_not_plain(shared_client, conn, id):
 def test_add_member_says_the_agent_id_is_reserved(shared_client, conn, id):
     r = shared_client.post("/access/users", data={"id": id, "name": "X"}, headers=ADMIN)
     assert r.status_code == 422
-    assert '<p class="error" role="alert">The id agent is reserved for agents.</p>' in r.text
+    error = (
+        '<p class="error" id="vf_member_error" role="alert">The id agent is reserved for agents.'
+    )
+    assert f"{error}</p>" in r.text
     assert "Use a plain id" not in r.text.split("<h2>Add member</h2>")[1].split("<form")[0]
     assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
 
@@ -459,10 +462,14 @@ def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, da
     assert r.status_code == status
     before, card = r.text.split("<h2>Add member</h2>")
     card = card.split("</section>")[0]
-    assert f'<p class="error" role="alert">{copy}</p>' in card and copy not in before
+    error = f'<p class="error" id="vf_member_error" role="alert">{copy}</p>'
+    assert error in card and copy not in before
     assert before.endswith('<section class="landing-access" id="add-member">\n  ')
     assert '<form method="post" action="/access/users#add-member"' in card
-    assert f'name="id" value="{data["id"]}" autofocus' in card
+    assert (
+        f'name="id" value="{data["id"]}" autofocus'
+        ' aria-invalid="true" aria-describedby="vf_member_error"'
+    ) in card
     assert f'name="name" value="{data["name"]}"' in card
     assert '<option value="admin" selected>' in card
     assert '<option value="member" selected>' not in card
@@ -477,6 +484,7 @@ def test_add_member_inputs_check_the_id_in_the_browser(shared_client):
     assert 'name="name" value="" maxlength="60"' in card
     assert '<option value="member" selected>' in card
     assert 'class="error"' not in card and "autofocus" not in page
+    assert "aria-invalid" not in card and "vf_member_error" not in card
 
 
 def test_denied_page_has_a_heading_and_links_back(shared_client, conn, as_user):
