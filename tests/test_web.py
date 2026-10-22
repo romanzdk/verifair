@@ -1461,3 +1461,47 @@ def test_thread_markup_for_allowed_users_matches_local_mode(shared_settings, mod
     assert threads("carol@example.com")[human] == local[human]
     assert threads("owner@example.com")[agent] == local[agent]
     conn.close()
+
+
+def test_shared_mode_reply_reopens_only_when_the_replier_may_moderate(
+    shared_client, shared_settings, moderation
+):
+    from verifair import db
+
+    people, human, agent = moderation
+    conn = db.connect(shared_settings.db_path)
+    token, _ = db.create_token(conn, owner_id="owner@example.com", label="agent")
+    conn.close()
+    owners_agent = {"Authorization": f"Bearer {token}"}
+
+    def resolved(cid):
+        return _moderation_state(shared_settings, cid)[0] == 1
+
+    def web_reply(cid, who):
+        r = shared_client.post(
+            f"/r/r/comments/{cid}/reply", data={"version": 1, "body": "Fixed."}, headers=who
+        )
+        assert r.status_code == 200
+
+    def api_reply(cid):
+        r = shared_client.post(
+            "/api/reports/r/comments",
+            json={"body": "Fixed.", "parent_id": cid},
+            headers=owners_agent,
+        )
+        assert r.status_code == 201
+
+    for cid, reply, reopens in [
+        (human, lambda: api_reply(human), False),
+        (human, lambda: web_reply(human, people["owner"]), False),
+        (human, lambda: web_reply(human, people["dave"]), False),
+        (human, lambda: web_reply(human, people["carol"]), True),
+        (human, lambda: web_reply(human, people["admin"]), True),
+        (agent, lambda: api_reply(agent), True),
+        (agent, lambda: web_reply(agent, people["owner"]), True),
+        (agent, lambda: web_reply(agent, people["carol"]), False),
+    ]:
+        shared_client.post(f"/r/r/comments/{cid}/resolve", headers=people["admin"])
+        assert resolved(cid)
+        reply()
+        assert resolved(cid) is not reopens, (cid, reopens)

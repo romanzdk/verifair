@@ -371,6 +371,7 @@ def add_comment(
     blocking: bool = True,
     prefix: str | None = None,
     suffix: str | None = None,
+    reopen: bool = True,
 ) -> sqlite3.Row:
     with _write(conn):
         _check_version(conn, report_id, expected_version)
@@ -386,7 +387,8 @@ def add_comment(
             blocking = bool(
                 conn.execute("SELECT blocking FROM comments WHERE id=?", (parent_id,)).fetchone()[0]
             )
-            reopen_thread(conn, report_id, parent_id)
+            if reopen:
+                reopen_thread(conn, report_id, parent_id)
         cur = conn.execute(
             "INSERT INTO comments (report_id, version, parent_id, section, quote, author_id,"
             " author_name, body, created_at, blocking, prefix, suffix)"

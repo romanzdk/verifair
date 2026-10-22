@@ -353,7 +353,8 @@ def post_comment(
     id: str, body: CommentIn, request: Request, conn: Conn, background: BackgroundTasks
 ):
     report = _require_report(conn, id)
-    _require_owner(report, request.state.token_owner)
+    owner = request.state.token_owner
+    _require_owner(report, owner)
     if body.parent_id is not None and any(
         value is not None for value in (body.section, body.quote, body.prefix, body.suffix)
     ):
@@ -376,6 +377,10 @@ def post_comment(
             )
             if hits > 1:
                 raise HTTPException(422, "ambiguous quote")
+    reopen = True
+    if owner is not None and body.parent_id is not None:
+        root = db.thread_root(conn, id, body.parent_id)
+        reopen = root is not None and root["author_id"] == "agent"
     try:
         row = db.add_comment(
             conn,
@@ -390,6 +395,7 @@ def post_comment(
             blocking=body.blocking,
             prefix=body.prefix,
             suffix=body.suffix,
+            reopen=reopen,
         )
     except ValueError:
         raise HTTPException(404, "parent not found") from None

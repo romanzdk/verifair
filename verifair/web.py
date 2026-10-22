@@ -485,6 +485,7 @@ def post_reply(
     user_id, name = user
     if not name:
         return _name_prompt(request, f"/r/{id}")
+    root = db.thread_root(conn, id, cid)
     try:
         row = db.add_comment(
             conn,
@@ -495,6 +496,8 @@ def post_reply(
             author_name=name,
             body=body,
             parent_id=cid,
+            reopen=root is not None
+            and _can_moderate(_shared(request), request.state.member, user_id, root, report),
         )
     except db.StaleVersion as stale:
         return _stale(request, id, stale.latest)

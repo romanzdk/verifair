@@ -129,6 +129,16 @@ def test_resolve_twice_keeps_first_time_and_reply_reopens(conn):
     assert _resolved_at(conn, root["id"]) is None
 
 
+def test_reply_with_reopen_false_keeps_the_thread_resolved(conn):
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    kw = {"report_id": "r1", "version": 1, "author_id": "u1", "author_name": "Alice"}
+    root = add_comment(conn, body="?", **kw)
+    resolve_thread(conn, "r1", root["id"], by="u1")
+    reply = add_comment(conn, body="fixed", parent_id=root["id"], reopen=False, **kw)
+    assert reply["parent_id"] == root["id"]
+    assert _resolved_at(conn, root["id"]) is not None
+
+
 def test_list_comments_orders_by_id(conn):
     push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
     kw = {"report_id": "r1", "version": 1, "author_id": "u1", "author_name": "Alice"}

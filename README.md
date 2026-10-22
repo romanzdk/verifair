@@ -185,7 +185,7 @@ curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comment
   -d '{"body": "Cycle start day, inclusive.", "parent_id": 1}'
 ```
 
-- With `parent_id` it is a reply. A reply to a resolved thread opens it again. A reply inherits its anchor from the thread, so any non-null `section`, `quote`, `prefix` or `suffix` with `parent_id` is rejected with 422 `"replies cannot set section, quote, prefix or suffix"`.
+- With `parent_id` it is a reply. In local mode a reply to a resolved thread opens it again. In shared mode an agent reply opens it again only when the agent started the thread; a reply to a thread a person started leaves it resolved. A reply inherits its anchor from the thread, so any non-null `section`, `quote`, `prefix` or `suffix` with `parent_id` is rejected with 422 `"replies cannot set section, quote, prefix or suffix"`.
 - Without `parent_id` it starts a new thread. `section` must be an H2 heading of the current version, exactly as written, for example `"section": "Edge cases"`. Text before the first `##` is the section `Intro`; a report with no `##` at all is one section called `Report`. `quote` points at a piece of text in that section, so `quote` without `section` is rejected with 422 `"quote requires section"`.
 - `section` and `quote` are limited to 2,000 characters each; `prefix` and `suffix` to 64 each. A quote repeated within the named section without nonempty context is rejected with 422 `"ambiguous quote"`. Add `prefix` or `suffix` to disambiguate it.
 - Without `section` the thread is a general comment on the whole report.
@@ -355,11 +355,13 @@ A report with no owner (an old report pushed with the shared token and never sig
 
 ### Moderation
 
-In shared mode, anyone can reply to a thread or reopen it. Only these people can resolve a thread or change its blocking flag:
+In shared mode, anyone can reply to a thread or reopen it with the **Reopen** button. Only these people can resolve a thread or change its blocking flag:
 
 - the person who started the thread,
 - an admin,
 - the report owner, when the agent started the thread.
+
+A reply to a resolved thread opens it again only when the person replying could resolve it. The same rule holds for agent tokens: the owner's agent reopens a thread by replying only when the agent started it. So an agent that answers "fixed" on a reviewer's resolved thread does not open it again, but the reviewer's own reply does. In local mode every reply opens the thread again.
 
 The buttons are hidden for everyone else, and a direct request gets 403 `Only the person who started this thread or an admin can do that.` A resolved thread shows who resolved it.
 
