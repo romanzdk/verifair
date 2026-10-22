@@ -133,9 +133,11 @@ def _require_report(conn: sqlite3.Connection, id: str) -> sqlite3.Row:
 
 
 def _require_owner(report: sqlite3.Row, owner: sqlite3.Row | None) -> None:
-    if owner is not None and report["author_id"] is None:
+    if owner is None:
+        return
+    if report["author_id"] is None:
         raise HTTPException(403, NO_OWNER)
-    if owner is not None and report["author_id"] != owner["id"]:
+    if report["author_id"] != owner["id"]:
         raise HTTPException(403, NOT_OWNER)
 
 
