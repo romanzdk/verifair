@@ -41,7 +41,7 @@ async def _membership_denial(request: Request, settings: Settings):
         reason = "not-member" if user is None else "inactive"
         status = 403
         message = (web.NOT_MEMBER if user is None else web.DEACTIVATED).format(id=user_id)
-    log.info("membership denied reason=%s path=%s", reason, request.url.path)
+    log.info("membership denied reason=%s path=%r", reason, request.url.path)
     return web.templates.TemplateResponse(
         request, "denied.html", {"message": message, "home": status == 401}, status_code=status
     )

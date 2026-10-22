@@ -34,7 +34,7 @@ log = logging.getLogger("verifair")
 
 
 def _refuse_token(reason: str, path: str, detail: str = "invalid token") -> NoReturn:
-    log.info("api token refused reason=%s path=%s", reason, path)
+    log.info("api token refused reason=%s path=%r", reason, path)
     raise HTTPException(401, detail)
 
 
@@ -282,6 +282,7 @@ def get_report(id: str, conn: Conn):
 
 def _poll_wait(
     path: str,
+    url_path: str,
     id: str,
     kind: str,
     since: datetime | None,
@@ -291,7 +292,7 @@ def _poll_wait(
     with closing(db.connect(path)) as conn:
         conn.execute("BEGIN")
         if token is not None and (reason := db.authenticate_token(conn, token)[1]):
-            _refuse_token(reason, f"/api/reports/{id}/wait")
+            _refuse_token(reason, url_path)
         _require_report(conn, id)
         current = db.latest_version(conn, id)
         rows = {}
@@ -340,6 +341,7 @@ async def wait_for_event(
         event, after = await run_in_threadpool(
             _poll_wait,
             request.app.state.settings.db_path,
+            request.url.path,
             id,
             kind,
             since,

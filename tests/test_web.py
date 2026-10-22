@@ -778,12 +778,19 @@ def test_shared_mode_denials_are_logged_with_reason_and_path(
     anonymous.get("/access", headers={"X-Forwarded-Email": "gone@example.com"})
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("membership ")]
     assert lines == [
-        "membership denied reason=missing-header path=/r/x",
-        "membership denied reason=duplicate-header path=/",
-        "membership denied reason=not-member path=/p/q",
-        "membership denied reason=inactive path=/access",
+        "membership denied reason=missing-header path='/r/x'",
+        "membership denied reason=duplicate-header path='/'",
+        "membership denied reason=not-member path='/p/q'",
+        "membership denied reason=inactive path='/access'",
     ]
     assert all(r.levelname == "INFO" for r in caplog.records if "membership" in r.getMessage())
+
+
+def test_shared_mode_denial_log_escapes_control_characters(shared_settings, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    _anonymous(shared_settings).get("/r/%1B%5B2K")
+    assert "membership denied reason=missing-header path='/r/\\x1b[2K'" in caplog.text
+    assert "\x1b" not in caplog.text
 
 
 def test_shared_mode_member_is_the_users_row_and_gets_no_cookies(

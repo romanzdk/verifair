@@ -1107,7 +1107,7 @@ def test_shared_mode_token_refusals_are_logged_with_a_reason(
         assert shared_client.get("/api/reports/x", headers=headers).status_code == 401
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("api token")]
     assert lines == [
-        f"api token refused reason={reason} path=/api/reports/x"
+        f"api token refused reason={reason} path='/api/reports/x'"
         for reason in (
             "missing",
             "malformed",
@@ -1138,4 +1138,33 @@ def test_shared_mode_wait_logs_why_the_token_stopped_working(
     r = shared_client.get("/api/reports/prorate/wait?timeout=10", headers=alice)
     thread.join()
     assert r.status_code == 401
-    assert "api token refused reason=revoked path=/api/reports/prorate/wait" in caplog.text
+    assert "api token refused reason=revoked path='/api/reports/prorate/wait'" in caplog.text
+
+
+def test_shared_mode_token_refusal_logs_escape_control_characters(
+    shared_client, shared_settings, alice, caplog
+):
+    with closing(db.connect(shared_settings.db_path)) as conn:
+        db.push_report(
+            conn,
+            project="p",
+            title="T",
+            risk="low",
+            body="## A\nx",
+            id="\x1b[2K",
+            author_id="alice@example.com",
+        )
+    caplog.set_level("INFO", logger="verifair")
+
+    def revoke(conn):
+        [token] = db.list_tokens(conn, "alice@example.com")
+        db.revoke_token(conn, token["id"])
+
+    assert shared_client.get("/api/reports/%1B%5B2K").status_code == 401
+    thread = _later(shared_settings, 0.6, revoke)
+    r = shared_client.get("/api/reports/%1B%5B2K/wait?timeout=10", headers=alice)
+    thread.join()
+    assert r.status_code == 401
+    assert "api token refused reason=missing path='/api/reports/\\x1b[2K'" in caplog.text
+    assert "api token refused reason=revoked path='/api/reports/\\x1b[2K/wait'" in caplog.text
+    assert "\x1b" not in caplog.text
