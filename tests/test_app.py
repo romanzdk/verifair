@@ -218,3 +218,147 @@ def test_html_responses_carry_csp(client):
     for path in ["/r/t", "/healthz", "/static/app.js", "/api/reports/t"]:
         r = client.get(path, headers=H)
         assert r.headers["x-content-type-options"] == "nosniff", path
+
+
+def _seed_mixed_case_ids(path):
+    conn = db.connect(path)
+    db.init_schema(conn)
+    body = "## A\nx"
+    db.push_report(
+        conn,
+        project="p",
+        title="Old change",
+        risk="low",
+        body=body,
+        id="old",
+        author_id="Jane@Example.com",
+        reviewers=["Bob@Example.com", "bob@example.com"],
+    )
+    db.push_report(conn, project="p", title="Legacy", risk="low", body=body, id="legacy")
+    db.push_report(conn, project="p", title="Unowned", risk="low", body=body, id="unowned")
+    for id in ("old", "legacy"):
+        db.sign_version(
+            conn, report_id=id, version=1, signer_id="Jane@Example.com", signer_name="J"
+        )
+    conn.execute("UPDATE reports SET author_id=NULL WHERE id='legacy'")
+    db.add_verdict(
+        conn,
+        report_id="old",
+        version=1,
+        reviewer_id="JANE@example.com",
+        reviewer_name="Jane",
+        verdict="approve",
+    )
+    for author in ("Bob@Example.com", "agent", "Agent"):
+        cid = db.add_comment(
+            conn,
+            report_id="old",
+            version=1,
+            author_id=author,
+            author_name=author,
+            body="Why?",
+            section="A",
+            blocking=False,
+        )["id"]
+        db.resolve_thread(conn, "old", cid, by=author)
+    conn.close()
+
+
+def _ids(path):
+    conn = db.connect(path)
+    try:
+        return {
+            "reports": conn.execute("SELECT id, author_id FROM reports ORDER BY id").fetchall(),
+            "signatures": conn.execute("SELECT report_id, signer_id FROM signatures").fetchall(),
+            "verdicts": conn.execute("SELECT reviewer_id FROM verdicts").fetchall(),
+            "comments": conn.execute("SELECT author_id, resolved_by FROM comments").fetchall(),
+            "requests": conn.execute(
+                "SELECT report_id, reviewer_id FROM review_requests"
+            ).fetchall(),
+        }
+    finally:
+        conn.close()
+
+
+def _plain(ids):
+    return {table: [tuple(row) for row in rows] for table, rows in ids.items()}
+
+
+def test_shared_mode_startup_lower_cases_old_header_ids_once(shared_settings, caplog):
+    from fastapi.testclient import TestClient
+
+    caplog.set_level("INFO", logger="verifair")
+    _seed_mixed_case_ids(shared_settings.db_path)
+    client = TestClient(create_app(shared_settings), headers={"Sec-Fetch-Site": "same-origin"})
+    assert _plain(_ids(shared_settings.db_path)) == {
+        "reports": [
+            ("legacy", "jane@example.com"),
+            ("old", "jane@example.com"),
+            ("unowned", None),
+        ],
+        "signatures": [("old", "jane@example.com"), ("legacy", "jane@example.com")],
+        "verdicts": [("jane@example.com",)],
+        "comments": [
+            ("bob@example.com", "bob@example.com"),
+            ("agent", "agent"),
+            ("Agent", "Agent"),
+        ],
+        "requests": [("old", "bob@example.com")],
+    }
+    assert "lowercased ids rows=8" in [r.getMessage() for r in caplog.records]
+
+    conn = db.connect(shared_settings.db_path)
+    for id in ("jane@example.com", "bob@example.com"):
+        db.add_user(conn, id=id, name=id.partition("@")[0], role="member")
+    token, _ = db.create_token(conn, owner_id="jane@example.com", label="agent")
+    conn.close()
+    bearer = {"Authorization": f"Bearer {token}"}
+
+    assert client.get("/api/reports/old", headers=bearer).json()["status"] == "awaiting_review"
+    r = client.post(
+        "/r/old/verdict",
+        data={"version": 1, "verdict": "approve"},
+        headers={"X-Forwarded-Email": "JANE@Example.COM"},
+    )
+    assert "You signed this report. Someone else has to approve it." in r.text
+    assert len(client.get("/api/reports/old", headers=bearer).json()["verdicts"]) == 1
+
+    pushed = client.post(
+        "/api/reports",
+        json={"project": "p", "title": "Old change", "risk": "low", "body": "## A\ny", "id": "old"},
+        headers=bearer,
+    )
+    assert (pushed.status_code, pushed.json()["version"]) == (201, 2)
+
+    mine = client.get("/?scope=reviewer", headers={"X-Forwarded-Email": "bob@example.com"})
+    assert "Old change" in mine.text
+
+    before = _plain(_ids(shared_settings.db_path))
+    caplog.clear()
+    create_app(shared_settings)
+    assert _plain(_ids(shared_settings.db_path)) == before
+    assert not [r for r in caplog.records if r.getMessage().startswith("lowercased")]
+    conn = db.connect(shared_settings.db_path)
+    assert db.lowercase_human_ids(conn) == 0
+    conn.close()
+
+
+def test_local_mode_startup_keeps_mixed_case_cookie_ids(settings):
+    conn = db.connect(settings.db_path)
+    db.init_schema(conn)
+    db.push_report(
+        conn, project="p", title="T", risk="low", body="## A\nx", id="r", author_id="AbCdEfGh12"
+    )
+    db.sign_version(conn, report_id="r", version=1, signer_id="AbCdEfGh12", signer_name="A")
+    db.add_verdict(
+        conn, report_id="r", version=1, reviewer_id="XyZxYz99", reviewer_name="X", verdict="approve"
+    )
+    cid = db.add_comment(
+        conn, report_id="r", version=1, author_id="XyZxYz99", author_name="X", body="b"
+    )["id"]
+    db.resolve_thread(conn, "r", cid, by="XyZxYz99")
+    conn.close()
+    before = _plain(_ids(settings.db_path))
+    create_app(settings)
+    assert _plain(_ids(settings.db_path)) == before
+    assert before["reports"] == [("r", "AbCdEfGh12")]

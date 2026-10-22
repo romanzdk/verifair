@@ -196,6 +196,42 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
 
 
+HUMAN_ID_COLUMNS = (
+    ("reports", "author_id"),
+    ("signatures", "signer_id"),
+    ("verdicts", "reviewer_id"),
+    ("comments", "author_id"),
+    ("comments", "resolved_by"),
+    ("review_requests", "reviewer_id"),
+)
+
+
+def lowercase_human_ids(conn: sqlite3.Connection) -> int:
+    # Python's lower() matches how the identity header is read (SQLite's is ASCII only).
+    # An old human id such as "Agent" is left alone so it does not turn into the agent.
+    changed = 0
+    with _write(conn):
+        for table, column in HUMAN_ID_COLUMNS:
+            rows = conn.execute(
+                f"SELECT rowid, {column} FROM {table} WHERE {column} IS NOT NULL"
+            ).fetchall()
+            for rowid, value in rows:
+                lower = value.lower()
+                if lower == value or lower == "agent":
+                    continue
+                changed += 1
+                if table == "review_requests":
+                    conn.execute(
+                        "INSERT OR IGNORE INTO review_requests (report_id, reviewer_id)"
+                        " SELECT report_id, ? FROM review_requests WHERE rowid=?",
+                        (lower, rowid),
+                    )
+                    conn.execute("DELETE FROM review_requests WHERE rowid=?", (rowid,))
+                else:
+                    conn.execute(f"UPDATE {table} SET {column}=? WHERE rowid=?", (lower, rowid))
+    return changed
+
+
 def _unique_id(conn: sqlite3.Connection, base: str) -> str:
     candidate, n = base, 1
     while get_report(conn, candidate):
