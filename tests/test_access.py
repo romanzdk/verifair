@@ -427,3 +427,36 @@ def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, con
     js = (Path(web.__file__).parent / "static" / "landing.js").read_text()
     assert 'addEventListener("submit"' in js and "event.submitter?.dataset.confirm" in js
     assert "!confirm(message)" in js and "event.preventDefault()" in js
+
+
+PLAIN = "Use a plain id such as jane@example.com."
+MEMBER_INPUT = "Enter an id (1–200 characters) and a name (1–60 characters)."
+
+
+@pytest.mark.parametrize(
+    ("data", "status", "copy"),
+    [
+        ({"id": "a b", "name": "Eve Q", "role": "admin"}, 422, PLAIN),
+        ({"id": "Admin@example.com", "name": "Again", "role": "admin"}, 409, EXISTS),
+        ({"id": "eve@example.com", "name": " ", "role": "admin"}, 422, MEMBER_INPUT),
+    ],
+)
+def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, data, status, copy):
+    r = shared_client.post("/access/users", data=data, headers=ADMIN)
+    assert r.status_code == status
+    before, card = r.text.split("<h2>Add member</h2>")
+    card = card.split("</section>")[0]
+    assert f'<p class="error" role="alert">{copy}</p>' in card and copy not in before
+    assert f'name="id" value="{data["id"]}"' in card
+    assert f'name="name" value="{data["name"]}"' in card
+    assert '<option value="admin" selected>' in card
+    assert '<option value="member" selected>' not in card
+
+
+def test_add_member_inputs_check_the_id_in_the_browser(shared_client):
+    page = shared_client.get("/access", headers=ADMIN).text
+    card = page.split("<h2>Add member</h2>")[1].split("</section>")[0]
+    assert f'name="id" value="" maxlength="200" pattern="[^\\s\\/\\\\]+" title="{PLAIN}"' in card
+    assert 'name="name" value="" maxlength="60"' in card
+    assert '<option value="member" selected>' in card
+    assert 'class="error"' not in card

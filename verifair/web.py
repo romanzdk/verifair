@@ -668,6 +668,8 @@ def _access(
     error=None,
     token=None,
     token_note=None,
+    member_error=None,
+    member_form=None,
     status=200,
 ):
     member = request.state.member
@@ -676,6 +678,8 @@ def _access(
         "error": error,
         "new_token": token,
         "token_note": token_note,
+        "member_error": member_error,
+        "member_form": member_form or {"id": "", "name": "", "role": "member"},
         "roles": db.ROLES,
         "nonce": secrets.token_urlsafe(16),
     }
@@ -720,16 +724,21 @@ def add_member(
 ):
     if member["role"] != "admin":
         return _denied(request, ADMIN_ONLY)
-    id, name = id.strip().lower(), name.strip()
-    if not (1 <= len(id) <= 200 and 1 <= len(name) <= 60):
-        return _access(request, conn, user, error=MEMBER_INPUT, status=422)
-    if not plain_id(id):
-        return _access(request, conn, user, error=MEMBER_PLAIN, status=422)
+
+    def refuse(error: str, status: int):
+        form = {"id": id, "name": name, "role": role}
+        return _access(request, conn, user, member_error=error, member_form=form, status=status)
+
+    clean_id, clean_name = id.strip().lower(), name.strip()
+    if not (1 <= len(clean_id) <= 200 and 1 <= len(clean_name) <= 60):
+        return refuse(MEMBER_INPUT, 422)
+    if not plain_id(clean_id):
+        return refuse(MEMBER_PLAIN, 422)
     try:
-        db.add_user(conn, id=id, name=name, role=role)
+        db.add_user(conn, id=clean_id, name=clean_name, role=role)
     except ValueError:
-        return _access(request, conn, user, error=MEMBER_EXISTS, status=409)
-    log.info("access action=add_user actor=%s target=%s role=%s", user[0], id, role)
+        return refuse(MEMBER_EXISTS, 409)
+    log.info("access action=add_user actor=%s target=%s role=%s", user[0], clean_id, role)
     return RedirectResponse("/access", 303)
 
 

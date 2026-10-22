@@ -37,6 +37,7 @@
 .landing-access td { vertical-align: middle; overflow-wrap: break-word; }
 .landing-access > input[readonly] { width: 100%; font-family: var(--font-mono); }
 .landing-access > p { margin: 10px 0 0; font-size: 12px; color: var(--muted-foreground); }
+.landing-access > .error { margin: 0 0 4px; color: var(--destructive); }
 .landing-access-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
 td > .landing-access-form { margin: 0; flex-wrap: nowrap; }
 .landing-access-form input:not([type="hidden"]) { flex: 1 1 200px; }
