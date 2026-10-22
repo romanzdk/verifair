@@ -7,14 +7,14 @@
   <tbody>
     {% for t in tokens %}
     <tr>
-      {% if owner %}<td><code>{{ t.owner_id }}</code></td>{% endif %}
-      <td>{{ t.label }}</td>
-      <td><code>{{ t.id }}</code></td>
-      <td><time datetime="{{ t.created_at }}">{{ t.created_at|date }}</time></td>
+      {% if owner %}<td data-label="Owner"><code>{{ t.owner_id }}</code></td>{% endif %}
+      <td data-label="Label">{{ t.label }}</td>
+      <td data-label="Token id"><code>{{ t.id }}</code></td>
+      <td data-label="Created"><time datetime="{{ t.created_at }}">{{ t.created_at|date }}</time></td>
       {% if t.revoked_at %}
-      <td>Revoked <time datetime="{{ t.revoked_at }}">{{ t.revoked_at|date }}</time></td><td></td>
+      <td data-label="Status">Revoked <time datetime="{{ t.revoked_at }}">{{ t.revoked_at|date }}</time></td><td></td>
       {% else %}
-      <td>Active</td>
+      <td data-label="Status">Active</td>
       <td><form method="post" action="/access/tokens/{{ t.id|segment }}/revoke"><button class="btn">Revoke</button></form></td>
       {% endif %}
     </tr>
@@ -64,13 +64,13 @@
     <tbody>
       {% for u in users %}{% set action = "/access/users/" ~ u.id|segment %}
       <tr>
-        <td><code>{{ u.id }}</code></td>
-        <td>{{ u.name }}</td>
-        <td><form method="post" action="{{ action }}" class="landing-access-form">
+        <td data-label="Id"><code>{{ u.id }}</code></td>
+        <td data-label="Name">{{ u.name }}</td>
+        <td data-label="Role"><form method="post" action="{{ action }}" class="landing-access-form">
           <select name="role" aria-label="Role for {{ u.id }}">{% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}</select>
           <button class="btn">Save</button>
         </form></td>
-        <td>{{ "Yes" if u.active else "No" }}</td>
+        <td data-label="Active">{{ "Yes" if u.active else "No" }}</td>
         <td><form method="post" action="{{ action }}">
           <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
           <button class="btn">{{ "Deactivate" if u.active else "Reactivate" }}</button>

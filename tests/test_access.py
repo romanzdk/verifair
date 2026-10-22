@@ -1,5 +1,6 @@
 import re
 from contextlib import closing
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -383,3 +384,20 @@ def test_member_ids_are_stored_lower_case_and_compared_case_insensitively(shared
     assert r.status_code == 422 and db.get_user(conn, "agent") is None
     with pytest.raises(ValueError):
         db.add_user(conn, id="BOB@x.com", name="Bob", role="member")
+
+
+def test_access_tables_stack_with_cell_labels_on_narrow_screens(shared_client, conn):
+    _token(conn, "admin@example.com")
+    page = shared_client.get("/access", headers=ADMIN).text
+    for label in ("Owner", "Label", "Token id", "Created", "Status", "Id", "Name", "Role"):
+        assert f'<td data-label="{label}">' in page, label
+    assert '<td data-label="Active">Yes</td>' in page
+    css = (Path(web.__file__).parent / "static" / "landing.css").read_text()
+    assert ".landing-access td { vertical-align: middle; overflow-wrap: break-word; }" in css
+    assert "anywhere" not in css.split(".landing-access td {")[1].split("}")[0]
+    mobile = css.split("@media (max-width: 760px) {")[1].split("\n}")[0]
+    assert ".landing-access :is(table, tbody, tr, td) { display: block; }" in mobile
+    assert "content: attr(data-label)" in mobile
+    link = css.split(".landing-access-link {")[1].split("}")[0]
+    assert "display: inline-flex" in link and "min-height: 32px" in link
+    assert "align-items: center" in link and "padding:" in link

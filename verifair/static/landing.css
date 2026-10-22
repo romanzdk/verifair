@@ -31,10 +31,10 @@
 .landing-identity-panel button { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--accent-surface); color: var(--accent-surface-foreground); font: inherit; font-size: 12px; cursor: pointer; }
 .landing-identity-panel p, .landing-identity-panel [role="status"] { display: block; margin: 12px 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; }
 .landing-identity-panel [role="status"]:empty { display: none; }
-.landing-access-link { font-size: 12px; font-weight: 550; }
+.landing-access-link { display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; font-size: 12px; font-weight: 550; }
 .landing-access { margin-bottom: 22px; padding: 22px 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); overflow-x: auto; }
 .landing-access h2 { font-size: 17px; font-weight: 650; letter-spacing: -.015em; margin: 0 0 12px; }
-.landing-access td { vertical-align: middle; overflow-wrap: anywhere; }
+.landing-access td { vertical-align: middle; overflow-wrap: break-word; }
 .landing-access > input[readonly] { width: 100%; font-family: var(--font-mono); }
 .landing-access > p { margin: 10px 0 0; font-size: 12px; color: var(--muted-foreground); }
 .landing-access-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
@@ -146,6 +146,14 @@ td > .landing-access-form { margin: 0; flex-wrap: nowrap; }
   .landing-change-author .landing-field-label { display: none; }
   .landing-filters { padding-inline: 8px; }
   .landing-filters > a { padding-inline: 11px; }
+  .landing-access { padding: 18px; }
+  .landing-access :is(table, tbody, tr, td) { display: block; }
+  .landing-access thead { display: none; }
+  .landing-access tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .landing-access td { padding: 3px 0; border: 0; word-break: break-word; }
+  .landing-access td:empty { display: none; }
+  .landing-access td[data-label]::before { content: attr(data-label); display: block; color: var(--muted-foreground); font-size: 11px; }
+  .landing-access td:not([data-label]) { padding-top: 8px; }
 }
 @media (max-width: 440px) {
   .landing-page .topbar { padding-inline: 16px; gap: 12px; }
