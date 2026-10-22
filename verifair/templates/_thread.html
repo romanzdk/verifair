@@ -15,7 +15,7 @@
   {{ messages() }}
   {% if is_current %}
   <div class="tact">
-    <button type="button" class="btn" id="vf_reopen_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/reopen" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">Reopen</button>
+    <button type="button" class="btn" id="vf_reopen_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/reopen" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML"{% if root.id not in can_moderate %} hx-confirm="Reopen this thread? Only its starter or an admin can resolve it again."{% endif %}>Reopen</button>
   </div>
   {% endif %}
   {%- if thread_error %}

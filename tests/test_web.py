@@ -1012,7 +1012,10 @@ def test_resigning_keeps_the_first_signer_and_does_not_notify(client, monkeypatc
     assert (g["status"], g["signed_by"]) == ("approved", "Signer")
 
 
-BLOCKING_COPY = "Resolve the open blocking threads first, or mark them non-blocking."
+BLOCKING_COPY = (
+    "Resolve the open blocking threads first. Ask the person who started each one, or an admin,"
+    " to resolve it or mark it non-blocking."
+)
 
 
 def _open_thread(client, blocking=None):
@@ -1518,6 +1521,48 @@ def test_thread_markup_for_allowed_users_matches_local_mode(shared_settings, mod
     assert threads("admin@example.com") == local
     assert threads("carol@example.com")[human] == local[human]
     assert threads("owner@example.com")[agent] == local[agent]
+    conn.close()
+
+
+REOPEN_CONFIRM = (
+    ' hx-confirm="Reopen this thread? Only its starter or an admin can resolve it again."'
+)
+
+
+def test_reopen_asks_first_only_when_the_user_cannot_resolve_it_again(
+    shared_client, shared_settings, moderation
+):
+    from verifair import db, web
+
+    people, human, agent = moderation
+    shared_client.post(f"/r/r/comments/{human}/resolve", headers=people["carol"])
+    shared_client.post(f"/r/r/comments/{agent}/resolve", headers=people["owner"])
+
+    def reopen(who, cid):
+        page = shared_client.get("/r/r", headers=people[who]).text
+        return re.search(rf'<button [^>]*id="vf_reopen_{cid}"[^>]*>', page).group(0)
+
+    for who, human_ok, agent_ok in [
+        ("dave", False, False),
+        ("carol", True, False),
+        ("owner", False, True),
+        ("admin", True, True),
+    ]:
+        for cid, ok in ((human, human_ok), (agent, agent_ok)):
+            assert (REOPEN_CONFIRM in reopen(who, cid)) is not ok, (who, cid)
+
+    conn = db.connect(shared_settings.db_path)
+    report = db.get_report(conn, "r")
+    template = web.templates.get_template("_thread.html")
+
+    def threads(user_id):
+        member = db.get_user(conn, user_id)
+        ctx = web.report_context(conn, report, 1, user_id, member, member is not None)
+        return {t.root["id"]: template.render(ctx | {"thread": t}) for t in ctx["threads"]}
+
+    admin, dave = threads("admin@example.com"), threads("dave@example.com")
+    assert all('id="vf_reopen_' in html and "hx-confirm" not in html for html in admin.values())
+    assert {cid: html.replace(REOPEN_CONFIRM, "") for cid, html in dave.items()} == admin
     conn.close()
 
 

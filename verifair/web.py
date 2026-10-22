@@ -41,7 +41,10 @@ SCOPES = {"all": "All changes", "author": "My changes", "reviewer": "My reviews"
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
-BLOCKED = "Resolve the open blocking threads first, or mark them non-blocking."
+BLOCKED = (
+    "Resolve the open blocking threads first. Ask the person who started each one, or an admin,"
+    " to resolve it or mark it non-blocking."
+)
 Body = Annotated[str, Form(max_length=20000)]
 Anchor = Annotated[str, Form(max_length=2000)]
 LAST_ADMIN = "There must be at least one active admin."
