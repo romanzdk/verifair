@@ -53,16 +53,22 @@ def create_app(settings: Settings) -> FastAPI:
         raise RuntimeError(
             "VERIFAIR_BOOTSTRAP_ADMIN_ID must be a plain id such as jane@example.com"
         )
+    if settings.identity_header and settings.api_token:
+        log.warning("VERIFAIR_API_TOKEN is ignored in shared mode. Agents need member tokens.")
     conn = db.connect(settings.db_path)
     try:
         db.init_schema(conn)
-        if settings.identity_header:
-            if settings.bootstrap_admin_id:
-                db.bootstrap_admin(conn, settings.bootstrap_admin_id)
-            if not db.list_users(conn):
-                raise RuntimeError(
-                    "VERIFAIR_BOOTSTRAP_ADMIN_ID is required to create the first admin"
-                )
+        if not settings.identity_header and db.list_users(conn):
+            raise RuntimeError(
+                "This database has members. Set VERIFAIR_IDENTITY_HEADER to run in shared mode."
+            )
+        if settings.identity_header and admin_id:
+            if db.bootstrap_admin(conn, admin_id):
+                log.info("bootstrap admin created id=%s", admin_id.lower())
+            else:
+                log.info("bootstrap skipped: members exist")
+        if settings.identity_header and not db.list_users(conn):
+            raise RuntimeError("VERIFAIR_BOOTSTRAP_ADMIN_ID is required to create the first admin")
     finally:
         conn.close()
 

@@ -24,7 +24,10 @@ def load_settings() -> Settings:
     api_token = os.environ.get("VERIFAIR_API_TOKEN") or None
     identity_header = os.environ.get("VERIFAIR_IDENTITY_HEADER") or None
     if not api_token and not identity_header:
-        raise RuntimeError("VERIFAIR_API_TOKEN is required")
+        raise RuntimeError(
+            "VERIFAIR_API_TOKEN is required in local mode."
+            " Set VERIFAIR_IDENTITY_HEADER for shared mode."
+        )
     return Settings(
         api_token=api_token,
         db_path=os.environ.get("VERIFAIR_DB_PATH", "./verifair.db"),

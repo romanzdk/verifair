@@ -14,8 +14,37 @@ def test_health(client):
 def test_missing_token_raises(monkeypatch):
     monkeypatch.delenv("VERIFAIR_API_TOKEN", raising=False)
     monkeypatch.delenv("VERIFAIR_IDENTITY_HEADER", raising=False)
-    with pytest.raises(RuntimeError, match="VERIFAIR_API_TOKEN"):
+    with pytest.raises(RuntimeError) as error:
         load_settings()
+    assert str(error.value) == (
+        "VERIFAIR_API_TOKEN is required in local mode."
+        " Set VERIFAIR_IDENTITY_HEADER for shared mode."
+    )
+
+
+def test_local_mode_refuses_a_database_with_members(settings):
+    conn = db.connect(settings.db_path)
+    db.init_schema(conn)
+    db.add_user(conn, id="admin@example.com", name="admin", role="admin")
+    conn.close()
+    with pytest.raises(RuntimeError) as error:
+        create_app(settings)
+    assert str(error.value) == (
+        "This database has members. Set VERIFAIR_IDENTITY_HEADER to run in shared mode."
+    )
+
+
+def test_startup_logs_the_bootstrap_outcome_and_an_ignored_shared_token(shared_settings, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    create_app(shared_settings)
+    create_app(replace(shared_settings, api_token="t"))
+    create_app(replace(shared_settings, bootstrap_admin_id=None))
+    lines = [(r.levelname, r.getMessage()) for r in caplog.records]
+    assert lines == [
+        ("INFO", "bootstrap admin created id=admin@example.com"),
+        ("WARNING", "VERIFAIR_API_TOKEN is ignored in shared mode. Agents need member tokens."),
+        ("INFO", "bootstrap skipped: members exist"),
+    ]
 
 
 def test_shared_mode_loads_without_api_token(monkeypatch):
