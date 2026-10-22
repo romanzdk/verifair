@@ -82,17 +82,17 @@ def reviewers(comments: list[sqlite3.Row], verdicts: list[sqlite3.Row]) -> list[
     return sorted(result, key=lambda r: r.name)
 
 
-def _open_blocking(threads: list[Thread]) -> list[Thread]:
+def open_blocking(threads: list[Thread]) -> list[Thread]:
     return [t for t in threads if t.blocking and t.root["resolved_at"] is None]
 
 
 def can_approve(threads: list[Thread]) -> bool:
-    return not _open_blocking(threads)
+    return not open_blocking(threads)
 
 
 def can_request_changes(threads: list[Thread], reviewer_id: str, summary: str) -> bool:
     return bool(summary.strip()) or any(
-        t.root["author_id"] == reviewer_id for t in _open_blocking(threads)
+        t.root["author_id"] == reviewer_id for t in open_blocking(threads)
     )
 
 

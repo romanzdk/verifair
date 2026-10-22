@@ -42,6 +42,7 @@ REFUSED = "Add a summary, or start a comment thread of your own and leave it ope
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
 BLOCKED_LOCAL = "Resolve the open blocking threads first, or mark them non-blocking."
+BLOCKED_OWN = "Resolve your open blocking threads first, or mark them non-blocking."
 BLOCKED = (
     "Resolve the open blocking threads first. Ask the person who started each one, the report"
     " owner for agent threads, or an admin to resolve it or mark it non-blocking."
@@ -586,7 +587,10 @@ def post_verdict(
             return SELF_REVIEW
         threads = build_threads(db.list_comments(conn, id), [], version)
         if verdict == "approve" and not rules.can_approve(threads):
-            return BLOCKED if _shared(request) else BLOCKED_LOCAL
+            if not _shared(request):
+                return BLOCKED_LOCAL
+            mine = all(t.root["author_id"] == user_id for t in rules.open_blocking(threads))
+            return BLOCKED_OWN if mine else BLOCKED
         if verdict == "request_changes" and not rules.can_request_changes(
             threads, user_id, summary
         ):

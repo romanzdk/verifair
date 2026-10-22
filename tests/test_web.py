@@ -1025,6 +1025,7 @@ SHARED_BLOCKING_COPY = (
     "Resolve the open blocking threads first. Ask the person who started each one, the report"
     " owner for agent threads, or an admin to resolve it or mark it non-blocking."
 )
+OWN_BLOCKING_COPY = "Resolve your open blocking threads first, or mark them non-blocking."
 
 
 def _open_thread(client, blocking=None):
@@ -1056,6 +1057,15 @@ def test_approve_refused_while_blocking_thread_open_and_allowed_after_resolve(cl
 
     client.post(f"/r/prorate/comments/{cid}/reply", data={"version": 1, "body": "Still wrong."})
     assert BLOCKING_COPY in _approve(client).text
+
+
+def test_local_mode_keeps_the_plain_blocked_copy_for_your_own_thread(client):
+    push(client)
+    sign(client)
+    _open_thread(client)
+    client.cookies.set("vf_id", "alice000")
+    client.cookies.set("vf_name", "Alice")
+    assert f'<p class="error" role="alert">{BLOCKING_COPY}</p>' in _approve(client).text
 
 
 def test_approve_allowed_after_marking_thread_non_blocking(client):
@@ -1450,6 +1460,21 @@ def test_shared_mode_blocked_approval_names_who_can_resolve(shared_client, moder
     )
     assert f'<p class="error" role="alert">{SHARED_BLOCKING_COPY}</p>' in r.text
     assert BLOCKING_COPY not in r.text
+
+
+def test_shared_mode_blocked_approval_on_your_own_threads_says_resolve_yours(
+    shared_client, moderation
+):
+    people, _, agent = moderation
+    shared_client.post("/r/r/sign", data={"version": 1}, headers=people["owner"])
+    verdict = {"version": 1, "verdict": "approve"}
+    r = shared_client.post("/r/r/verdict", data=verdict, headers=people["carol"])
+    assert f'<p class="error" role="alert">{SHARED_BLOCKING_COPY}</p>' in r.text
+    shared_client.post(f"/r/r/comments/{agent}/resolve", headers=people["owner"])
+    r = shared_client.post("/r/r/verdict", data=verdict, headers=people["carol"])
+    assert f'<p class="error" role="alert">{OWN_BLOCKING_COPY}</p>' in r.text
+    r = shared_client.post("/r/r/verdict", data=verdict, headers=people["dave"])
+    assert f'<p class="error" role="alert">{SHARED_BLOCKING_COPY}</p>' in r.text
 
 
 def test_shared_mode_refusal_on_resolved_thread_opens_the_card(shared_client, moderation):
