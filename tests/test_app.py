@@ -318,7 +318,7 @@ def test_shared_mode_startup_lower_cases_old_header_ids_once(shared_settings, ca
         ],
         "requests": [("old", "bob@example.com")],
     }
-    assert "lowercased ids rows=8" in [r.getMessage() for r in caplog.records]
+    assert "lowercased ids values=8" in [r.getMessage() for r in caplog.records]
 
     conn = db.connect(shared_settings.db_path)
     for id in ("jane@example.com", "bob@example.com"):
@@ -354,6 +354,34 @@ def test_shared_mode_startup_lower_cases_old_header_ids_once(shared_settings, ca
     conn = db.connect(shared_settings.db_path)
     assert db.lowercase_human_ids(conn) == 0
     conn.close()
+
+
+def test_lowercasing_reads_no_rows_when_nothing_is_left_to_change(shared_settings):
+    _seed_mixed_case_ids(shared_settings.db_path)
+    conn = db.connect(shared_settings.db_path)
+    db.lowercase_human_ids(conn)
+    statements = []
+    conn.set_trace_callback(statements.append)
+    changes = conn.total_changes
+    assert db.lowercase_human_ids(conn) == 0
+    conn.set_trace_callback(None)
+    selects = [s for s in statements if s.startswith("SELECT")]
+    assert len(selects) == len(db.HUMAN_ID_COLUMNS)
+    assert all(conn.execute(s).fetchall() == [] for s in selects)
+    assert conn.total_changes == changes
+    conn.close()
+
+
+def test_refused_shared_start_leaves_stored_ids_alone(shared_settings):
+    _seed_mixed_case_ids(shared_settings.db_path)
+    conn = db.connect(shared_settings.db_path)
+    db.init_schema(conn)
+    conn.close()
+    before = _plain(_ids(shared_settings.db_path))
+    assert before["verdicts"] == [("JANE@example.com",)]
+    with pytest.raises(RuntimeError, match="VERIFAIR_BOOTSTRAP_ADMIN_ID is required"):
+        create_app(replace(shared_settings, bootstrap_admin_id=None))
+    assert _plain(_ids(shared_settings.db_path)) == before
 
 
 def test_local_mode_startup_keeps_mixed_case_cookie_ids(settings):

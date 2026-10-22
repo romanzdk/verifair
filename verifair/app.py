@@ -63,8 +63,6 @@ def create_app(settings: Settings) -> FastAPI:
     conn = db.connect(settings.db_path)
     try:
         db.init_schema(conn)
-        if settings.identity_header and (changed := db.lowercase_human_ids(conn)):
-            log.info("lowercased ids rows=%d", changed)
         if not settings.identity_header and db.list_users(conn):
             raise RuntimeError(
                 "This database has members. Set VERIFAIR_IDENTITY_HEADER to run in shared mode."
@@ -76,6 +74,8 @@ def create_app(settings: Settings) -> FastAPI:
                 log.info("bootstrap skipped: members exist")
         if settings.identity_header and not db.list_users(conn):
             raise RuntimeError("VERIFAIR_BOOTSTRAP_ADMIN_ID is required to create the first admin")
+        if settings.identity_header and (changed := db.lowercase_human_ids(conn)):
+            log.info("lowercased ids values=%d", changed)
     finally:
         conn.close()
 

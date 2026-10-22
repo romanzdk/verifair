@@ -209,17 +209,16 @@ HUMAN_ID_COLUMNS = (
 def lowercase_human_ids(conn: sqlite3.Connection) -> int:
     # Python's lower() matches how the identity header is read (SQLite's is ASCII only).
     # An old human id such as "Agent" is left alone so it does not turn into the agent.
+    conn.create_function("py_lower", 1, str.lower, deterministic=True)
     changed = 0
     with _write(conn):
         for table, column in HUMAN_ID_COLUMNS:
             rows = conn.execute(
-                f"SELECT rowid, {column} FROM {table} WHERE {column} IS NOT NULL"
+                f"SELECT rowid, py_lower({column}) FROM {table} WHERE {column} IS NOT NULL"
+                f" AND {column} != py_lower({column}) AND py_lower({column}) != 'agent'"
             ).fetchall()
-            for rowid, value in rows:
-                lower = value.lower()
-                if lower == value or lower == "agent":
-                    continue
-                changed += 1
+            changed += len(rows)
+            for rowid, lower in rows:
                 if table == "review_requests":
                     conn.execute(
                         "INSERT OR IGNORE INTO review_requests (report_id, reviewer_id)"

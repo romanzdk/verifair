@@ -389,7 +389,7 @@ After the upgrade:
 
 - Add the members on `/access` and give each agent a member token. The old shared token stops working.
 - Existing reports keep their `author_id`. Signed reports get it from their latest signature. A member can push new versions only to reports whose `author_id` is their id.
-- Every shared-mode startup turns the ids already stored on reports, signatures, verdicts, comments and review requests into lower case, so they match the members. It skips `agent`. When it changes anything it logs `lowercased ids rows=N`. Local mode leaves ids as they are.
+- Every shared-mode startup turns the ids already stored on reports, signatures, verdicts, comments and review requests into lower case, so they match the members. It skips `agent`. When it changes anything it logs `lowercased ids values=N`, where N counts each changed id, so a comment whose author and resolver both changed counts 2. It runs only after the other startup checks pass, so a start that fails changes nothing. Local mode leaves ids as they are.
 - Reports with no owner are frozen. Push them again with an agent token under a new id.
 - If no admin can sign in any more, make someone admin again in the database. Use the id in lower case:
 
