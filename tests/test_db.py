@@ -553,12 +553,12 @@ def test_update_user_changes_role_and_active(conn):
     add_user(conn, id="boss", name="Boss", role="admin")
     add_user(conn, id="m", name="M", role="member")
     conn.execute("UPDATE users SET updated_at='2000-01-01' WHERE id='m'")
-    promoted = update_user(conn, "m", role="admin")
-    assert (promoted["role"], promoted["active"]) == ("admin", 1)
+    promoted, revoked = update_user(conn, "m", role="admin")
+    assert (promoted["role"], promoted["active"], revoked) == ("admin", 1, 0)
     assert promoted["updated_at"] != "2000-01-01"
-    off = update_user(conn, "m", active=False)
-    assert (off["role"], off["active"]) == ("admin", 0)
-    assert update_user(conn, "m", active=True)["active"] == 1
+    off, revoked = update_user(conn, "m", active=False)
+    assert (off["role"], off["active"], revoked) == ("admin", 0, 0)
+    assert update_user(conn, "m", active=True)[0]["active"] == 1
     with pytest.raises(ValueError):
         update_user(conn, "nobody", role="member")
 
@@ -573,7 +573,7 @@ def test_update_user_refuses_to_remove_last_active_admin(conn, change):
     a = get_user(conn, "a")
     assert (a["role"], a["active"]) == ("admin", 1)
     assert not conn.in_transaction
-    assert update_user(conn, "a", role="admin", active=True)["role"] == "admin"
+    assert update_user(conn, "a", role="admin", active=True)[0]["role"] == "admin"
     update_user(conn, "b", active=True)
     update_user(conn, "a", **change)
 
@@ -624,12 +624,13 @@ def test_deactivation_revokes_open_tokens_of_that_user(conn):
     _, old = create_token(conn, owner_id="m", label="old")
     conn.execute("UPDATE api_tokens SET revoked_at='2000-01-01' WHERE id=?", (old["id"],))
     boss_token, _ = create_token(conn, owner_id="boss", label="ci")
-    update_user(conn, "m", active=False)
+    assert update_user(conn, "m", active=False)[1] == 1
+    assert update_user(conn, "m", active=False)[1] == 0
     revoked = {t["label"]: t["revoked_at"] for t in list_tokens(conn)}
     assert revoked["laptop"] is not None
     assert revoked["old"] == "2000-01-01"
     assert revoked["ci"] is None
-    update_user(conn, "m", active=True)
+    assert update_user(conn, "m", active=True)[1] == 0
     assert authenticate_token(conn, token) is None
     assert authenticate_token(conn, boss_token)["id"] == "boss"
 

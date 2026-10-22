@@ -758,9 +758,10 @@ def update_member(
 ):
     if member["role"] != "admin":
         return _denied(request, ADMIN_ONLY)
-    open_tokens = [t for t in db.list_tokens(conn, id) if t["revoked_at"] is None]
     try:
-        row = db.update_user(conn, id, role=role, active=None if active is None else active == "1")
+        row, revoked = db.update_user(
+            conn, id, role=role, active=None if active is None else active == "1"
+        )
     except db.LastAdmin:
         return _access(request, conn, user, error=LAST_ADMIN, status=409)
     except ValueError:
@@ -771,7 +772,7 @@ def update_member(
         id,
         row["role"],
         row["active"],
-        0 if row["active"] else len(open_tokens),
+        revoked,
     )
     return RedirectResponse("/access", 303)
 

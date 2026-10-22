@@ -489,3 +489,25 @@ def test_new_token_has_a_copy_button_and_the_note_describes_the_field(shared_cli
     assert r.text.count(token) == 1
     js = (Path(web.__file__).parent / "static" / "landing.js").read_text()
     assert '"[data-copy-identity], [data-copy-target]"' in js and "Token copied." in js
+
+
+def test_tokens_revoked_counts_what_the_deactivation_revoked(
+    shared_client, conn, as_user, monkeypatch, caplog
+):
+    caplog.set_level("INFO", logger="verifair")
+    as_user("bob@example.com")
+    update = db.update_user
+
+    def create_then_update(conn, id, **kwargs):
+        _token(conn, id, "late")
+        return update(conn, id, **kwargs)
+
+    monkeypatch.setattr(db, "update_user", create_then_update)
+    r = shared_client.post(
+        "/access/users/bob@example.com", data={"active": "0"}, headers=ADMIN, follow_redirects=False
+    )
+    assert r.status_code == 303
+    assert (
+        "access action=update_user actor=admin@example.com target=bob@example.com"
+        " role=member active=0 tokens_revoked=1"
+    ) in caplog.text

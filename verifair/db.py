@@ -627,10 +627,10 @@ def list_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 def update_user(
     conn: sqlite3.Connection, id: str, *, role: str | None = None, active: bool | None = None
-) -> sqlite3.Row:
+) -> tuple[sqlite3.Row, int]:
     if role is not None:
         _check_role(role)
-    now = _now()
+    now, revoked = _now(), 0
     with _write(conn):
         user = get_user(conn, id)
         if user is None:
@@ -648,11 +648,11 @@ def update_user(
             (role, int(active), now, id),
         )
         if not active:
-            conn.execute(
+            revoked = conn.execute(
                 "UPDATE api_tokens SET revoked_at=? WHERE owner_id=? AND revoked_at IS NULL",
                 (now, id),
-            )
-    return get_user(conn, id)
+            ).rowcount
+    return get_user(conn, id), revoked
 
 
 def bootstrap_admin(conn: sqlite3.Connection, admin_id: str) -> bool:
