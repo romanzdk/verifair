@@ -176,7 +176,7 @@ Response (`open=true` leaves out resolved threads):
 - `prefix` and `suffix` hold optional context immediately before and after the quote, used to choose between repeated matches.
 - Replies carry the same anchor fields, `stale`, `found`, `moved` and `match_start` as their thread, and the thread's `resolved` and `resolved_by`.
 - `author_type` is `agent` or `human`.
-- `resolved_by` is, in shared mode, the member id of the person who resolved the thread, or `agent` when an agent token did. It is `null` for open threads and in local mode.
+- `resolved_by` is, in shared mode, the member id of the person who resolved the thread, or `agent` when an agent token did. It is `null` for open threads, in local mode, and for threads resolved before the upgrade to shared mode.
 
 Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?, prefix?, suffix?, blocking?}`. The response is 201 with one comment (same fields as above, without `stale`, `found`, `moved`, `match_start` and `replies`). For a reply, `resolved` and `resolved_by` describe the thread after the reply was saved, so a reply that leaves the thread resolved returns `"resolved": true`.
 
@@ -380,10 +380,12 @@ A deployment that already sets `VERIFAIR_IDENTITY_HEADER` runs in shared mode af
 
 Before you upgrade:
 
-1. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID`, or startup fails.
-2. Let `/api/` through the proxy without sign-in. Agents use tokens, not the browser login. Keep the proxy stripping the identity header on those routes too. With oauth2-proxy: `--skip-auth-route=^/api/`. Leave `--pass-authorization-header` and `--basic-auth-password` off: with either one set, oauth2-proxy removes the client's `Authorization` header even on skipped routes, so agent tokens never reach verifair.
-3. Point liveness and readiness probes at `/healthz`. verifair needs no sign-in there, but oauth2-proxy asks for one on every route it does not skip. Add `--skip-auth-route=GET=^/healthz$`, use an exec probe, or probe the proxy's own `/ping` instead.
-4. Plan who to add first. After the switch, everyone except the bootstrap admin gets 403 until an admin adds them. The 403 page shows the exact id to add, so ask people to open verifair and send you that id. Ids are matched without regard to case.
+1. Back up the database with `sqlite3 /data/verifair.db ".backup /backup/verifair.db"`. Shared mode turns the stored ids into lower case, so going back to the old version means restoring this backup.
+2. Stop the old instance before you start the new one, so the old version cannot write mixed-case ids after the new one has changed them. On Kubernetes, use `strategy: Recreate` on the Deployment.
+3. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID`, or startup fails.
+4. Let `/api/` through the proxy without sign-in. Agents use tokens, not the browser login. Keep the proxy stripping the identity header on those routes too. With oauth2-proxy: `--skip-auth-route=^/api/`. Leave `--pass-authorization-header` and `--basic-auth-password` off: with either one set, oauth2-proxy removes the client's `Authorization` header even on skipped routes, so agent tokens never reach verifair.
+5. Point liveness and readiness probes at `/healthz`. verifair needs no sign-in there, but oauth2-proxy asks for one on every route it does not skip. Add `--skip-auth-route=GET=^/healthz$`, use an exec probe, or probe the proxy's own `/ping` instead.
+6. Plan who to add first. After the switch, everyone except the bootstrap admin gets 403 until an admin adds them. The 403 page shows the exact id to add, so ask people to open verifair and send you that id. Ids are matched without regard to case.
 
 After the upgrade:
 
