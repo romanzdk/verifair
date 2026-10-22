@@ -74,7 +74,7 @@
         <td data-label="Active">{{ "Yes" if u.active else "No" }}</td>
         <td><form method="post" action="{{ action }}">
           <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
-          {% if u.active %}<button class="btn" aria-label="Deactivate {{ u.id }}" data-confirm="Deactivate {{ u.id }}? Their agent tokens will be revoked.">Deactivate</button>
+          {% if u.active %}<button class="btn" aria-label="Deactivate {{ u.id }}" data-confirm="{{ 'Deactivate yourself? You will lose access right away.' if u.id == me else 'Deactivate ' ~ u.id ~ '? Their agent tokens will be revoked.' }}">Deactivate</button>
           {% else %}<button class="btn" aria-label="Reactivate {{ u.id }}">Reactivate</button>{% endif %}
         </form></td>
       </tr>

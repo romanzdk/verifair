@@ -424,6 +424,10 @@ def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, con
     ) in page
     assert page.count("(you)") == 1
     assert "<code>admin@example.com</code> <small>(you)</small>" in page
+    assert (
+        '<button class="btn" aria-label="Deactivate admin@example.com"'
+        ' data-confirm="Deactivate yourself? You will lose access right away.">Deactivate</button>'
+    ) in page
     js = (Path(web.__file__).parent / "static" / "landing.js").read_text()
     assert 'addEventListener("submit"' in js and "event.submitter?.dataset.confirm" in js
     assert "!confirm(message)" in js and "event.preventDefault()" in js
