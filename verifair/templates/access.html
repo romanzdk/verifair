@@ -36,17 +36,22 @@
 <p>Access management needs a sign-in proxy. See the README.</p>
 {% else %}
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-{% if new_token %}
+{% if new_token or token_note %}
 <section class="landing-access">
   <h2>New token</h2>
+  {% if new_token %}
   <input readonly value="{{ new_token }}" aria-label="New token" autocomplete="off" spellcheck="false">
   <p>Copy it now. It will not be shown again.</p>
+  {% else %}
+  <p role="status">{{ token_note }}</p>
+  {% endif %}
 </section>
 {% endif %}
 <section class="landing-access">
   <h2>Your agent tokens</h2>
   {{ token_rows(tokens) }}
   <form method="post" action="/access/tokens" class="landing-access-form">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
     <input name="label" maxlength="60" required placeholder="Label, for example laptop" aria-label="Token label">
     <button class="btn p">New token</button>
   </form>

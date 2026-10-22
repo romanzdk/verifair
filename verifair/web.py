@@ -53,6 +53,10 @@ DEACTIVATED = "Your access to this workspace was turned off. Ask an admin to rea
 LABEL_INPUT = "Enter a label (1–60 characters)."
 ADMIN_ONLY = "Only an admin can manage members."
 OWNER_ONLY = "Only the token owner or an admin can revoke it."
+ALREADY_CREATED = (
+    "This token was already created. Its secret was shown only once."
+    " If you did not copy it, revoke it and create a new one."
+)
 
 
 def plain_id(value: str) -> bool:
@@ -657,10 +661,24 @@ def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str
 
 
 def _access(
-    request: Request, conn: sqlite3.Connection, user, *, error=None, token=None, status=200
+    request: Request,
+    conn: sqlite3.Connection,
+    user,
+    *,
+    error=None,
+    token=None,
+    token_note=None,
+    status=200,
 ):
     member = request.state.member
-    ctx = {"shared": _shared(request), "error": error, "new_token": token, "roles": db.ROLES}
+    ctx = {
+        "shared": _shared(request),
+        "error": error,
+        "new_token": token,
+        "token_note": token_note,
+        "roles": db.ROLES,
+        "nonce": secrets.token_urlsafe(16),
+    }
     if member is not None:
         ctx |= {"tokens": db.list_tokens(conn, member["id"]), "is_admin": member["role"] == "admin"}
         if ctx["is_admin"]:
@@ -743,13 +761,20 @@ def update_member(
 
 @router.post("/access/tokens")
 def new_token(
-    request: Request, conn: Conn, user: User, member: Member, label: Annotated[str, Form()] = ""
+    request: Request,
+    conn: Conn,
+    user: User,
+    member: Member,
+    label: Annotated[str, Form()] = "",
+    nonce: Annotated[str, Form(max_length=64)] = "",
 ):
     label = label.strip()
     if not 1 <= len(label) <= 60:
         return _access(request, conn, user, error=LABEL_INPUT, status=422)
     try:
-        token, row = db.create_token(conn, owner_id=member["id"], label=label)
+        token, row = db.create_token(conn, owner_id=member["id"], label=label, nonce=nonce or None)
+    except db.AlreadyCreated:
+        return _access(request, conn, user, token_note=ALREADY_CREATED)
     except ValueError:
         return _denied(request, DEACTIVATED.format(id=member["id"]))
     log.info("access action=create_token actor=%s target=%s", user[0], row["id"])

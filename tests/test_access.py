@@ -12,6 +12,10 @@ LAST_ADMIN = "There must be at least one active admin."
 EXISTS = "That member already exists."
 COPY_ONCE = "Copy it now. It will not be shown again."
 LOCAL_NOTE = "Access management needs a sign-in proxy. See the README."
+ALREADY_CREATED = (
+    "This token was already created. Its secret was shown only once."
+    " If you did not copy it, revoke it and create a new one."
+)
 
 
 @pytest.fixture
@@ -186,6 +190,25 @@ def test_new_token_is_shown_once_and_never_logged(shared_client, conn, as_user, 
     secret = token.partition(".")[2]
     assert secret not in caplog.text
     assert f"access action=create_token actor=bob@example.com target={row['id']}" in caplog.text
+
+
+def _nonce(html):
+    return re.search(r'name="nonce" value="([^"]+)"', html).group(1)
+
+
+def test_resending_the_new_token_form_does_not_create_a_second_token(shared_client, conn):
+    page = shared_client.get("/access", headers=ADMIN).text
+    nonce = _nonce(page)
+    assert _nonce(shared_client.get("/access", headers=ADMIN).text) != nonce
+    data = {"label": "laptop", "nonce": nonce}
+    first = shared_client.post("/access/tokens", data=data, headers=ADMIN)
+    assert 'value="vf_' in first.text and ALREADY_CREATED not in first.text
+    assert _nonce(first.text) != nonce
+    again = shared_client.post("/access/tokens", data=data, headers=ADMIN)
+    assert again.status_code == 200 and again.headers["cache-control"] == "no-store"
+    assert ALREADY_CREATED in again.text and "vf_" not in again.text
+    assert COPY_ONCE not in again.text
+    assert len(db.list_tokens(conn)) == 1
 
 
 @pytest.mark.parametrize("label", ["", "   ", "x" * 61])

@@ -668,6 +668,47 @@ def test_token_round_trip_stores_only_a_digest(conn):
     assert secret not in " ".join(str(v) for v in stored)
 
 
+def test_create_token_with_a_used_nonce_creates_nothing(conn):
+    add_user(conn, id="m", name="M", role="member")
+    add_user(conn, id="n", name="N", role="member")
+    create_token(conn, owner_id="m", label="a", nonce="x1")
+    with pytest.raises(db.AlreadyCreated):
+        create_token(conn, owner_id="m", label="again", nonce="x1")
+    create_token(conn, owner_id="n", label="other owner", nonce="x1")
+    create_token(conn, owner_id="m", label="no nonce")
+    create_token(conn, owner_id="m", label="no nonce")
+    assert sorted(t["label"] for t in list_tokens(conn)) == [
+        "a",
+        "no nonce",
+        "no nonce",
+        "other owner",
+    ]
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO api_tokens (id, digest, owner_id, label, created_at, nonce)"
+            " VALUES ('z', 'd', 'm', 'l', 'now', 'x1')"
+        )
+
+
+def test_init_schema_adds_the_token_nonce_to_an_older_database(tmp_path):
+    c = connect(str(tmp_path / "old.db"))
+    c.executescript(
+        "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL,"
+        " active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);"
+        "CREATE TABLE api_tokens (id TEXT PRIMARY KEY, digest TEXT NOT NULL,"
+        " owner_id TEXT NOT NULL REFERENCES users(id), label TEXT NOT NULL,"
+        " created_at TEXT NOT NULL, revoked_at TEXT);"
+    )
+    init_schema(c)
+    init_schema(c)
+    assert "nonce" in _columns(c, "api_tokens")
+    add_user(c, id="m", name="M", role="member")
+    create_token(c, owner_id="m", label="a", nonce="x1")
+    with pytest.raises(db.AlreadyCreated):
+        create_token(c, owner_id="m", label="a", nonce="x1")
+    c.close()
+
+
 def test_authenticate_token_refuses_wrong_secret(conn):
     add_user(conn, id="m", name="M", role="member")
     token, _ = create_token(conn, owner_id="m", label="a")

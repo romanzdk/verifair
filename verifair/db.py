@@ -90,7 +90,8 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     owner_id TEXT NOT NULL REFERENCES users(id),
     label TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    revoked_at TEXT
+    revoked_at TEXT,
+    nonce TEXT
 );
 CREATE INDEX IF NOT EXISTS comments_report_parent ON comments(report_id, parent_id);
 CREATE INDEX IF NOT EXISTS verdicts_report ON verdicts(report_id);
@@ -109,6 +110,10 @@ class AlreadySigned(Exception):
 
 
 class VerdictRefused(Exception):
+    pass
+
+
+class AlreadyCreated(Exception):
     pass
 
 
@@ -177,6 +182,11 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "comments", "prefix", "TEXT")
     _ensure_column(conn, "comments", "suffix", "TEXT")
     _ensure_column(conn, "comments", "resolved_by", "TEXT")
+    _ensure_column(conn, "api_tokens", "nonce", "TEXT")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS api_tokens_owner_nonce ON api_tokens(owner_id, nonce)"
+        " WHERE nonce IS NOT NULL"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS reports_author ON reports(author_id)")
     conn.execute(
         "UPDATE reports SET author_id=(SELECT signer_id FROM signatures s"
@@ -624,16 +634,25 @@ def _digest(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
-def create_token(conn: sqlite3.Connection, *, owner_id: str, label: str) -> tuple[str, sqlite3.Row]:
+def create_token(
+    conn: sqlite3.Connection, *, owner_id: str, label: str, nonce: str | None = None
+) -> tuple[str, sqlite3.Row]:
     public_id, secret = secrets.token_hex(6), secrets.token_urlsafe(32)
     with _write(conn):
         owner = get_user(conn, owner_id)
         if owner is None or not owner["active"]:
             raise ValueError("unknown or inactive owner")
+        if (
+            nonce is not None
+            and conn.execute(
+                "SELECT 1 FROM api_tokens WHERE owner_id=? AND nonce=?", (owner_id, nonce)
+            ).fetchone()
+        ):
+            raise AlreadyCreated
         conn.execute(
-            "INSERT INTO api_tokens (id, digest, owner_id, label, created_at)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (public_id, _digest(secret), owner_id, label, _now()),
+            "INSERT INTO api_tokens (id, digest, owner_id, label, created_at, nonce)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (public_id, _digest(secret), owner_id, label, _now(), nonce),
         )
     return f"vf_{public_id}.{secret}", get_token(conn, public_id)
 
