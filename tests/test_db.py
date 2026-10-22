@@ -695,6 +695,14 @@ def test_authenticate_token_refuses_inactive_owner(conn):
     assert authenticate_token(conn, token) is None
 
 
+def test_authenticate_token_refuses_a_token_whose_owner_row_is_gone(conn):
+    add_user(conn, id="m", name="M", role="member")
+    token, _ = create_token(conn, owner_id="m", label="a")
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("DELETE FROM users WHERE id='m'")
+    assert authenticate_token(conn, token) is None
+
+
 def test_authenticate_token_returns_none_for_malformed_strings(conn):
     add_user(conn, id="m", name="M", role="member")
     token, _ = create_token(conn, owner_id="m", label="a")

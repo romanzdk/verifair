@@ -125,7 +125,9 @@ def test_comment_roundtrip_and_open_filter(client):
     assert len(threads) == 1
     t = threads[0]
     anchor = {"stale": False, "found": True, "moved": False, "match_start": 0}
-    assert {k: v for k, v in t.items() if k != "replies"} == root.json() | anchor
+    assert {k: v for k, v in t.items() if k != "replies"} == root.json() | anchor | {
+        "resolved_by": None
+    }
     assert t["replies"] == [reply.json() | anchor]
 
     done = client.post(f"/api/reports/prorate/comments/{cid}/resolve", headers=H)

@@ -357,10 +357,11 @@ def get_comments(id: str, conn: Conn, open: bool = False):
             _comment_json(t.root)
             | anchor
             | {
+                "resolved_by": t.root["resolved_by"],
                 "replies": [
                     _comment_json(r, resolved) | anchor | {"blocking": t.blocking}
                     for r in t.replies
-                ]
+                ],
             }
         )
     return {"threads": result}

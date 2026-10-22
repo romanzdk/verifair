@@ -151,6 +151,7 @@ Response (`open=true` leaves out resolved threads):
       "created_at": "2026-10-21T09:14:03+00:00",
       "blocking": true,
       "resolved": false,
+      "resolved_by": null,
       "stale": true,
       "found": true,
       "moved": false,
@@ -175,6 +176,7 @@ Response (`open=true` leaves out resolved threads):
 - `prefix` and `suffix` hold optional context immediately before and after the quote, used to choose between repeated matches.
 - Replies carry the same anchor fields, `stale`, `found`, `moved` and `match_start` as their thread.
 - `author_type` is `agent` or `human`.
+- Each thread also has `resolved_by`: in shared mode the member id of the person who resolved it, or `agent` when an agent token did. It is `null` for open threads and in local mode.
 
 Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?, prefix?, suffix?, blocking?}`. The response is 201 with one comment (same fields as above, without `stale`, `found`, `moved`, `match_start` and `replies`).
 
@@ -340,7 +342,7 @@ A deactivated member is refused on their next request, and all their tokens are 
 
 There must always be at least one active admin. verifair refuses to demote or deactivate the last one: `There must be at least one active admin.`
 
-Admin and token actions are written to the app log as `access action=... actor=... target=...`. The token secret is never logged.
+Admin and token actions are written to the app log as `access action=... actor=... target=...`. A member change also logs `tokens_revoked=N`, the number of tokens a deactivation revoked. The token secret is never logged.
 
 ### Agent tokens
 

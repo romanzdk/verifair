@@ -186,11 +186,6 @@ def _can_moderate(
     )
 
 
-def _resolver_name(conn: sqlite3.Connection, user_id: str) -> str:
-    user = db.get_user(conn, user_id)
-    return user["name"] if user else user_id
-
-
 def report_context(
     conn: sqlite3.Connection,
     report: sqlite3.Row,
@@ -208,6 +203,10 @@ def report_context(
     threads = build_threads(comments, sections, current)
     open_threads = [t for t in threads if t.root["resolved_at"] is None]
     signature = db.get_signature(conn, id, current)
+    resolved_by = {
+        t.root["id"]: t.root["resolved_by"] for t in threads if shared and t.root["resolved_by"]
+    }
+    names = {u["id"]: u["name"] for u in db.list_users(conn)} if resolved_by else {}
     return {
         "report": report,
         "url": f"/r/{url_quote(id)}",
@@ -237,11 +236,7 @@ def report_context(
         "can_moderate": {
             t.root["id"] for t in threads if _can_moderate(shared, member, user_id, t.root, report)
         },
-        "resolvers": {
-            t.root["id"]: _resolver_name(conn, t.root["resolved_by"])
-            for t in threads
-            if shared and t.root["resolved_by"]
-        },
+        "resolvers": {cid: names.get(by, by) for cid, by in resolved_by.items()},
     }
 
 
@@ -517,7 +512,7 @@ def resolve(id: str, cid: int, request: Request, conn: Conn, user: User):
     refusal = _moderation_refusal(request, conn, report, user[0], cid)
     if refusal:
         return refusal
-    root_id = db.resolve_thread(conn, id, cid, by=user[0])
+    root_id = db.resolve_thread(conn, id, cid, by=user[0] if _shared(request) else None)
     if root_id is None:
         raise HTTPException(404, "comment not found")
     return _thread_response(request, conn, report, user[0], root_id)
@@ -728,6 +723,7 @@ def update_member(
 ):
     if member["role"] != "admin":
         return _denied(request, ADMIN_ONLY)
+    open_tokens = [t for t in db.list_tokens(conn, id) if t["revoked_at"] is None]
     try:
         row = db.update_user(conn, id, role=role, active=None if active is None else active == "1")
     except db.LastAdmin:
@@ -735,11 +731,12 @@ def update_member(
     except ValueError:
         raise HTTPException(404, "member not found") from None
     log.info(
-        "access action=update_user actor=%s target=%s role=%s active=%s",
+        "access action=update_user actor=%s target=%s role=%s active=%s tokens_revoked=%d",
         user[0],
         id,
         row["role"],
         row["active"],
+        0 if row["active"] else len(open_tokens),
     )
     return RedirectResponse("/access", 303)
 

@@ -116,13 +116,13 @@ def test_admin_adds_promotes_deactivates_and_reactivates(shared_client, conn, ca
     assert lines == [
         "access action=add_user actor=admin@example.com target=carol@example.com role=member",
         "access action=update_user actor=admin@example.com target=carol@example.com"
-        " role=admin active=1",
+        " role=admin active=1 tokens_revoked=0",
         "access action=update_user actor=admin@example.com target=carol@example.com"
-        " role=member active=1",
+        " role=member active=1 tokens_revoked=0",
         "access action=update_user actor=admin@example.com target=carol@example.com"
-        " role=member active=0",
+        " role=member active=0 tokens_revoked=1",
         "access action=update_user actor=admin@example.com target=carol@example.com"
-        " role=member active=1",
+        " role=member active=1 tokens_revoked=0",
     ]
 
 

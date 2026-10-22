@@ -1478,6 +1478,14 @@ def test_resolved_summary_names_who_resolved(shared_client, shared_settings, mod
     page = shared_client.get("/r/r", headers=people["dave"]).text
     assert "Why? · resolved by <b>Carol Creator</b></summary>" in page
     assert "Why? · resolved by <b>agent</b></summary>" in page
+    threads = shared_client.get(
+        "/api/reports/r/comments", headers={"Authorization": f"Bearer {token}"}
+    ).json()["threads"]
+    assert {t["id"]: t["resolved_by"] for t in threads} == {
+        human: "carol@example.com",
+        agent: "agent",
+    }
+    assert all("resolved_by" not in reply for t in threads for reply in t["replies"])
 
 
 def test_local_mode_anyone_moderates_and_resolver_is_not_shown(client):
@@ -1488,6 +1496,8 @@ def test_local_mode_anyone_moderates_and_resolver_is_not_shown(client):
     r = client.post(f"/r/prorate/comments/{cid}/resolve")
     assert r.status_code == 200 and 'class="thread resolved"' in r.text
     assert "resolved by" not in r.text and "resolved by" not in client.get("/r/prorate").text
+    [thread] = api_threads(client)
+    assert (thread["resolved"], thread["resolved_by"]) == (True, None)
 
 
 def test_thread_markup_for_allowed_users_matches_local_mode(shared_settings, moderation):

@@ -654,7 +654,7 @@ def authenticate_token(conn: sqlite3.Connection, token: str) -> sqlite3.Row | No
     if row is None or not hmac.compare_digest(row["digest"], _digest(secret)):
         return None
     owner = get_user(conn, row["owner_id"])
-    return owner if owner["active"] else None
+    return owner if owner is not None and owner["active"] else None
 
 
 def revoke_token(conn: sqlite3.Connection, token_id: str) -> bool:
