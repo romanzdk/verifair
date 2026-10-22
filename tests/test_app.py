@@ -92,8 +92,21 @@ def test_bootstrap_admin_id_agent_is_refused_in_any_case(shared_settings, value)
 
 
 def test_local_mode_startup_needs_no_users(settings):
-    create_app(replace(settings, bootstrap_admin_id="admin@example.com"))
+    create_app(settings)
     conn = db.connect(settings.db_path)
+    assert db.list_users(conn) == []
+    conn.close()
+
+
+def test_bootstrap_admin_id_without_the_identity_header_refuses_to_start(settings):
+    with pytest.raises(RuntimeError) as error:
+        create_app(replace(settings, bootstrap_admin_id="admin@example.com"))
+    assert str(error.value) == (
+        "VERIFAIR_BOOTSTRAP_ADMIN_ID is set but VERIFAIR_IDENTITY_HEADER is not."
+        " Set the header to run in shared mode."
+    )
+    conn = db.connect(settings.db_path)
+    db.init_schema(conn)
     assert db.list_users(conn) == []
     conn.close()
 

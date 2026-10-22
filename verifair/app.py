@@ -49,7 +49,12 @@ async def _membership_denial(request: Request, settings: Settings):
 
 def create_app(settings: Settings) -> FastAPI:
     admin_id = settings.bootstrap_admin_id
-    if settings.identity_header and admin_id and not web.plain_id(admin_id):
+    if admin_id and not settings.identity_header:
+        raise RuntimeError(
+            "VERIFAIR_BOOTSTRAP_ADMIN_ID is set but VERIFAIR_IDENTITY_HEADER is not."
+            " Set the header to run in shared mode."
+        )
+    if admin_id and not web.plain_id(admin_id):
         raise RuntimeError(
             "VERIFAIR_BOOTSTRAP_ADMIN_ID must be a plain id such as jane@example.com"
         )

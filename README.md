@@ -242,7 +242,7 @@ An unknown section also lists the valid headings: `{"detail": "unknown section",
 | `VERIFAIR_BASE_URL` | `http://localhost:8000` | Used for links in API responses and notifications |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | Comma-separated H2 headings every pushed body must have; empty turns the check off |
 | `VERIFAIR_IDENTITY_HEADER` | unset | Name of a request header that carries the user identity. Setting it turns on shared mode (see Roles and access) |
-| `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: id of the first admin, created when the database has no members |
+| `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: id of the first admin, created when the database has no members. Startup fails if it is set without `VERIFAIR_IDENTITY_HEADER` |
 | `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook for draft reports, ready-for-review notifications, comments and verdicts |
 
 ## Report template
@@ -315,7 +315,7 @@ export VERIFAIR_BOOTSTRAP_ADMIN_ID=jane@example.com
 uv run uvicorn verifair.asgi:app
 ```
 
-Startup fails when the database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set. It also fails when the id is not a plain id (no spaces, `/` or `\`, and not `agent`). Startup logs `bootstrap admin created id=...` or `bootstrap skipped: members exist`.
+Startup fails when the database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set. It also fails when `VERIFAIR_BOOTSTRAP_ADMIN_ID` is set without `VERIFAIR_IDENTITY_HEADER`, so a missing header does not quietly start local mode. It also fails when the id is not a plain id (no spaces, `/` or `\`, and not `agent`). Startup logs `bootstrap admin created id=...` or `bootstrap skipped: members exist`.
 
 Once a database has members, it stays in shared mode. Starting it without `VERIFAIR_IDENTITY_HEADER` fails with `This database has members. Set VERIFAIR_IDENTITY_HEADER to run in shared mode.` This stops a config mistake from opening the workspace to everyone.
 
