@@ -14,6 +14,7 @@ import pytest
         "unicode_squashed_match",
         "unicode_context",
         "unicode_context_boundary",
+        "error_copy",
     ],
 )
 def test_actual_javascript_anchor_ranges(case):

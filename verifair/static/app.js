@@ -187,6 +187,7 @@ function clearRequestError(anchor) {
 }
 
 function errorCopy(status) {
+  if (status === 401 || status === 403) return "Your access changed. Reload the page.";
   if (status === 422) return "Check the text and try again.";
   if (status === 404) return "This item no longer exists. Reload the page.";
   return `Something went wrong (${status}). Reload and try again.`;

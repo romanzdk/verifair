@@ -604,6 +604,7 @@ def test_app_js_caps_quote_and_maps_error_copy():
         "This item no longer exists. Reload the page.",
         "Connection lost. Your text is still here, try again.",
         "Something went wrong (${status}). Reload and try again.",
+        "Your access changed. Reload the page.",
     ]:
         assert copy in js
 

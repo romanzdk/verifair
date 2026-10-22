@@ -95,6 +95,13 @@ const cases = {
     assert.equal(prefix, "🚀" + "x".repeat(30) + " ");
     assert.equal(suffix, " " + "x".repeat(30) + "🚀");
   },
+  error_copy() {
+    assert.equal(scope.errorCopy(401), "Your access changed. Reload the page.");
+    assert.equal(scope.errorCopy(403), "Your access changed. Reload the page.");
+    assert.equal(scope.errorCopy(404), "This item no longer exists. Reload the page.");
+    assert.equal(scope.errorCopy(422), "Check the text and try again.");
+    assert.equal(scope.errorCopy(500), "Something went wrong (500). Reload and try again.");
+  },
 };
 cases[process.argv[2]]();
 console.log(`${process.argv[2]}: correct DOM range`);
