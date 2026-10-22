@@ -4,14 +4,16 @@
   if (active && nav.scrollWidth > nav.clientWidth) {
     nav.scrollLeft = Math.max(0, active.offsetLeft - 16);
   }
-  document.querySelectorAll("[data-copy-identity]").forEach(button => {
+  document.querySelectorAll("[data-copy-identity], [data-copy-target]").forEach(button => {
+    const field = button.dataset.copyTarget && document.getElementById(button.dataset.copyTarget);
     button.addEventListener("click", async () => {
       const result = button.parentElement.querySelector("[data-copy-result]");
       try {
-        await navigator.clipboard.writeText(button.dataset.copyIdentity);
-        result.textContent = "Identity copied.";
+        await navigator.clipboard.writeText(field ? field.value : button.dataset.copyIdentity);
+        result.textContent = field ? "Token copied." : "Identity copied.";
       } catch {
-        result.textContent = "Select the ID above to copy it.";
+        field?.select();
+        result.textContent = field ? "Select the token above to copy it." : "Select the ID above to copy it.";
       }
     });
   });

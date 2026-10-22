@@ -473,3 +473,19 @@ def test_denied_page_has_a_heading_and_links_back(shared_client, as_user):
         assert 'href="/static/landing.css"' in r.text and '<a href="/">' in r.text
         assert ('<a href="/access">' in r.text) is back
         assert "<script" not in r.text and 'class="topbar"' not in r.text
+
+
+def test_new_token_has_a_copy_button_and_the_note_describes_the_field(shared_client):
+    r, token = _new_token(shared_client, ADMIN)
+    assert (
+        f'<input readonly value="{token}" id="vf_new_token" aria-label="New token"'
+        ' aria-describedby="vf_new_token_note"'
+    ) in r.text
+    assert f'<p id="vf_new_token_note">{COPY_ONCE}</p>' in r.text
+    assert (
+        '<button type="button" class="btn" data-copy-target="vf_new_token">Copy token</button>'
+        ' <span data-copy-result role="status"></span>'
+    ) in r.text
+    assert r.text.count(token) == 1
+    js = (Path(web.__file__).parent / "static" / "landing.js").read_text()
+    assert '"[data-copy-identity], [data-copy-target]"' in js and "Token copied." in js

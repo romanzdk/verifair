@@ -40,8 +40,9 @@
 <section class="landing-access">
   <h2>New token</h2>
   {% if new_token %}
-  <input readonly value="{{ new_token }}" aria-label="New token" autocomplete="off" spellcheck="false">
-  <p>Copy it now. It will not be shown again.</p>
+  <input readonly value="{{ new_token }}" id="vf_new_token" aria-label="New token" aria-describedby="vf_new_token_note" autocomplete="off" spellcheck="false">
+  <p id="vf_new_token_note">Copy it now. It will not be shown again.</p>
+  <p><button type="button" class="btn" data-copy-target="vf_new_token">Copy token</button> <span data-copy-result role="status"></span></p>
   {% else %}
   <p role="status">{{ token_note }}</p>
   {% endif %}
