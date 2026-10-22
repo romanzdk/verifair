@@ -304,7 +304,7 @@ verifair has two modes. `VERIFAIR_IDENTITY_HEADER` switches between them.
 
 1. Put verifair behind an auth proxy that signs users in, for example with SSO.
 2. The proxy must set the identity header on every request. It must strip any value the client sent and write its own. Otherwise anyone can pose as anyone.
-3. Make verifair reachable only through the proxy. Anyone who can reach it directly can send any header.
+3. Make verifair reachable only through the proxy. Anyone who can reach it directly can send any header. See [Deploying](#deploying) for how.
 4. Set `VERIFAIR_IDENTITY_HEADER` to the header name, for example `X-Forwarded-Email`.
 5. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID` to your own id as the proxy sends it, for example `jane@example.com`. Case does not matter. On a database with no members, startup makes this id the first admin. Once members exist, it adds no one.
 6. `VERIFAIR_API_TOKEN` is not needed. If it is set, shared mode refuses it and startup logs a warning.
@@ -369,13 +369,31 @@ In shared mode, anyone can reply to a thread or reopen it with the **Reopen** bu
 
 A reply to a resolved thread opens it again only when the person replying could resolve it. The same rule holds for agent tokens: the owner's agent reopens a thread by replying only when the agent started it. So an agent that answers "fixed" on a reviewer's resolved thread does not open it again, but the reviewer's own reply does. In local mode every reply opens the thread again.
 
-The buttons are hidden for everyone else, and a direct request gets 403 `Only the person who started this thread or an admin can do that.` A resolved thread shows who resolved it.
+The buttons are hidden for everyone else. If someone else tries anyway, a plain request (such as `curl`) gets 403 `Only the person who started this thread or an admin can do that.`, and a request from the page shows the same text in the thread instead. A resolved thread shows who resolved it.
 
 In local mode, anyone can resolve any thread.
 
 ### Moving an existing deployment to shared mode
 
-A deployment that already sets `VERIFAIR_IDENTITY_HEADER` runs in shared mode after the upgrade. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID` before you upgrade, or startup fails. Then add the members on `/access` and give each agent a member token. The old shared token stops working. Existing reports keep their `author_id`. A member can push new versions only to reports whose `author_id` is their id.
+A deployment that already sets `VERIFAIR_IDENTITY_HEADER` runs in shared mode after the upgrade.
+
+Before you upgrade:
+
+1. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID`, or startup fails.
+2. Let `/api/` through the proxy without sign-in. Agents use tokens, not the browser login. Keep the proxy stripping the identity header on those routes too. With oauth2-proxy: `--skip-auth-route=^/api/`.
+3. Point liveness and readiness probes at `/healthz`. It needs no sign-in.
+4. Plan who to add first. After the switch, everyone except the bootstrap admin gets 403 until an admin adds them. The 403 page shows the exact id to add, so ask people to open verifair and send you that id. Ids are matched without regard to case.
+
+After the upgrade:
+
+- Add the members on `/access` and give each agent a member token. The old shared token stops working.
+- Existing reports keep their `author_id`. Signed reports get it from their latest signature. A member can push new versions only to reports whose `author_id` is their id.
+- Reports with no owner are frozen. Push them again with an agent token under a new id.
+- If no admin can sign in any more, make someone admin again in the database. Use the id in lower case:
+
+  ```bash
+  sqlite3 /data/verifair.db "UPDATE users SET role='admin', active=1 WHERE id='jane@example.com'"
+  ```
 
 ### Not built yet
 
@@ -392,6 +410,8 @@ docker build -t verifair .
 docker run --rm -e VERIFAIR_API_TOKEN=change-me -p 127.0.0.1:8000:8000 -v verifair-data:/data verifair
 ```
 
+The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When the auth proxy runs next to verifair in the same pod, set `UVICORN_HOST=127.0.0.1` so only the proxy can reach it. The image `HEALTHCHECK` still works then, because it runs inside the container.
+
 The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind mounts or Kubernetes PVCs, `/data` must be writable by uid 10001 (`chown 10001 <dir>` or `fsGroup: 10001`).
 
 ## Deploying
@@ -405,12 +425,14 @@ The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind
 - Back up with `sqlite3 /data/verifair.db ".backup /backup/verifair.db"`, not `cp`, which can copy a half-written file.
 - Run one replica only.
 - The image trusts `X-Forwarded-*` headers from any address. Set `FORWARDED_ALLOW_IPS` to your proxy's IP.
+- `FORWARDED_ALLOW_IPS` does not protect the identity header. It only decides whose `X-Forwarded-For` and `X-Forwarded-Proto` uvicorn believes. verifair reads the identity header from every request, so anyone who can reach verifair directly, not through the proxy, can claim any identity. Make sure only the proxy can reach it: run the proxy as a sidecar and set `UVICORN_HOST=127.0.0.1`, or use a network policy that only lets the proxy in.
+- With `UVICORN_HOST=127.0.0.1`, an HTTP probe from outside the container cannot reach `/healthz`. Use an exec probe with the same command as the image `HEALTHCHECK`, or probe `/healthz` through the proxy.
 
 ### Upgrading an existing HTTP deployment
 
 Before upgrading a shared deployment, configure a trusted TLS certificate and an HTTPS reverse proxy for its hostname. Redirect the old HTTP URL to HTTPS, set `VERIFAIR_BASE_URL` to that HTTPS origin, and restart verifair behind the proxy with its existing database volume. Update agent URLs and bookmarked report links to HTTPS. A healthy `/healthz` response or a readable page on HTTP does not confirm that browser writes work.
 
-After restarting, open the HTTPS URL in a browser, set your name if needed, and submit a comment on a draft report to check that writes pass through the proxy. Existing non-loopback HTTP deployments need this change before the upgrade; private-network placement alone does not enable browser writes. The API continues to use bearer tokens, and `/healthz` can still be checked over the internal loopback HTTP listener.
+After restarting, open the HTTPS URL in a browser. In local mode, set your name if needed; in shared mode, sign in as a member first. Then submit a comment on a draft report to check that writes pass through the proxy. Existing non-loopback HTTP deployments need this change before the upgrade; private-network placement alone does not enable browser writes. The API continues to use bearer tokens, and `/healthz` can still be checked over the internal loopback HTTP listener.
 
 ## Related projects
 
