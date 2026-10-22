@@ -369,7 +369,7 @@ In shared mode, anyone can reply to a thread or reopen it with the **Reopen** bu
 
 A reply to a resolved thread opens it again only when the person replying could resolve it. The same rule holds for agent tokens: the owner's agent reopens a thread by replying only when the agent started it. So an agent that answers "fixed" on a reviewer's resolved thread does not open it again, but the reviewer's own reply does. In local mode every reply opens the thread again.
 
-The buttons are hidden for everyone else. If someone else tries anyway, a plain request (such as `curl`) gets 403 `Only the person who started this thread or an admin can do that.`, and a request from the page shows the same text in the thread instead. A resolved thread shows who resolved it.
+The buttons are hidden for everyone else. If someone else tries anyway, a request without htmx gets 403 `Only the person who started this thread or an admin can do that.`, and a request from the page shows the same text in the thread instead. A resolved thread shows who resolved it.
 
 In local mode, anyone can resolve any thread.
 
@@ -380,8 +380,8 @@ A deployment that already sets `VERIFAIR_IDENTITY_HEADER` runs in shared mode af
 Before you upgrade:
 
 1. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID`, or startup fails.
-2. Let `/api/` through the proxy without sign-in. Agents use tokens, not the browser login. Keep the proxy stripping the identity header on those routes too. With oauth2-proxy: `--skip-auth-route=^/api/`.
-3. Point liveness and readiness probes at `/healthz`. It needs no sign-in.
+2. Let `/api/` through the proxy without sign-in. Agents use tokens, not the browser login. Keep the proxy stripping the identity header on those routes too. With oauth2-proxy: `--skip-auth-route=^/api/`. Leave `--pass-authorization-header` and `--basic-auth-password` off: with either one set, oauth2-proxy removes the client's `Authorization` header even on skipped routes, so agent tokens never reach verifair.
+3. Point liveness and readiness probes at `/healthz`. verifair needs no sign-in there, but oauth2-proxy asks for one on every route it does not skip. Add `--skip-auth-route=GET=^/healthz$`, use an exec probe, or probe the proxy's own `/ping` instead.
 4. Plan who to add first. After the switch, everyone except the bootstrap admin gets 403 until an admin adds them. The 403 page shows the exact id to add, so ask people to open verifair and send you that id. Ids are matched without regard to case.
 
 After the upgrade:
@@ -427,7 +427,7 @@ The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind
 - Run one replica only.
 - The image trusts `X-Forwarded-*` headers from any address. Set `FORWARDED_ALLOW_IPS` to your proxy's IP.
 - `FORWARDED_ALLOW_IPS` does not protect the identity header. It only decides whose `X-Forwarded-For` and `X-Forwarded-Proto` uvicorn believes. verifair reads the identity header from every request, so anyone who can reach verifair directly, not through the proxy, can claim any identity. Make sure only the proxy can reach it: run the proxy as a sidecar and set `UVICORN_HOST=127.0.0.1`, or use a network policy that only lets the proxy in.
-- With `UVICORN_HOST=127.0.0.1`, an HTTP probe from outside the container cannot reach `/healthz`. Use an exec probe with the same command as the image `HEALTHCHECK`, or probe `/healthz` through the proxy.
+- With `UVICORN_HOST=127.0.0.1`, an HTTP probe from outside the container cannot reach `/healthz`. Use an exec probe with the same command as the image `HEALTHCHECK`, or probe `/healthz` through the proxy. oauth2-proxy then needs `--skip-auth-route=GET=^/healthz$`, or it asks the probe to sign in.
 
 ### Upgrading an existing HTTP deployment
 
