@@ -1083,3 +1083,59 @@ def test_reply_response_shows_the_thread_state_after_the_reply(
         "resolved": True,
         "resolved_by": "bob@example.com",
     }
+
+
+def test_shared_mode_token_refusals_are_logged_with_a_reason(
+    shared_client, shared_settings, alice, bob, caplog
+):
+    caplog.set_level("INFO", logger="verifair")
+    good = alice["Authorization"].removeprefix("Bearer ")
+    with closing(db.connect(shared_settings.db_path)) as conn:
+        revoked, row = db.create_token(conn, owner_id="alice@example.com", label="old")
+        db.revoke_token(conn, row["id"])
+        conn.execute("UPDATE users SET active=0 WHERE id='bob@example.com'")
+    for headers in [
+        {},
+        {"Authorization": "Token abc"},
+        {"Authorization": "Bearer"},
+        {"Authorization": "Bearer t"},
+        {"Authorization": "Bearer vf_nodot"},
+        {"Authorization": f"Bearer {good}x"},
+        {"Authorization": f"Bearer {revoked}"},
+        bob,
+    ]:
+        assert shared_client.get("/api/reports/x", headers=headers).status_code == 401
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("api token")]
+    assert lines == [
+        f"api token refused reason={reason} path=/api/reports/x"
+        for reason in (
+            "missing",
+            "malformed",
+            "malformed",
+            "shared-token",
+            "malformed",
+            "unknown",
+            "revoked",
+            "inactive",
+        )
+    ]
+    assert all(r.levelname == "INFO" for r in caplog.records if "api token" in r.getMessage())
+    for secret in (good, revoked, bob["Authorization"].removeprefix("Bearer ")):
+        assert secret.partition(".")[2] not in caplog.text
+
+
+def test_shared_mode_wait_logs_why_the_token_stopped_working(
+    shared_client, shared_settings, alice, caplog
+):
+    caplog.set_level("INFO", logger="verifair")
+    push(shared_client, auth=alice)
+
+    def revoke(conn):
+        [token] = db.list_tokens(conn, "alice@example.com")
+        db.revoke_token(conn, token["id"])
+
+    thread = _later(shared_settings, 0.6, revoke)
+    r = shared_client.get("/api/reports/prorate/wait?timeout=10", headers=alice)
+    thread.join()
+    assert r.status_code == 401
+    assert "api token refused reason=revoked path=/api/reports/prorate/wait" in caplog.text

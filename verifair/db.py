@@ -699,17 +699,23 @@ def get_token(conn: sqlite3.Connection, token_id: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
-def authenticate_token(conn: sqlite3.Connection, token: str) -> sqlite3.Row | None:
+def authenticate_token(
+    conn: sqlite3.Connection, token: str
+) -> tuple[sqlite3.Row | None, str | None]:
     if not token.startswith("vf_") or token.count(".") != 1:
-        return None
+        return None, "malformed"
     public_id, secret = token[3:].split(".")
     row = conn.execute(
-        "SELECT digest, owner_id FROM api_tokens WHERE id=? AND revoked_at IS NULL", (public_id,)
+        "SELECT digest, owner_id, revoked_at FROM api_tokens WHERE id=?", (public_id,)
     ).fetchone()
     if row is None or not hmac.compare_digest(row["digest"], _digest(secret)):
-        return None
+        return None, "unknown"
+    if row["revoked_at"] is not None:
+        return None, "revoked"
     owner = get_user(conn, row["owner_id"])
-    return owner if owner is not None and owner["active"] else None
+    if owner is None or not owner["active"]:
+        return None, "inactive"
+    return owner, None
 
 
 def revoke_token(conn: sqlite3.Connection, token_id: str) -> bool:

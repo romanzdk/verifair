@@ -352,6 +352,7 @@ Every member creates their own agent tokens on `/access`. A token looks like `vf
 - Deactivating a member revokes their tokens.
 - A token acts for its owner, but never with admin power, even when the owner is an admin. It cannot push to or comment on another member's report, and it cannot resolve threads that a person started.
 - The shared `VERIFAIR_API_TOKEN` is refused in shared mode with 401 `The shared token is not accepted in shared mode. Use a member agent token.`
+- Each refused token is logged at INFO as `api token refused reason=... path=...`. The reason is `missing` (no `Authorization` header), `malformed` (not a `Bearer` value, or a `vf_` token of the wrong shape), `shared-token` (a bearer value that does not start with `vf_`), `unknown` (no such token, or a wrong secret), `revoked` or `inactive` (the owner is deactivated). The token itself is never logged.
 
 ### Report ownership
 

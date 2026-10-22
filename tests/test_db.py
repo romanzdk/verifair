@@ -631,8 +631,8 @@ def test_deactivation_revokes_open_tokens_of_that_user(conn):
     assert revoked["old"] == "2000-01-01"
     assert revoked["ci"] is None
     assert update_user(conn, "m", active=True)[1] == 0
-    assert authenticate_token(conn, token) is None
-    assert authenticate_token(conn, boss_token)["id"] == "boss"
+    assert authenticate_token(conn, token) == (None, "revoked")
+    assert authenticate_token(conn, boss_token)[0]["id"] == "boss"
 
 
 def test_bootstrap_admin_only_on_empty_table(conn):
@@ -663,7 +663,7 @@ def test_token_round_trip_stores_only_a_digest(conn):
     assert len(public_id) == 12 and row["id"] == public_id
     assert (row["owner_id"], row["label"], row["revoked_at"]) == ("m@example.com", "laptop", None)
     assert "digest" not in row.keys()
-    assert authenticate_token(conn, token)["name"] == "M"
+    assert authenticate_token(conn, token)[0]["name"] == "M"
     stored = conn.execute("SELECT * FROM api_tokens").fetchone()
     assert stored["digest"] == hashlib.sha256(secret.encode()).hexdigest()
     assert secret not in " ".join(str(v) for v in stored)
@@ -715,8 +715,9 @@ def test_authenticate_token_refuses_wrong_secret(conn):
     token, _ = create_token(conn, owner_id="m", label="a")
     _, other = create_token(conn, owner_id="m", label="b")
     secret = token.split(".")[1]
-    assert authenticate_token(conn, token + "x") is None
-    assert authenticate_token(conn, f"vf_{other['id']}.{secret}") is None
+    assert authenticate_token(conn, token + "x") == (None, "unknown")
+    assert authenticate_token(conn, f"vf_{other['id']}.{secret}") == (None, "unknown")
+    assert authenticate_token(conn, f"vf_nope.{secret}") == (None, "unknown")
 
 
 def test_authenticate_token_refuses_revoked(conn):
@@ -726,15 +727,16 @@ def test_authenticate_token_refuses_revoked(conn):
     assert revoke_token(conn, row["id"]) is True
     assert revoke_token(conn, row["id"]) is False
     assert revoke_token(conn, "missing") is False
-    assert authenticate_token(conn, token) is None
-    assert authenticate_token(conn, kept)["id"] == "m"
+    assert authenticate_token(conn, token) == (None, "revoked")
+    assert authenticate_token(conn, token + "x") == (None, "unknown")
+    assert authenticate_token(conn, kept)[0]["id"] == "m"
 
 
 def test_authenticate_token_refuses_inactive_owner(conn):
     add_user(conn, id="m", name="M", role="member")
     token, _ = create_token(conn, owner_id="m", label="a")
     conn.execute("UPDATE users SET active=0 WHERE id='m'")
-    assert authenticate_token(conn, token) is None
+    assert authenticate_token(conn, token) == (None, "inactive")
 
 
 def test_authenticate_token_refuses_a_token_whose_owner_row_is_gone(conn):
@@ -742,10 +744,10 @@ def test_authenticate_token_refuses_a_token_whose_owner_row_is_gone(conn):
     token, _ = create_token(conn, owner_id="m", label="a")
     conn.execute("PRAGMA foreign_keys=OFF")
     conn.execute("DELETE FROM users WHERE id='m'")
-    assert authenticate_token(conn, token) is None
+    assert authenticate_token(conn, token) == (None, "inactive")
 
 
-def test_authenticate_token_returns_none_for_malformed_strings(conn):
+def test_authenticate_token_refuses_malformed_strings(conn):
     add_user(conn, id="m", name="M", role="member")
     token, _ = create_token(conn, owner_id="m", label="a")
     body = token.removeprefix("vf_")
@@ -761,7 +763,11 @@ def test_authenticate_token_returns_none_for_malformed_strings(conn):
         f"Bearer {token}",
         "vf_\x00.\u00ff",
     ]
-    assert [authenticate_token(conn, t) for t in malformed] == [None] * len(malformed)
+    reasons = [authenticate_token(conn, t) for t in malformed]
+    assert reasons == [
+        (None, "unknown" if t in ("vf_.", "vf_.x", "vf_\x00.\u00ff") else "malformed")
+        for t in malformed
+    ]
 
 
 def test_list_tokens_filters_by_owner_and_never_returns_digest(conn):

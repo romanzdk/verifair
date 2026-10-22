@@ -1,12 +1,13 @@
 import asyncio
 import json
+import logging
 import secrets
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
 from itertools import islice
 from time import monotonic
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NoReturn
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -29,6 +30,12 @@ from verifair.rules import NO_OWNER, compute_status
 NOT_OWNER = "This report belongs to another member."
 SHARED_TOKEN = "The shared token is not accepted in shared mode. Use a member agent token."
 AGENT_RESOLVE = "Agent tokens can only resolve threads the agent started on its owner's reports."
+log = logging.getLogger("verifair")
+
+
+def _refuse_token(reason: str, path: str, detail: str = "invalid token") -> NoReturn:
+    log.info("api token refused reason=%s path=%s", reason, path)
+    raise HTTPException(401, detail)
 
 
 def require_token(request: Request) -> None:
@@ -36,15 +43,19 @@ def require_token(request: Request) -> None:
     given = request.headers.get("Authorization", "")
     request.state.token_owner = request.state.token = None
     if settings.identity_header:
+        path = request.url.path
         scheme, _, token = given.partition(" ")
-        if scheme == "Bearer" and token and not token.lstrip().startswith("vf_"):
-            raise HTTPException(401, SHARED_TOKEN)
-        if scheme == "Bearer" and token:
-            request.state.token = token
-            with closing(db.connect(settings.db_path)) as conn:
-                request.state.token_owner = db.authenticate_token(conn, token)
-        if request.state.token_owner is None:
-            raise HTTPException(401, "invalid token")
+        if not given:
+            _refuse_token("missing", path)
+        if scheme != "Bearer" or not token:
+            _refuse_token("malformed", path)
+        if not token.lstrip().startswith("vf_"):
+            _refuse_token("shared-token", path, SHARED_TOKEN)
+        with closing(db.connect(settings.db_path)) as conn:
+            owner, reason = db.authenticate_token(conn, token)
+        if owner is None:
+            _refuse_token(reason, path)
+        request.state.token, request.state.token_owner = token, owner
         return
     token = settings.api_token
     if not token or not secrets.compare_digest(given.encode(), f"Bearer {token}".encode()):
@@ -279,8 +290,8 @@ def _poll_wait(
 ) -> tuple[dict | None, dict[str, int]]:
     with closing(db.connect(path)) as conn:
         conn.execute("BEGIN")
-        if token is not None and db.authenticate_token(conn, token) is None:
-            raise HTTPException(401, "invalid token")
+        if token is not None and (reason := db.authenticate_token(conn, token)[1]):
+            _refuse_token(reason, f"/api/reports/{id}/wait")
         _require_report(conn, id)
         current = db.latest_version(conn, id)
         rows = {}
