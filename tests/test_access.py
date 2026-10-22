@@ -335,13 +335,21 @@ def test_browser_check_refusals_on_access_keep_the_security_headers(
         "a\tb",
         ".",
         "..",
-        "agent",
     ],
 )
 def test_add_member_refuses_ids_that_are_not_plain(shared_client, conn, id):
     r = shared_client.post("/access/users", data={"id": id, "name": "X"}, headers=ADMIN)
     assert r.status_code == 422
     assert "Use a plain id such as jane@example.com." in r.text
+    assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
+
+
+@pytest.mark.parametrize("id", ["agent", "Agent", " AGENT "])
+def test_add_member_says_the_agent_id_is_reserved(shared_client, conn, id):
+    r = shared_client.post("/access/users", data={"id": id, "name": "X"}, headers=ADMIN)
+    assert r.status_code == 422
+    assert '<p class="error" role="alert">The id agent is reserved for agents.</p>' in r.text
+    assert "Use a plain id" not in r.text.split("<h2>Add member</h2>")[1].split("<form")[0]
     assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
 
 
