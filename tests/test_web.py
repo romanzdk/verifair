@@ -765,7 +765,7 @@ def test_app_js_caps_quote_and_maps_error_copy():
     import verifair
 
     js = (Path(verifair.__file__).parent / "static" / "app.js").read_text()
-    assert "quote.slice(0, QUOTE_MAX)" in js and "const QUOTE_MAX = 2000;" in js
+    assert "Array.from(quote).slice(0, QUOTE_MAX)" in js and "const QUOTE_MAX = 2000;" in js
     for copy in [
         "Check the text and try again.",
         "This item no longer exists. Reload the page.",
@@ -2161,6 +2161,15 @@ def test_comment_with_quote_missing_from_section_is_refused(client):
 
 def _rail_reviewers(page):
     return page.split("<h4>Reviewers</h4>")[1].split("<h4>Versions</h4>")[0]
+
+
+def test_sidebar_skips_the_signer_among_requested_reviewers(client):
+    push(client, reviewers=["signer00", "carol000"])
+    sign(client)
+    rail = _rail_reviewers(client.get("/r/prorate").text)
+    assert re.findall(r'<span class="rn">([^<]*)</span> · ([^<]*)</div>', rail) == [
+        ("carol000", "review requested")
+    ]
 
 
 def test_sidebar_lists_requested_reviewers_next_to_verdicts(client):

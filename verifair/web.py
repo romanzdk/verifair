@@ -353,7 +353,9 @@ def report_context(
     resolved_by = {
         t.root["id"]: t.root["resolved_by"] for t in threads if shared and t.root["resolved_by"]
     }
-    names = {u["id"]: u["name"] for u in db.list_users(conn)} if resolved_by else {}
+    signer_id = signature["signer_id"] if signature else None
+    requested = [p for p in db.requested_reviewers(conn, id) if p != signer_id]
+    names = {u["id"]: u["name"] for u in db.list_users(conn)} if resolved_by or requested else {}
     return {
         "report": report,
         "url": f"/r/{url_quote(id)}",
@@ -366,7 +368,7 @@ def report_context(
             verdicts,
             current,
             signed=signature is not None,
-            signer_id=signature["signer_id"] if signature else None,
+            signer_id=signer_id,
         ),
         "signature": signature,
         "sections": sections,
@@ -375,7 +377,9 @@ def report_context(
         "open_count": len(open_threads),
         "blocking_count": sum(t.blocking for t in open_threads),
         "open_by_section": Counter(t.section_slug for t in open_threads),
-        "reviewers": rules.reviewers(comments, verdicts, _requested(conn, id)),
+        "reviewers": rules.reviewers(
+            comments, verdicts, {person: names.get(person, person) for person in requested}
+        ),
         "versions": db.list_versions(conn, id)[::-1],
         "links": _links(report),
         "my_verdict": rules.latest_verdicts(verdicts, current).get(user_id),
@@ -390,12 +394,6 @@ def report_context(
         },
         "resolvers": {cid: names.get(by, by) for cid, by in resolved_by.items()},
     }
-
-
-def _requested(conn: db.Connection, id: str) -> dict[str, str]:
-    requested = db.requested_reviewers(conn, id)
-    names = {u["id"]: u["name"] for u in db.list_users(conn)} if requested else {}
-    return {person: names.get(person, person) for person in requested}
 
 
 def _thread_response(
