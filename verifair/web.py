@@ -24,6 +24,7 @@ from verifair.render import (
     build_threads,
     normalize,
     quote_found,
+    render_markdown,
     section_plain_text,
     split_sections,
     threads_by_section,
@@ -374,9 +375,12 @@ def report_context(
     names = {u["id"]: u["name"] for u in users}
     judged = rules.latest_verdicts(verdicts, current)
     can_change = version == current
+    url = f"/r/{url_quote(id)}"
     return {
         "report": report,
-        "url": f"/r/{url_quote(id)}",
+        "url": url,
+        "shown_url": url if version == current else f"{url}/v/{version}",
+        "plan_html": render_markdown(shown["plan"]) if shown["plan"] is not None else None,
         "ticket": _ticket_label(report["ticket_url"]) if report["ticket_url"] else None,
         "version": version,
         "version_date": shown["created_at"],
@@ -639,22 +643,27 @@ def project_page(
 
 
 @router.get("/r/{id}")
-def report_page(id: str, request: Request, conn: Conn, user: User):
+def report_page(id: str, request: Request, conn: Conn, user: User, tab: str = "report"):
     report = _require_report(conn, id)
     ctx = report_context(
         conn, report, db.latest_version(conn, id), user[0], request.state.member, _shared(request)
     )
     ctx["sign_refusal"] = _sign_refusal(request, report, user[0])
+    ctx["view_tab"] = "plan" if tab == "plan" and ctx["plan_html"] is not None else "report"
     ctx["active_project"] = report["project"]
     return _page(request, conn, user, "report.html", ctx)
 
 
 @router.get("/r/{id}/v/{n}")
-def report_version_page(id: str, n: int, request: Request, conn: Conn, user: User):
+def report_version_page(
+    id: str, n: int, request: Request, conn: Conn, user: User, tab: str = "report"
+):
     report = _require_report(conn, id)
     if db.get_version(conn, id, n) is None:
         raise HTTPException(404, "version not found")
     ctx = report_context(conn, report, n, user[0], request.state.member, _shared(request))
+    ctx["shown_url"] = f"{ctx['url']}/v/{n}"
+    ctx["view_tab"] = "plan" if tab == "plan" and ctx["plan_html"] is not None else "report"
     ctx["active_project"] = report["project"]
     return _page(request, conn, user, "report.html", ctx)
 

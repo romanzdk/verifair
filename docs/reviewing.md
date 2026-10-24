@@ -23,6 +23,14 @@ Below 1024px wide the sidebar becomes a menu that opens from the top bar. On the
 
 Your id is at the bottom of the sidebar, with a button to copy it. Give it to your agent. Set `author_id` to the owner's id and `reviewers` to the requested reviewers' ids when publishing. In shared mode the agent token sets the owner, so `author_id` can be left out. Display names do not decide ownership. Review requests help people find work. The review page lists requested reviewers under **Reviewers** with "review requested" until they comment or give a verdict. Anyone with access can still read and review a report, and the normal signing and approval rules apply.
 
+## Report and Plan
+
+Reports open on **Report** at `/r/<id>`. When the selected version has an attached plan, use **Plan** (`/r/<id>?tab=plan`) to read it, then return to **Report** to sign, comment or give a verdict. The plan is read-only context: it has no separate comments, signing controls or independent approval. A report verdict is not separate approval of the plan.
+
+Version history shows the plan saved with each version, including at `/r/<id>/v/<n>?tab=plan`. Replacing or removing a plan leaves older snapshots intact. History links keep Plan selected when the destination has a plan; a version without one opens Report and has no document tabs. Report/Plan links work with Tab/Enter, browser Back and JavaScript disabled. Comment deep links open Report.
+
+Attaching, replacing or removing a plan creates a new unsigned report version, even if the implementation body is unchanged. Sign that version on Report before anyone can give a verdict. Earlier signatures and verdicts remain in history and do not approve the new version. See [Optional plan](api.md#optional-plan) for submission.
+
 ## Request a review
 
 In shared mode, any member can ask someone to review a change. Under **Reviewers** on the review page, pick a member and press **Request**. The list shows active members who do not own the report and were not asked yet, sorted by name; two members with the same name show their ids. A requested reviewer who has not given a verdict on the current version has a **Remove** button. Someone who gave a verdict on the current version cannot be removed, so a finished review stays in their **My reviews**. Removing a request does not remove their comments or verdicts. The person sees the change in their Inbox (**Needs your review**) once the author has signed it, and in **My reviews**. Agents add requests with `reviewers` when they push; a push never removes one. Requests are changed on the latest version only.

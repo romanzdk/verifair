@@ -1,3 +1,4 @@
+import json
 import time
 from contextlib import closing
 from dataclasses import replace
@@ -558,4 +559,25 @@ def test_a_normal_push_still_works(client):
     assert (
         client.post("/api/reports", json=payload, headers={"Authorization": "Bearer t"}).status_code
         == 201
+    )
+
+
+@pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+def test_plan_counts_toward_request_body_limit(client, settings, chunked):
+    payload = REPORT | {"body": "b" * (LIMIT // 2), "plan": "p" * (LIMIT // 2)}
+    encoded = json.dumps(payload).encode()
+    assert len(payload["body"].encode()) < LIMIT
+    assert len(payload["plan"].encode()) < LIMIT
+    assert len(encoded) > LIMIT
+    response = client.post(
+        "/api/reports",
+        content=iter([encoded]) if chunked else encoded,
+        headers=H | {"Content-Type": "application/json"},
+    )
+    assert ("content-length" not in response.request.headers) is chunked
+    assert (response.status_code, response.json()) == (413, TOO_LARGE)
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.list_reports(conn) == []
+    assert (
+        client.post("/api/reports", json=REPORT | {"plan": "# Small"}, headers=H).status_code == 201
     )

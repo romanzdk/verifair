@@ -52,6 +52,16 @@ print(json.dumps({
 EOF
 ```
 
+### Optional plan
+
+Attach one design or implementation Markdown document as `plan` in the same JSON payload. No plan template or headings are required; the report `body` and its headings remain required. Pass `"$PLAN_MD"` as a second argument to Python, import `Path` from `pathlib`, and add `"plan": Path(sys.argv[2]).read_text(encoding="utf-8")` to the payload above. Keep Python JSON encoding and send file contents, not a path or URL. See the complete [Python-plus-curl example](../../docs/api.md#optional-plan). There is no multipart upload or web editor.
+
+On updates, reuse `id` and resend `body` and the required fields. Omitting `plan` inherits the previous version's plan (or no plan on creation); `"plan": None` emits JSON `null` and removes it from the new version only. Nonblank text is stored exactly per version, without trimming or normalization; earlier snapshots survive replacement or removal. Blank text, wrong JSON types, NUL and lone surrogates are rejected with 422 and nothing saved. The existing 1 MiB (1,048,576-byte) limit applies to the entire encoded JSON request, including body and plan together. POST's 201 `{id, version, url}` response and GET's metadata shape are unchanged; GET returns neither document's contents.
+
+The optional **Plan** tab is read-only context for the selected report version; **Report** has signing, comments and verdicts. There is no independent plan approval. Every push, including a plan change or removal with the same body, creates a new unsigned report version that needs a fresh human signature. Earlier signatures and verdicts remain historical.
+
+### Push results
+
 - `reviewers` only adds review requests; a push cannot remove one. If the user wants a request removed, they use **Remove** under Reviewers on the review page (shared mode).
 - Add `"ticket_url"` if there is a ticket. Local mode only: add `"author"` and `"author_id"` if the user told you their verifair id. Shared mode: leave them out; the token owner is the author.
 - Responses:

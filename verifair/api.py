@@ -128,6 +128,7 @@ class ReportIn(Input):
     ]
     risk: Literal["low", "medium", "high"]
     body: Annotated[str, AfterValidator(_not_blank)]
+    plan: Annotated[str, AfterValidator(_not_blank)] | None = None
     id: str | None = Field(default=None, pattern=SLUG)
     ticket_url: HttpUrl | None = None
     links: list[Link] = []
@@ -237,6 +238,8 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             title=body.title,
             risk=body.risk,
             body=body.body,
+            plan=body.plan,
+            inherit_plan="plan" not in body.model_fields_set,
             id=body.id,
             ticket_url=body.ticket_url,
             links=[link.model_dump() for link in body.links],

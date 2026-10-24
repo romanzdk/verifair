@@ -70,6 +70,10 @@ def section_headings(body: str) -> list[str]:
     return [heading for _, heading in _headings(_md.parse(body))]
 
 
+def render_markdown(body: str) -> str:
+    return _md.render(body)
+
+
 def section_plain_text(body: str, heading: str) -> str:
     tokens = _md.parse(body)
     starts = list(_headings(tokens))

@@ -60,6 +60,41 @@ A push sends a "draft" message to Slack (if configured). The "ready for review" 
 
 Report markdown: raw HTML is shown as text, not rendered, and `javascript:` links are dropped. Use plain markdown only.
 
+### Optional plan
+
+`POST /api/reports` accepts one optional `plan`: Markdown contents, not a file path or URL to load. Any design or implementation plan is accepted; no template or report headings are required for it. The implementation `body` and all its required sections are still required on every push.
+
+| `plan` input | First version | Later version |
+| --- | --- | --- |
+| Omitted | No plan | Inherit the immediately preceding version's plan |
+| `null` | No plan | Remove the plan from the new version only |
+| Nonblank string | Store exact text | Replace with the exact text |
+| Empty or whitespace-only string, wrong JSON type, NUL or lone surrogate | 422; nothing saved | 422; no metadata or version changes |
+
+Each version stores its own plan snapshot, preserving submitted whitespace and Unicode without trimming or normalization. Replacing or removing a plan leaves earlier versions intact. The existing 1 MiB (1,048,576-byte) limit covers the entire encoded JSON request, including `body`, `plan` and all other fields together.
+
+Read UTF-8 files and encode their contents with Python before sending JSON. Set `REPORT_MD` and `PLAN_MD` to your local files, and use your configured URL and token:
+
+```bash
+python3 - "$REPORT_MD" "$PLAN_MD" <<'PY' | curl -sS --fail-with-body \
+  -X POST "$VERIFAIR_URL/api/reports" \
+  -H "Authorization: Bearer $VERIFAIR_API_TOKEN" \
+  -H "Content-Type: application/json" --data-binary @-
+import json, sys
+from pathlib import Path
+print(json.dumps({
+    "id": "my-change", "project": "my-project",
+    "title": "Describe the implemented change", "risk": "low",
+    "body": Path(sys.argv[1]).read_text(encoding="utf-8"),
+    "plan": Path(sys.argv[2]).read_text(encoding="utf-8"),
+}))
+PY
+```
+
+For updates, reuse `id` and resend the implementation `body` and required fields. Omit the `plan` key to inherit; use `"plan": None` in Python to send JSON `null` and remove it. Do not interpolate Markdown into a shell JSON literal. Submission uses the same JSON endpoint, with no multipart upload or web editor.
+
+Every push creates a new unsigned report version, even if only the plan changes or is removed. A human must sign the new version before review; earlier signatures and verdicts remain historical. Plan context is read-only, with no separate comments or approval. The POST response remains HTTP 201 with `{id, version, url}`. See [Report and Plan](reviewing.md#report-and-plan) for navigation and history.
+
 `scripts/push-sample.sh` pushes the report template as a draft example with the fixed id `sample-prorate-mid-cycle`, so running it again adds a new version. It sends to `http://localhost:8000` unless you set `VERIFAIR_URL`. For any URL that is not localhost it also needs `VERIFAIR_ALLOW_REMOTE=1`:
 
 ```bash
@@ -69,7 +104,7 @@ VERIFAIR_API_TOKEN=change-me VERIFAIR_URL=https://verifair.example.com VERIFAIR_
 
 ## Read a report
 
-`GET /api/reports/$ID` returns the report metadata, status, versions and verdicts. It does not return the markdown body.
+`GET /api/reports/$ID` returns the report metadata, status, versions and verdicts. Its shape is unchanged when a plan is attached: it returns neither the Markdown body nor plan contents, including in `versions`. Keep your local source files; read the plan on the report page.
 
 ```json
 {

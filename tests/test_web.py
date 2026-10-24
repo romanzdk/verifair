@@ -1,11 +1,12 @@
 import importlib.metadata
 import re
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from verifair import db, web
+from verifair import db, notify, web
 from verifair.app import CSP as APP_CSP
 
 H = {"Authorization": "Bearer t"}
@@ -39,6 +40,214 @@ def api_report(client, id="prorate"):
 
 def api_threads(client, id="prorate"):
     return client.get(f"/api/reports/{id}/comments", headers=H).json()["threads"]
+
+
+def _set_plan(settings, plan, version=1):
+    with closing(db.connect(settings.database_url)) as conn:
+        conn.execute(
+            "UPDATE versions SET plan = %s WHERE report_id = 'prorate' AND version = %s",
+            (plan, version),
+        )
+
+
+def _document_nav(page):
+    nav = re.search(r'<nav class="tabs" aria-label="Report documents">(.*?)</nav>', page, re.S)
+    assert nav is not None
+    assert nav[1].count('aria-current="page"') == 1
+    return nav[1]
+
+
+def test_plan_template_is_read_only(client):
+    push(client, reviewers=["carol000"])
+    client.cookies.set("vf_name", "Reader")
+    response = client.get("/r/prorate")
+    context = dict(response.context)
+    context |= {
+        "view_tab": "plan",
+        "plan_html": "<h1>Original plan</h1>",
+        "shown_url": "/r/prorate",
+    }
+    page = web.templates.get_template("report.html").render(context)
+    assert '<article class="content">' in page
+    assert "<h1>Original plan</h1>" in page
+    assert "has-verdict" not in page and "hx-post=" not in page
+    assert "data-section=" not in page and 'id="vf_popover"' not in page
+    assert "Full new price." not in page
+
+
+def test_report_plan_documents_navigation(client, settings):
+    push(client)
+    assert "Report documents" not in client.get("/r/prorate").text
+    _set_plan(settings, "# Original plan\n\n## Design\nPlan-only rationale.")
+    comment = client.post(
+        "/api/reports/prorate/comments", json={"body": "Report-only comment"}, headers=H
+    )
+    assert comment.status_code == 201
+    for suffix in ("", "?tab=report", "?tab=unknown", "?tab="):
+        response = client.get("/r/prorate" + suffix)
+        assert response.status_code == 200
+        nav = _document_nav(response.text)
+        assert '<a href="/r/prorate" aria-current="page">Report</a>' in nav
+        assert '<a href="/r/prorate?tab=plan">Plan</a>' in nav
+        assert "Full new price." in response.text and "Report-only comment" in response.text
+        assert "Plan-only rationale." not in response.text
+    plan = client.get("/r/prorate?tab=plan")
+    assert plan.status_code == 200
+    nav = _document_nav(plan.text)
+    assert '<a href="/r/prorate?tab=plan" aria-current="page">Plan</a>' in nav
+    assert "<h1>Original plan</h1>" in plan.text and "<h2>Design</h2>" in plan.text
+    assert "Report-only comment" not in plan.text and "Full new price." not in plan.text
+    assert plan.text.count("<main") == 1
+    assert plan.context["is_current"] is True
+    assert plan.context["shown_url"] == "/r/prorate"
+    for path in ("/r/nope?tab=plan", "/r/prorate/v/99?tab=plan"):
+        assert client.get(path).status_code == 404
+    _set_plan(settings, None)
+    fallback = client.get("/r/prorate?tab=plan")
+    assert fallback.status_code == 200
+    assert "Report documents" not in fallback.text and "Full new price." in fallback.text
+
+
+def test_plan_page_is_read_only(client, settings):
+    push(client, reviewers=["carol000"])
+    _set_plan(settings, "# Plan\n\n## Intent\nRead-only design.")
+    client.cookies.set("vf_name", "Reader")
+    report = client.get("/r/prorate").text
+    assert 'id="vf_sign"' in report and 'id="vf_verdict"' in report
+    assert "data-comment-section" in report and "has-verdict" in report
+    assert "Remove review request for carol000" in report
+    plan = client.get("/r/prorate?tab=plan").text
+    for forbidden in (
+        "hx-post=",
+        "data-section=",
+        "data-comment-section",
+        'class="cform"',
+        'id="vf_popover"',
+        'id="vf_verdict"',
+        'id="vf_sign"',
+        'class="name-prompt"',
+        "has-verdict",
+        "Remove review request",
+        'class="addrev"',
+    ):
+        assert forbidden not in plan
+    assert "carol000" in plan and "Read-only context" in plan
+    assert 'on the <a href="/r/prorate">Report tab</a>' in plan
+    client.cookies.delete("vf_name")
+    assert 'class="name-prompt"' not in client.get("/r/prorate?tab=plan").text
+    sign(client)
+    assert "Signed by <b>Signer</b>" in client.get("/r/prorate?tab=plan").text
+    push(client, id="prorate")
+    historical = client.get("/r/prorate/v/1").text
+    assert "has-verdict" not in historical and "data-comment-section" not in historical
+
+
+def test_plan_shared_reviewers_are_read_only(shared_client, shared_settings, as_user):
+    as_user("reviewer@example.com", "Reviewer")
+    as_user("other@example.com", "Other")
+    with closing(db.connect(shared_settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="prorate",
+            project="p",
+            title="Prorate",
+            risk="low",
+            body=SAMPLE,
+            author_id="admin@example.com",
+            reviewers=["reviewer@example.com"],
+        )
+    _set_plan(shared_settings, "# Shared plan")
+    report = shared_client.get("/r/prorate").text
+    assert 'class="addrev"' in report and "Remove review request" in report
+    plan = shared_client.get("/r/prorate?tab=plan").text
+    assert "Reviewer" in plan and "hx-post=" not in plan
+    assert 'class="addrev"' not in plan and "Remove review request" not in plan
+
+
+def test_plan_history_and_version_links(client, settings):
+    push(client)
+    _set_plan(settings, "# Plan A\nOriginal choice.")
+    client.post("/api/reports/prorate/comments", json={"body": "General note"}, headers=H)
+    client.post(
+        "/api/reports/prorate/comments",
+        json={"body": "Gone note", "section": "Edge cases"},
+        headers=H,
+    )
+    push(client, id="prorate", body="## Intent\nChanged body.")
+    _set_plan(settings, "# Plan B\nReplacement choice.", 2)
+    first = client.get("/r/prorate/v/1?tab=plan")
+    assert first.context["is_current"] is False
+    assert first.context["shown_url"] == "/r/prorate/v/1"
+    assert "Original choice." in first.text and "Replacement choice." not in first.text
+    assert 'href="/r/prorate?tab=plan">open current</a>' in first.text
+    push(client, id="prorate", body="## Intent\nNewest body.")
+    _set_plan(settings, None, 3)
+    for version, wanted, unwanted in (
+        (1, "Original choice.", "Replacement choice."),
+        (2, "Replacement choice.", "Original choice."),
+    ):
+        response = client.get(f"/r/prorate/v/{version}?tab=plan")
+        page = response.text
+        assert wanted in page and unwanted not in page
+        assert f'href="/r/prorate/v/{version}" aria-current="page">' not in _document_nav(page)
+        assert f'href="/r/prorate/v/{version}?tab=plan" aria-current="page">Plan</a>' in page
+        assert 'href="/r/prorate">open current</a>' in page
+        rail = page.split('<aside class="side"')[1].split("</aside>")[0]
+        assert 'href="/r/prorate/v/1?tab=plan"' in rail
+        assert 'href="/r/prorate/v/2?tab=plan"' in rail
+        assert 'href="/r/prorate"' in rail and 'href="/r/prorate?tab=plan"' not in rail
+        assert f'href="/r/prorate/v/{version}#intent"' in rail
+        assert f'href="/r/prorate/v/{version}#vf_general"' in rail
+        if version == 2:
+            assert f'href="/r/prorate/v/{version}#vf_earlier"' in rail
+        assert 'href="#intent"' not in rail
+    for path in ("/r/prorate?tab=plan", "/r/prorate/v/3?tab=plan"):
+        fallback = client.get(path)
+        assert "Newest body." in fallback.text and "Report documents" not in fallback.text
+    report = client.get("/r/prorate/v/1").text
+    assert 'href="/r/prorate/v/2?tab=plan"' not in report
+
+
+def test_plan_headings_do_not_become_report_comment_anchors(client, settings):
+    push(client, body="## Intent\nFirst body quote.\n\n## Intent\nSecond body quote.")
+    _set_plan(
+        settings,
+        "# Plan\n\n## Intent\nPlan-only quote.\n\n## Design\nPrivate design.\n\n"
+        "<script>alert(1)</script>\n\n{{ 7 * 7 }}\n\n[bad](javascript:alert(1))",
+    )
+    page = client.get("/r/prorate?tab=plan").text
+    assert '<article class="content">' in page and "<h2>Intent</h2>" in page
+    assert 'id="intent"' not in page and "data-section=" not in page
+    assert "&lt;script&gt;" in page and "<script>alert(1)" not in page
+    assert "{{ 7 * 7 }}" in page and 'href="javascript:' not in page
+    unknown = client.post(
+        "/api/reports/prorate/comments",
+        json={"body": "Why?", "section": "Design"},
+        headers=H,
+    )
+    assert unknown.status_code == 422 and unknown.json()["detail"] == "unknown section"
+    quote = client.post(
+        "/api/reports/prorate/comments",
+        json={"body": "Why?", "section": "Intent", "quote": "Plan-only quote."},
+        headers=H,
+    )
+    assert quote.status_code == 422 and quote.json()["detail"] == "quote not found"
+    valid = client.post(
+        "/api/reports/prorate/comments",
+        json={"body": "Real comment", "section": "Intent", "quote": "Second body quote."},
+        headers=H,
+    )
+    assert valid.status_code == 201
+    with closing(db.connect(settings.database_url)) as conn:
+        notice = notify.comment_text(
+            db.get_report(conn, "prorate"), db.list_comments(conn, "prorate")[0], settings.base_url
+        )
+    link = notice.rsplit(" ", 1)[1]
+    assert link == f"{settings.base_url}/r/prorate#vf_c{valid.json()['id']}"
+    report = client.get(link.removeprefix(settings.base_url)).text
+    assert 'id="intent"' in report and 'id="intent-2"' in report
+    assert f'id="vf_c{valid.json()["id"]}"' in report
+    assert "Real comment" in report and "Plan-only quote." not in report
 
 
 def test_inbox_links_projects_and_changes_shows_counts(client):

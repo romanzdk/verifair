@@ -80,6 +80,67 @@ def test_push_existing_id_other_project_refused(conn):
     assert _idle(conn)
 
 
+def test_plan_snapshots_inherit_replace_and_remove(conn):
+    original = "  # Návrh 🦊\n\nKeep exact whitespace.\r\n  "
+    replacement = "# Replacement\nA different approach.\n"
+    kwargs = {"id": "r1", "project": "p", "title": "T", "risk": "low", "body": "body"}
+    results = [
+        push_report(conn, **kwargs, plan=original),
+        push_report(conn, **kwargs),
+        push_report(conn, **kwargs, plan=replacement),
+        push_report(conn, **kwargs, plan=None, inherit_plan=False),
+        push_report(conn, **kwargs),
+    ]
+    assert results == [("r1", n) for n in range(1, 6)]
+    versions = list_versions(conn, "r1")
+    assert [v["plan"] for v in versions] == [original, original, replacement, None, None]
+    assert [v["body"] for v in versions] == ["body"] * 5
+    assert [v["version"] for v in versions] == [1, 2, 3, 4, 5]
+    assert db.get_version(conn, "r1", 1)["plan"] == original
+    for id, plan_args in [("omitted", {}), ("removed", {"plan": None, "inherit_plan": False})]:
+        push_report(conn, **(kwargs | {"id": id}), **plan_args)
+        assert db.get_version(conn, id, 1)["plan"] is None
+
+
+def test_fresh_versions_plan_is_nullable_text(conn):
+    column = conn.execute(
+        "SELECT data_type, is_nullable FROM information_schema.columns"
+        " WHERE table_schema=current_schema() AND table_name='versions' AND column_name='plan'"
+    ).fetchone()
+    assert column == {"data_type": "text", "is_nullable": "YES"}
+
+
+def test_init_schema_adds_plan_to_legacy_versions(conn):
+    push_report(conn, project="p", title="T", risk="low", body="legacy body", id="r1")
+    signature = sign_version(conn, report_id="r1", version=1, signer_id="u1", signer_name="Ann")
+    conn.execute("ALTER TABLE versions DROP COLUMN IF EXISTS plan")
+    init_schema(conn)
+    init_schema(conn)
+    version = db.get_version(conn, "r1", 1)
+    assert version["body"] == "legacy body"
+    assert version["plan"] is None
+    assert get_signature(conn, "r1", 1) == signature
+
+
+def test_init_schema_does_not_wait_for_readers_of_versions_plan(new_database_url):
+    url = new_database_url()
+    conn, reader = connect(url), connect(url)
+    init_schema(conn)
+    try:
+        assert conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()"
+            " AND table_name='versions' AND column_name='plan'"
+        ).fetchone()
+        with reader.transaction():
+            reader.execute("SELECT * FROM versions")
+            started = time.monotonic()
+            init_schema(conn)
+            assert time.monotonic() - started < 1
+    finally:
+        conn.close()
+        reader.close()
+
+
 def test_reply_inherits_anchor_and_resolve_root_only(conn):
     push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
     root = add_comment(
