@@ -46,7 +46,7 @@ A request without the header, or with the header sent more than once, gets 401. 
 | Read all projects, reports and threads | Yes | Yes | Yes |
 | Push a report or a new version | Through their own agent token | Same as a member | The owner's reports only |
 | Comment, reply, reopen a thread | Yes | Yes | Comment and reply on the owner's reports |
-| Request a review, or remove a request | Yes, on any report, from any active member except the report owner | Same as a member | Add requests on the owner's reports when pushing |
+| Request a review, or remove a request | Yes, on any report, from any active member except the report owner. A reviewer with a verdict on the current version cannot be removed | Same as a member | Add requests on the owner's reports when pushing |
 | Sign a version | Own reports | Own reports | No |
 | Approve or request changes | Reports someone else signed | Same as a member | No |
 | Resolve a thread or change its blocking flag | Threads they started, and agent threads on their own reports | Any thread | Resolve agent threads on the owner's reports |

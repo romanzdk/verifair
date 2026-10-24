@@ -25,9 +25,9 @@ Your id is at the bottom of the sidebar, with a button to copy it. Give it to yo
 
 ## Request a review
 
-In shared mode, any member can ask someone to review a change. Under **Reviewers** on the review page, pick a member and press **Request**. The list shows active members who do not own the report and were not asked yet. A requested reviewer who has not given a verdict on the current version has a **Remove** button. Removing a request does not remove their comments or verdicts. The person sees the change in their Inbox (**Needs your review**) once the author has signed it, and in **My reviews**. Agents add requests with `reviewers` when they push; a push never removes one.
+In shared mode, any member can ask someone to review a change. Under **Reviewers** on the review page, pick a member and press **Request**. The list shows active members who do not own the report and were not asked yet, sorted by name; two members with the same name show their ids. A requested reviewer who has not given a verdict on the current version has a **Remove** button. Someone who gave a verdict on the current version cannot be removed, so a finished review stays in their **My reviews**. Removing a request does not remove their comments or verdicts. The person sees the change in their Inbox (**Needs your review**) once the author has signed it, and in **My reviews**. Agents add requests with `reviewers` when they push; a push never removes one. Requests are changed on the latest version only.
 
-In local mode there is no picker. Agents set `reviewers` when they push.
+In local mode there is no picker. Agents set `reviewers` when they push, and **Remove** works as in shared mode.
 
 ### Emails
 
@@ -36,7 +36,25 @@ With `VERIFAIR_SMTP_URL` and `VERIFAIR_EMAIL_FROM` set (see [configuration.md](c
 - when the author signs a version: to every requested reviewer except the signer,
 - when someone adds a reviewer while the current version is signed: to that person. Adding yourself sends nothing.
 
-A push makes a new unsigned version, so it sends no email; the reviewers get one when the author signs it. Emails go only to active members whose id contains `@`. The subject is `Review requested: <title>`. The text says who asked, the project, the risk, the report's **Judge this** section (up to 1,500 characters) and the link. Local mode sends no email.
+A push makes a new unsigned version, so it sends no email; the reviewers get one when the author signs it. Emails go only to active members whose id is one plain address, such as `bob@example.com`. Each person gets at most one email per report version, so removing and adding them again sends nothing new. Local mode sends no email.
+
+The subject is `Review requested: "<title>"`. The text says who signed which version and who asked for the review, then the project, the risk, the report's **Judge this** section as plain text (code blocks left out, links as their text, up to about 1,500 characters, then "Read the rest on the page.") and the link:
+
+```text
+Alice signed v3 of "Prorate plan changes by day". You were asked to review it by Bob.
+
+Project: billing · Risk: high
+
+Judge this:
+Is a day the right unit for proration?
+
+Open it to comment, approve or request changes:
+https://verifair.example.com/r/prorate
+
+— Sent by verifair. Replies to this mail are not read.
+```
+
+Someone added after the version was signed gets `Bob asked you to review "<title>" (v3, signed by Alice).` as the first line.
 
 Local identities belong to a browser. With the auth proxy described in [deployment.md](deployment.md#deploying), the trusted identity header supplies the same ID across devices. In local mode, signing a report without an owner records the signer as the owner, and **My changes** also lists unowned reports whose `author` equals your identity. In shared mode only `author_id` counts, and a report without an owner is frozen (see [Report ownership](access.md#report-ownership)).
 
