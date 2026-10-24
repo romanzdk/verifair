@@ -77,9 +77,11 @@ html:has(body.has-verdict) { scroll-padding-bottom: 96px; }
 }
 .brand { display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 16px; font: 600 15px/20px var(--font); letter-spacing: -.01em; flex: none; }
 .brand b { font-weight: 600; }
-.brand b span { color: var(--accent); }
-.mark { width: 20px; height: 20px; border-radius: 6px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; flex: none; }
-.mark svg { width: 13px; height: 13px; stroke-width: 3; }
+.brand b .ai { color: var(--link); font-weight: 800; }
+.dotless { position: relative; display: inline-block; }
+.dotless svg { position: absolute; left: 50%; top: .14em; width: .44em; height: .44em; transform: translateX(-50%); }
+.mark { width: 20px; height: 20px; flex: none; display: block; }
+.top-logo .mark { width: 24px; height: 24px; }
 .nav { padding: 4px 8px 12px; flex: 1; }
 .nav-h { margin: 16px 8px 4px; font: 600 12px/16px var(--font); color: var(--text-subtle); }
 .nav-h:first-child { margin-top: 4px; }

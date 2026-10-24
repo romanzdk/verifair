@@ -1946,6 +1946,16 @@ def test_sidebar_links_encode_odd_names(client):
     assert "a b&amp;c#?%" in page.text.split('<nav class="crumbs"')[1].split("</nav>")[0]
 
 
+def test_brand_is_one_accessible_name_and_logo_is_served(client):
+    home = client.get("/").text
+    brand = home.split('class="brand"')[1].split("</a>")[0]
+    assert '<span class="sr-only">verifair</span><b aria-hidden="true">' in brand
+    assert 'src="/static/logo.svg" alt=""' in brand
+    assert 'rel="icon" href="/static/logo.svg"' in home
+    logo = client.get("/static/logo.svg")
+    assert logo.status_code == 200 and logo.headers["content-type"].startswith("image/svg+xml")
+
+
 def test_name_form_error_takes_its_own_line():
     css = (Path(web.__file__).parent / "static" / "app.css").read_text()
     assert ".me-form .error { flex-basis: 100%; }" in css

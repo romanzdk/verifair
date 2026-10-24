@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}verifair{% endblock %}</title>
-<link rel="icon" href="data:,">
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css">{% block page_assets %}{% endblock %}
 <script src="/static/htmx.min.js" defer></script>
 <script src="/static/app.js" defer></script>
@@ -16,7 +16,7 @@
   <div class="app-main">
     <header class="app-top">
       <button class="menu-btn" popovertarget="vf_nav" aria-label="Open menu">{{ icon("menu") }}</button>
-      <a class="top-logo" href="/" aria-label="verifair home"><span class="mark">{{ icon("check", "") }}</span></a>
+      <a class="top-logo" href="/" aria-label="verifair home"><img class="mark" src="/static/logo.svg" alt="" width="24" height="24"></a>
       <nav class="crumbs" aria-label="Breadcrumb">{% block crumbs %}{% endblock %}</nav>
       <div class="top-act">{% block actions %}{% endblock %}</div>
     </header>

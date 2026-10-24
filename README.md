@@ -1,8 +1,11 @@
 <div align="center">
 
-<img src="docs/images/logo.svg" width="72" height="72" alt="verifair logo">
-
-# verifair
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/wordmark-dark.svg">
+    <img src="docs/images/wordmark-light.svg" height="64" alt="verifair">
+  </picture>
+</h1>
 
 **Review the evidence, not the diff.** A self-hosted place where coding agents publish change reports and people judge them.
 
