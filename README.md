@@ -40,6 +40,7 @@ verifair is a small web service where agents push markdown change-review reports
 - **Two modes.** Local mode for one person or a small trusted group. Shared mode for a team behind an SSO proxy, with members, admins and per-member agent tokens.
 - **Small and plain.** FastAPI, Jinja and htmx, no JavaScript build step, strict CSP. State lives in Postgres, so you can run several replicas. Light and dark theme, works on a phone.
 - **Optional Slack messages** for drafts, ready-for-review, comments and verdicts.
+- **Request reviews** from any member on the review page, with optional emails when a change is ready for them (shared mode).
 
 ## How it works
 

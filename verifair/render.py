@@ -70,6 +70,42 @@ def section_headings(body: str) -> list[str]:
     return [heading for _, heading in _headings(_md.parse(body))]
 
 
+def section_plain_text(body: str, heading: str) -> str:
+    tokens = _md.parse(body)
+    starts = list(_headings(tokens))
+    for n, (index, name) in enumerate(starts):
+        if name == heading:
+            end = starts[n + 1][0] if n + 1 < len(starts) else len(tokens)
+            return _plain_lines(tokens[index + 3 : end])
+    return ""
+
+
+def _plain_lines(tokens: list[Token]) -> str:
+    lines: list[str] = []
+    cells: list[str] | None = None
+    bullet, gap = "", False
+    for token in tokens:
+        if token.level == 0 and token.nesting == 1:
+            gap = bool(lines)
+        if token.type == "list_item_open":
+            bullet = f"{token.info}{token.markup} " if token.info else "- "
+        elif token.type == "tr_open":
+            cells = []
+        elif token.type == "inline":
+            parts = (" " if c.type.endswith("break") else c.content for c in token.children or ())
+            text = normalize("".join(parts))
+            if cells is not None:
+                cells.append(text)
+            elif text:
+                lines += [""] * gap + [bullet + text]
+                gap = False
+            bullet = ""
+        elif token.type == "tr_close":
+            lines += [""] * gap + [" | ".join(cells)]
+            cells, gap = None, False
+    return "\n".join(lines)
+
+
 def split_sections(body: str) -> list[Section]:
     tokens = _md.parse(body)
     headings = list(_headings(tokens))

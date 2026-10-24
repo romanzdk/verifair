@@ -729,6 +729,29 @@ def test_init_schema_is_idempotent(conn):
     assert latest_version(conn, "r1") == 1
 
 
+def test_init_schema_adds_requested_by_to_an_old_table(conn):
+    conn.execute("ALTER TABLE review_requests DROP COLUMN requested_by")
+    init_schema(conn)
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    db.add_review_request(conn, "r1", "b", requested_by="a")
+    assert db.review_requesters(conn, "r1") == {"b": "a"}
+
+
+def test_init_schema_does_not_wait_for_readers_of_review_requests(new_database_url):
+    url = new_database_url()
+    conn, reader = connect(url), connect(url)
+    init_schema(conn)
+    try:
+        with reader.transaction():
+            reader.execute("SELECT * FROM review_requests")
+            started = time.monotonic()
+            init_schema(conn)
+            assert time.monotonic() - started < 1
+    finally:
+        conn.close()
+        reader.close()
+
+
 def test_comment_and_verdict_ids_come_from_returning(conn):
     push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
     kw = {"report_id": "r1", "version": 1, "author_id": "u", "author_name": "U"}

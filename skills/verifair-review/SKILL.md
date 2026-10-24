@@ -46,12 +46,13 @@ print(json.dumps({
   "project": "repo-name", "title": "What changes, under 200 chars",
   "risk": "low|medium|high", "body": open(sys.argv[1]).read(),
   "links": [{"label": "Merge request", "url": "https://…"}],   # [] if none
-  "reviewers": ["bob@example.com"],      # ids the user gave you; omit if none
+  "reviewers": ["bob@example.com"],      # ids the user gave you; only adds, omit if none
   "agent": "claude", "model": "<your model>", "commit": "<sha the report describes>",
 }))
 EOF
 ```
 
+- `reviewers` only adds review requests; a push cannot remove one. If the user wants a request removed, they use **Remove** under Reviewers on the review page (shared mode).
 - Add `"ticket_url"` if there is a ticket. Local mode only: add `"author"` and `"author_id"` if the user told you their verifair id. Shared mode: leave them out; the token owner is the author.
 - Responses:
 

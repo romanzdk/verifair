@@ -186,13 +186,13 @@ function errorAnchor(event) {
   // When the swap removes the source element, htmx re-fires afterRequest on an ancestor and
   // detail.elt points there; requestConfig.elt is still the element that sent the request.
   const elt = event.detail.requestConfig?.elt || event.detail.elt;
-  const anchor = elt.closest("form") || elt;
+  const anchor = elt.closest("form, .rev-item") || elt;
   if (!anchor.isConnected) return anchor.id ? document.getElementById(anchor.id) : null;
   return anchor === document.body ? document.querySelector("main") || anchor : anchor;
 }
 
 function holdsError(anchor) {
-  return anchor.matches(".verdict, main, body");
+  return anchor.matches(".verdict, main, body, .rev-item");
 }
 
 function clearRequestError(anchor) {
@@ -216,6 +216,7 @@ function showRequestError(event, message) {
   const anchor = errorAnchor(event);
   if (!anchor) return;
   clearRequestError(anchor);
+  anchor.closest("#vf_sidebar")?.querySelectorAll("p.vf-req-error").forEach((line) => line.remove());
   const line = document.createElement("p");
   line.className = "error vf-req-error";
   line.setAttribute("role", "alert");
@@ -250,18 +251,43 @@ document.addEventListener("focusout", (event) => {
 highlight();
 showNavForNameError();
 document.body.addEventListener("htmx:afterSwap", highlight);
+// The rail is swapped whole, so focus goes to its error, or back to the picker, or to the Remove
+// button that took the removed one's place, and the outcome is read out from a live region
+// outside the rail.
+function settleReviewers(sent) {
+  const rail = document.getElementById("vf_sidebar");
+  const removes = (root) => Array.from(root.querySelectorAll(".rev .btn"));
+  const at = sent ? removes(sent.closest("aside") || rail).indexOf(sent) : -1;
+  const error = rail.querySelector("p.error[tabindex]");
+  const next = error || (at >= 0 && removes(rail)[at]) || rail.querySelector(".addrev select") || removes(rail).at(-1);
+  next?.focus();
+  // a focused role=alert error is already read out; repeating it in the live region would say it twice
+  const status = error ? null : rail.querySelector("[data-rev-status]");
+  const live = document.getElementById("vf_rev_live");
+  if (live) live.textContent = status ? status.textContent : "";
+}
+
 document.body.addEventListener("htmx:afterSettle", (event) => {
-  if (event.detail.pathInfo?.requestPath?.endsWith("/verdict")) {
+  const path = event.detail.pathInfo?.requestPath || "";
+  if (path.endsWith("/verdict")) {
     document.querySelector("#vf_verdict .vmsg")?.focus();
+  } else if (/\/reviewers(\/[^/]+\/remove)?$/.test(path)) {
+    settleReviewers(event.detail.requestConfig?.elt);
   }
 });
 document.body.addEventListener("htmx:responseError", (event) => showRequestError(event, errorCopy(event.detail.xhr.status, event.detail.xhr.responseText)));
-document.body.addEventListener("htmx:sendError", (event) =>
-  showRequestError(event, "Connection lost. Your text is still here, try again."),
-);
+document.body.addEventListener("htmx:sendError", (event) => {
+  const typed = errorAnchor(event)?.querySelector?.("textarea");
+  showRequestError(event, typed ? "Connection lost. Your text is still here, try again." : "Connection lost. Try again.");
+});
 document.body.addEventListener("htmx:afterRequest", (event) => {
   const anchor = event.detail.successful && errorAnchor(event);
   if (anchor) clearRequestError(anchor);
+  // hx-disabled-elt drops focus to the body while the Request button is disabled
+  const form = event.detail.requestConfig?.elt;
+  if (!event.detail.successful && form?.matches?.(".addrev") && form.isConnected && document.activeElement === document.body) {
+    (form.querySelector("button:enabled") || form.querySelector("select"))?.focus();
+  }
 });
 
 (() => {

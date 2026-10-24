@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import secrets
+import threading
 import zlib
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -23,12 +24,14 @@ from verifair.render import (
     build_threads,
     normalize,
     quote_found,
+    section_plain_text,
     split_sections,
     threads_by_section,
 )
 
 log = logging.getLogger("verifair")
 router = APIRouter()
+_MAIL_LOCK = threading.Lock()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 
@@ -121,6 +124,8 @@ NOT_MEMBER = "You are not a member of this workspace yet. Ask an admin to add {i
 DEACTIVATED = "Your access to this workspace was turned off. Ask an admin to reactivate {id}."
 LABEL_INPUT = "Enter a label (1–60 characters)."
 ADMIN_ONLY = "Only an admin can manage members."
+REVIEWER_REFUSED = "Pick an active member who does not own this report."
+REVIEWER_KEPT = "{name} already gave a verdict on this version, so the request stays."
 OWNER_ONLY = "Only the token owner or an admin can revoke it."
 ALREADY_CREATED = (
     "This token was already created. Its secret was shown only once."
@@ -156,6 +161,15 @@ async def current_user(request: Request) -> tuple[str, str | None]:
 
 
 User = Annotated[tuple[str, str | None], Depends(current_user)]
+
+
+async def access_member(request: Request) -> db.Row:
+    if not _shared(request):
+        raise HTTPException(404, "not found")
+    return request.state.member
+
+
+Member = Annotated[db.Row, Depends(access_member)]
 
 
 def _secure(request: Request) -> bool:
@@ -354,8 +368,12 @@ def report_context(
         t.root["id"]: t.root["resolved_by"] for t in threads if shared and t.root["resolved_by"]
     }
     signer_id = signature["signer_id"] if signature else None
-    requested = [p for p in db.requested_reviewers(conn, id) if p != signer_id]
-    names = {u["id"]: u["name"] for u in db.list_users(conn)} if resolved_by or requested else {}
+    all_requested = db.requested_reviewers(conn, id)
+    requested = [p for p in all_requested if p != signer_id]
+    users = db.list_users(conn) if shared or resolved_by or requested else []
+    names = {u["id"]: u["name"] for u in users}
+    judged = rules.latest_verdicts(verdicts, current)
+    can_change = version == current
     return {
         "report": report,
         "url": f"/r/{url_quote(id)}",
@@ -382,7 +400,7 @@ def report_context(
         ),
         "versions": db.list_versions(conn, id)[::-1],
         "links": _links(report),
-        "my_verdict": rules.latest_verdicts(verdicts, current).get(user_id),
+        "my_verdict": judged.get(user_id),
         "verdict_block": UNSIGNED
         if signature is None
         else SELF_REVIEW
@@ -393,7 +411,31 @@ def report_context(
             t.root["id"] for t in threads if _can_moderate(shared, member, user_id, t.root, report)
         },
         "resolvers": {cid: names.get(by, by) for cid, by in resolved_by.items()},
+        "labels": _labels(users),
+        "removable": {p for p in requested if p not in judged} if can_change else set(),
+        "request_options": _request_options(users, report, all_requested)
+        if shared and can_change
+        else [],
+        "requests_note": not can_change and (shared or bool(all_requested)),
     }
+
+
+def _labels(users: list[db.Row]) -> dict[str, str]:
+    names = Counter(u["name"].lower() for u in users)
+    return {
+        u["id"]: u["name"] if names[u["name"].lower()] == 1 else f"{u['name']} ({u['id']})"
+        for u in users
+    }
+
+
+def _request_options(users: list[db.Row], report: db.Row, requested: list[str]) -> list[dict]:
+    active = sorted((u for u in users if u["active"]), key=lambda u: (u["name"].lower(), u["id"]))
+    labels = _labels(users)
+    return [
+        {"id": u["id"], "label": labels[u["id"]]}
+        for u in active
+        if u["id"] != report["author_id"] and u["id"] not in requested
+    ]
 
 
 def _thread_response(
@@ -839,10 +881,115 @@ def sign(
         settings = request.app.state.settings
         text = notify.ready_for_review_text(report, version, name, settings.base_url)
         background.add_task(notify.send, settings, text)
+        others = [p for p in db.requested_reviewers(conn, id) if p != user_id]
+        _email_reviewers(request, background, conn, report, version, others)
     ctx = report_context(conn, report, version, user_id, request.state.member, _shared(request))
     ctx |= {"oob": True, "verdict_oob": True}
     nav = _nav_oob(request, conn, user, ctx)
     return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html"], ctx, tail=nav)
+
+
+def _claim_mail(request: Request, keys: list[tuple[str, str, int]]) -> list[str]:
+    mailed = request.app.state.mailed
+    with _MAIL_LOCK:
+        new = [key for key in dict.fromkeys(keys) if key not in mailed]
+        mailed.update(new)
+    return [reviewer for _, reviewer, _ in new]
+
+
+def _email_reviewers(request, background, conn, report, version, recipients, added_by=None):
+    settings = request.app.state.settings
+    if not (settings.smtp_url and _shared(request)):
+        return
+    users = {u["id"]: u for u in db.list_users(conn)}
+    recipients = [p for p in recipients if p in users and users[p]["active"]]
+    recipients = _claim_mail(request, [(report["id"], p, version) for p in recipients])
+    if not recipients:
+        return
+    signature = db.get_signature(conn, report["id"], version)
+    judge = section_plain_text(db.get_version(conn, report["id"], version)["body"], "Judge this")
+    requesters = db.review_requesters(conn, report["id"])
+    letters = {}
+    for person in recipients:
+        by = requesters.get(person)
+        signed_by_asker = by == signature["signer_id"]
+        named = by in users and by != person and not signed_by_asker
+        subject, letters[person] = notify.review_email(
+            report,
+            version,
+            judge,
+            settings.base_url,
+            signer=None if added_by and signed_by_asker else signature["signer_name"],
+            asker=added_by or (users[by]["name"] if named else None),
+            added=added_by is not None,
+        )
+    background.add_task(_send_mail, request.app, report["id"], version, subject, letters)
+
+
+async def _send_mail(app, report_id: str, version: int, subject: str, letters: dict[str, str]):
+    delivered = await notify.email(app.state.settings, report_id, subject, letters)
+    with _MAIL_LOCK:
+        app.state.mailed.difference_update(
+            (report_id, person, version) for person in letters if person not in delivered
+        )
+
+
+def _reviewers_response(
+    request: Request, conn: db.Connection, report, user, error=None, row=None, status=None
+):
+    if not request.headers.get("HX-Request"):
+        if error:
+            raise HTTPException(422, error)
+        return RedirectResponse(f"/r/{url_quote(report['id'])}", 303)
+    latest = db.latest_version(conn, report["id"])
+    ctx = report_context(conn, report, latest, user[0], request.state.member, _shared(request))
+    ctx |= {"reviewer_error": error, "error_row": row, "reviewer_status": status}
+    return _partial(request, ["_sidebar.html"], ctx, tail=_nav_oob(request, conn, user, ctx))
+
+
+@router.post("/r/{id}/reviewers")
+def request_review(
+    id: str,
+    request: Request,
+    conn: Conn,
+    user: User,
+    member: Member,
+    background: BackgroundTasks,
+    reviewer_id: Annotated[str, Form(max_length=256), NoNul] = "",
+):
+    report = _require_report(conn, id)
+    target = db.get_user(conn, reviewer_id.strip().lower())
+    if target is None or not target["active"] or target["id"] == report["author_id"]:
+        return _reviewers_response(request, conn, report, user, REVIEWER_REFUSED)
+    if db.add_review_request(conn, id, target["id"], requested_by=user[0]):
+        log.info(
+            "access action=add_reviewer actor=%s target=%s report=%s", user[0], target["id"], id
+        )
+        latest = db.latest_version(conn, id)
+        if target["id"] != user[0] and db.get_signature(conn, id, latest):
+            _email_reviewers(request, background, conn, report, latest, [target["id"]], user[1])
+    status = f"Requested {_labels(db.list_users(conn))[target['id']]}."
+    return _reviewers_response(request, conn, report, user, status=status)
+
+
+@router.post("/r/{id}/reviewers/{reviewer_id:path}/remove")
+def remove_review(id: str, reviewer_id: str, request: Request, conn: Conn, user: User):
+    report = _require_report(conn, id)
+    if _shared(request):
+        reviewer_id = reviewer_id.lower()
+    outcome = db.remove_review_request(conn, id, reviewer_id)
+    label = _labels(db.list_users(conn)).get(reviewer_id, reviewer_id)
+    if outcome == "kept":
+        error = REVIEWER_KEPT.format(name=label)
+        return _reviewers_response(request, conn, report, user, error, row=reviewer_id)
+    if outcome == "removed":
+        log.info(
+            "access action=remove_reviewer actor=%s target=%s report=%s", user[0], reviewer_id, id
+        )
+        status = f"Removed the request for {label}."
+    else:
+        status = f"{label} had no review request."
+    return _reviewers_response(request, conn, report, user, status=status)
 
 
 @router.post("/me")
@@ -900,15 +1047,6 @@ def _access(
 def _denied(request: Request, message: str, back: str | None = "/access/tokens", home: bool = True):
     ctx = {"message": message, "back": back, "home": home}
     return templates.TemplateResponse(request, "denied.html", ctx, status_code=403)
-
-
-async def access_member(request: Request) -> db.Row:
-    if not _shared(request):
-        raise HTTPException(404, "not found")
-    return request.state.member
-
-
-Member = Annotated[db.Row, Depends(access_member)]
 
 
 @router.get("/access")

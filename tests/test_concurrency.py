@@ -395,3 +395,30 @@ def test_first_request_after_all_pooled_connections_died_is_fast(settings, make_
     response = client.get("/api/reports/r1", headers={"Authorization": "Bearer t"})
     assert response.status_code == 200
     assert time.monotonic() - started < 0.5
+
+
+def test_a_verdict_in_flight_keeps_the_review_request(url):
+    c = connect(url)
+    _push(c, id="r1")
+    db.add_review_request(c, "r1", "a")
+    removed = []
+
+    def work(c, i):
+        if i == 0:
+            add_verdict(
+                c,
+                report_id="r1",
+                version=1,
+                reviewer_id="a",
+                reviewer_name="A",
+                verdict="approve",
+                validate=lambda: time.sleep(0.3) or None,
+            )
+        else:
+            time.sleep(0.1)
+            removed.append(db.remove_review_request(c, "r1", "a"))
+
+    _race(url, work)
+    requested = db.requested_reviewers(c, "r1")
+    c.close()
+    assert removed == ["kept"] and requested == ["a"]

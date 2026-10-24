@@ -234,6 +234,12 @@ def init_schema(conn: Connection) -> None:
         conn.execute("SET LOCAL lock_timeout = '5s'")
         conn.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK,))
         conn.execute(SCHEMA)
+        # ALTER takes an ACCESS EXCLUSIVE lock even when the column exists, so only run it once
+        if not conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()"
+            " AND table_name = 'review_requests' AND column_name = 'requested_by'"
+        ).fetchone():
+            conn.execute("ALTER TABLE review_requests ADD COLUMN IF NOT EXISTS requested_by TEXT")
 
 
 def push_report(
@@ -323,11 +329,12 @@ def push_report(
                     id,
                 ),
             )
-        if reviewers is not None:
-            conn.execute("DELETE FROM review_requests WHERE report_id=%s", (id,))
+        owner = author_id if author_id is not None else (existing or {}).get("author_id")
+        if reviewers:
             conn.cursor().executemany(
-                "INSERT INTO review_requests (report_id, reviewer_id) VALUES (%s, %s)",
-                [(id, reviewer) for reviewer in set(reviewers)],
+                "INSERT INTO review_requests (report_id, reviewer_id, requested_by)"
+                " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                [(id, reviewer, owner_id) for reviewer in set(reviewers) - {owner}],
             )
         conn.execute(
             'INSERT INTO versions (report_id, version, body, created_at, "commit")'
@@ -415,6 +422,42 @@ def requested_reviewers(conn: Connection, report_id: str) -> list[str]:
             (report_id,),
         )
     ]
+
+
+def review_requesters(conn: Connection, report_id: str) -> dict[str, str | None]:
+    rows = conn.execute(
+        "SELECT reviewer_id, requested_by FROM review_requests WHERE report_id=%s", (report_id,)
+    )
+    return {row["reviewer_id"]: row["requested_by"] for row in rows}
+
+
+def add_review_request(
+    conn: Connection, report_id: str, reviewer_id: str, requested_by: str | None = None
+) -> bool:
+    return (
+        conn.execute(
+            "INSERT INTO review_requests (report_id, reviewer_id, requested_by)"
+            " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            (report_id, reviewer_id, requested_by),
+        ).rowcount
+        > 0
+    )
+
+
+def remove_review_request(conn: Connection, report_id: str, reviewer_id: str) -> str:
+    with _write(conn, report_id):
+        judged = conn.execute(
+            "SELECT 1 FROM verdicts WHERE report_id=%s AND reviewer_id=%s AND version ="
+            " (SELECT MAX(version) FROM versions WHERE report_id=%s)",
+            (report_id, reviewer_id, report_id),
+        ).fetchone()
+        if judged:
+            return "kept"
+        removed = conn.execute(
+            "DELETE FROM review_requests WHERE report_id=%s AND reviewer_id=%s",
+            (report_id, reviewer_id),
+        ).rowcount
+    return "removed" if removed else "missing"
 
 
 def add_comment(
@@ -706,8 +749,8 @@ def lowercase_human_ids(conn: Connection) -> int:
             params = (old, [id.lower() for id in old])
             if table == "review_requests":
                 conn.execute(
-                    "INSERT INTO review_requests (report_id, reviewer_id)"
-                    f" SELECT r.report_id, m.new FROM review_requests r, {mapping}"
+                    "INSERT INTO review_requests (report_id, reviewer_id, requested_by)"
+                    f" SELECT r.report_id, m.new, r.requested_by FROM review_requests r, {mapping}"
                     " WHERE r.reviewer_id = m.old ON CONFLICT DO NOTHING",
                     params,
                 )

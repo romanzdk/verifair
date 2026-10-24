@@ -7,6 +7,7 @@ from verifair.render import (
     build_threads,
     find_anchor,
     normalize,
+    section_plain_text,
     slugify,
     split_sections,
     threads_by_section,
@@ -390,3 +391,25 @@ def test_score_bounds_text_slices_to_context_lengths():
 
     text = TrackedText("x" * 100_000 + "the price is 5." + "y" * 100_000)
     assert _score(text, 100_000, "the price is", "xxx", " 5.yz") == 7
+
+
+def test_section_plain_text_keeps_lines_and_link_text():
+    body = (
+        "## Intent\nx\n\n## Judge this\nIs a **day**\nthe right [unit](https://e.com/u)?\n\n"
+        "- first `item`\n- second\n\n```py\nsecret()\n```\n\n    indented code\n\n"
+        "![chart](https://e.com/c.png)\n\n## Rollback\ny"
+    )
+    assert section_plain_text(body, "Judge this") == (
+        "Is a day the right unit?\n\n- first item\n- second\n\nchart"
+    )
+    assert section_plain_text(body, "Missing") == ""
+
+
+def test_section_plain_text_keeps_numbers_and_table_rows():
+    body = (
+        "## Judge this\nFirst para.\n\nSecond para.\n\n1. one\n2. two\n\n"
+        "| Case | Result |\n|---|---|\n| empty | **0** |\n| one | 1 |\n"
+    )
+    assert section_plain_text(body, "Judge this") == (
+        "First para.\n\nSecond para.\n\n1. one\n2. two\n\nCase | Result\nempty | 0\none | 1"
+    )

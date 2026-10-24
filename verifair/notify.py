@@ -1,9 +1,14 @@
 import logging
+import smtplib
+import ssl
 from collections.abc import Mapping
+from email.message import EmailMessage
+from urllib.parse import quote, unquote, urlsplit
 
+import anyio
 import httpx
 
-from verifair.config import Settings
+from verifair.config import Settings, one_address
 
 log = logging.getLogger("verifair")
 
@@ -51,3 +56,114 @@ def send(settings: Settings, text: str) -> None:
     except (httpx.HTTPError, httpx.InvalidURL) as exc:
         status = getattr(getattr(exc, "response", None), "status_code", "")
         log.warning("slack notification failed: %s %s", type(exc).__name__, status)
+
+
+JUDGE_THIS_MAX = 1500
+MAIL_THREADS = anyio.CapacityLimiter(2)
+
+
+def _cut(text: str) -> str:
+    if len(text) <= JUDGE_THIS_MAX:
+        return text
+    head = text[: JUDGE_THIS_MAX + 1]
+    end = max(head.rfind(" "), head.rfind("\n"))
+    return text[: end if end > 0 else JUDGE_THIS_MAX].rstrip() + "\nRead the rest on the page."
+
+
+def review_email(
+    report: Mapping,
+    version: int,
+    judge: str,
+    base_url: str,
+    *,
+    signer: str | None,
+    asker: str | None = None,
+    added: bool = False,
+) -> tuple[str, str]:
+    title = " ".join(report["title"].split())
+    if added:
+        signed = f", signed by {signer}" if signer else ""
+        opening = f'{asker} asked you to review "{title}" (v{version}{signed}).'
+    else:
+        by = f" by {asker}" if asker else ""
+        opening = f'{signer} signed v{version} of "{title}". You were asked to review it{by}.'
+    blocks = [opening, f"Project: {report['project']} · Risk: {report['risk']}"]
+    if judge:
+        blocks.append(f"Judge this:\n{_cut(judge)}")
+    blocks += [
+        f"Open it to comment, approve or request changes:\n{base_url}/r/{quote(report['id'])}",
+        "— Sent by verifair. Replies to this mail are not read.",
+    ]
+    return f'Review requested: "{title}"', "\n\n".join(blocks)
+
+
+def _failed(report_id: str, recipients: int, exc: Exception) -> None:
+    log.warning(
+        "email failed report=%s recipients=%d error=%s code=%s",
+        report_id,
+        recipients,
+        type(exc).__name__,
+        getattr(exc, "smtp_code", "-"),
+    )
+
+
+def send_email(
+    settings: Settings, report_id: str, subject: str, letters: dict[str, str]
+) -> list[str]:
+    letters = {to: text for to, text in letters.items() if one_address(to)}
+    delivered: list[str] = []
+    refused: list[str] = []
+    if not settings.smtp_url or not letters:
+        return delivered
+    url = urlsplit(settings.smtp_url)
+    # smtplib does not check certificates unless it gets a default context
+    tls = ssl.create_default_context()
+    try:
+        if url.scheme == "smtps":
+            server = smtplib.SMTP_SSL(url.hostname, url.port or 0, timeout=10, context=tls)
+        else:
+            server = smtplib.SMTP(url.hostname, url.port or 0, timeout=10)
+        with server:
+            server.ehlo()
+            secure = url.scheme == "smtps"
+            if not secure and server.has_extn("starttls"):
+                server.starttls(context=tls)
+                secure = True
+            if url.username and not secure:
+                log.warning(
+                    "email not sent report=%s recipients=%d: the server offers no TLS,"
+                    " so verifair does not send the SMTP password",
+                    report_id,
+                    len(letters),
+                )
+                return delivered
+            if url.username:
+                server.login(unquote(url.username), unquote(url.password or ""))
+            for to, text in letters.items():
+                message = EmailMessage()
+                message["Subject"] = subject
+                message["From"] = settings.email_from
+                message["To"] = to
+                message.set_content(text)
+                try:
+                    server.send_message(message, to_addrs=[to])
+                except smtplib.SMTPServerDisconnected:
+                    raise
+                except smtplib.SMTPException as exc:
+                    refused.append(to)
+                    _failed(report_id, 1, exc)
+                else:
+                    delivered.append(to)
+    except Exception as exc:
+        if missed := len(letters) - len(delivered) - len(refused):
+            _failed(report_id, missed, exc)
+    return delivered
+
+
+async def email(
+    settings: Settings, report_id: str, subject: str, letters: dict[str, str]
+) -> list[str]:
+    # a slow mail server must not take threads from the shared pool that serves requests
+    return await anyio.to_thread.run_sync(
+        send_email, settings, report_id, subject, letters, limiter=MAIL_THREADS
+    )

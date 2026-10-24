@@ -1,4 +1,5 @@
 import re
+from contextlib import closing
 from dataclasses import replace
 
 import pytest
@@ -56,7 +57,7 @@ def seed(team):
     assert publish(team, "elsewhere", by=bob, project="other").status_code == 201
 
 
-def test_local_publish_preserves_and_explicitly_replaces_ownership_and_requests(client):
+def test_local_publish_preserves_ownership_and_only_adds_requests(client):
     response = publish(
         client,
         author="Alice",
@@ -80,10 +81,26 @@ def test_local_publish_preserves_and_explicitly_replaces_ownership_and_requests(
     reassigned = report(client)
     assert (reassigned["author_id"], reassigned["reviewers"]) == (
         "bob@example.com",
-        ["alice@example.com"],
+        ["alice@example.com", "bob@example.com"],
     )
-    publish(client, reviewers=[])
-    assert report(client)["reviewers"] == []
+    for reviewers in ([], None):
+        publish(client, reviewers=reviewers)
+        assert report(client)["reviewers"] == ["alice@example.com", "bob@example.com"]
+
+
+def test_local_publish_drops_the_owner_from_reviewers(client, settings):
+    publish(client, author_id="alice", reviewers=["alice", "bob"])
+    assert report(client)["reviewers"] == ["bob"]
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.review_requesters(conn, "owned") == {"bob": None}
+
+
+def test_shared_publish_only_adds_review_requests(team):
+    assert publish(team, reviewers=["bob@example.com"]).status_code == 201
+    assert publish(team, reviewers=["Carol@example.com", "bob@example.com"]).status_code == 201
+    for reviewers in ([], None):
+        assert publish(team, reviewers=reviewers).status_code == 201
+    assert report(team)["reviewers"] == ["bob@example.com", "carol@example.com"]
 
 
 @pytest.mark.parametrize(
