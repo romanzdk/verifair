@@ -3,7 +3,7 @@
 {% set is_report = view_tab|default('report') in ('report', 'implementation') %}
 {% set on_execution = view_tab == 'execution' %}
 {% set reviewing = (is_report or (view_tab == 'plan' and plan_first)) and reviewable %}
-{% set inline_name_prompt = reviewing and is_current and not user_name and not user_from_header %}
+{% set inline_name_prompt = reviewing and is_current and not user_name and not signed_in %}
 {% block title %}{{ report.title }} · verifair{% endblock %}
 {% block body_class %}{% if is_current and reviewing %} class="has-verdict"{% endif %}{% endblock %}
 {% block crumbs %}<a href="/p/{{ report.project|urlencode }}">{{ report.project }}</a>{{ icon("chevron-right", "ic14") }}<span class="cur">{{ report.title }}</span>{% endblock %}

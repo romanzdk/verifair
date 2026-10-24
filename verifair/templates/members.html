@@ -5,7 +5,7 @@
 <main class="app-page" id="vf_main">
 {% if not shared %}
   <div class="ph"><div><h1>Members</h1></div></div>
-  <p>Access management needs a sign-in proxy. Start verifair with <code>VERIFAIR_IDENTITY_HEADER</code> set to the header your proxy sends.</p>
+  <p>Access management needs shared mode with sign-in. Start verifair with <code>VERIFAIR_OIDC_ISSUER</code> set to your sign-in provider.</p>
 {% else %}
   {% set active_count = users|selectattr("active")|list|length %}
   {% set admins = users|selectattr("active")|selectattr("role", "eq", "admin")|list|length %}
@@ -13,7 +13,7 @@
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/access/users#add-member" class="panel addform" id="add-member">
     {% if member_error %}<p class="error" id="vf_member_error" role="alert">{{ member_error }}</p>{% endif %}
-    <label>Id (from the sign-in proxy)<input name="id" value="{{ member_form.id }}"{% if member_error %} autofocus aria-invalid="true" aria-describedby="vf_member_error"{% endif %} maxlength="200" pattern="[^\s\/\\]+" title="Use a plain id such as jane@example.com." required placeholder="jane@example.com" class="inp"></label>
+    <label>Email<input name="id" value="{{ member_form.id }}"{% if member_error %} autofocus aria-invalid="true" aria-describedby="vf_member_error"{% endif %} maxlength="200" pattern="[^\s\/\\]+" title="Use a plain id such as jane@example.com." required placeholder="jane@example.com" class="inp"></label>
     <label>Name<input name="name" value="{{ member_form.name }}" maxlength="60" required placeholder="Jane" class="inp"></label>
     <label>Role<select name="role" class="sel">{% for r in roles %}<option value="{{ r }}"{% if r == member_form.role %} selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}</select></label>
     <button class="btn p">{{ icon("plus", "ic14") }}Add member</button>

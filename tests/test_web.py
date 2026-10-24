@@ -3,8 +3,10 @@ import re
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote as url_quote
 
 import pytest
+from conftest import OIDC, SessionClient, signed_in
 
 from verifair import db, notify, web
 from verifair.app import CSP as APP_CSP
@@ -1405,11 +1407,9 @@ def test_app_js_caps_quote_and_maps_error_copy():
 def proxied(settings, make_app, monkeypatch):
     from dataclasses import replace
 
-    from fastapi.testclient import TestClient
-
     from verifair import db
 
-    shared = replace(settings, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss")
+    shared = replace(settings, **OIDC, bootstrap_admin_id="boss")
     app = make_app(shared)
     conn = db.connect(shared.database_url)
     for id in ("alice@example.com", "bob@example.com"):
@@ -1417,12 +1417,12 @@ def proxied(settings, make_app, monkeypatch):
     token, _ = db.create_token(conn, owner_id="alice@example.com", label="agent")
     conn.close()
     monkeypatch.setitem(H, "Authorization", f"Bearer {token}")
-    return TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
+    return SessionClient(app, headers={"Sec-Fetch-Site": "same-origin"})
 
 
 def test_identity_header_is_the_user(proxied):
     push(proxied)
-    who = {"X-Forwarded-Email": "alice@example.com"}
+    who = signed_in("alice@example.com")
     page = proxied.get("/r/prorate", headers=who)
     assert "Set your name" not in page.text and 'action="/me"' not in page.text
     assert '<span class="me">alice</span>' in page.text
@@ -1443,30 +1443,36 @@ def test_identity_header_blocks_set_name(proxied):
     r = proxied.post(
         "/me",
         data={"name": "Mallory"},
-        headers={"X-Forwarded-Email": "alice@example.com"},
+        headers=signed_in("alice@example.com"),
         follow_redirects=False,
     )
     assert r.status_code == 403 and "vf_name" not in r.cookies
 
 
-@pytest.mark.parametrize("value", [None, "", "  ", "agent"])
-def test_identity_header_configured_but_absent_is_401(proxied, value):
+@pytest.mark.parametrize("session", [None, "", "x.y", "agent"])
+def test_shared_mode_without_a_valid_session_cannot_act(proxied, session):
     push(proxied)
     proxied.cookies.set("vf_id", "bob00000")
     proxied.cookies.set("vf_name", "Bob")
-    headers = {} if value is None else {"X-Forwarded-Email": value}
-    assert proxied.get("/r/prorate", headers=headers).status_code == 401
-    assert proxied.post("/me", data={"name": "Bob"}, headers=headers).status_code == 401
+    if session is None:
+        headers = {}
+    elif session == "agent":
+        headers = signed_in("agent")
+    else:
+        headers = {"Cookie": f"vf_session={session}"}
+    page = proxied.get("/r/prorate", headers=headers, follow_redirects=False)
+    assert page.status_code == (403 if session == "agent" else 303)
+    assert proxied.post("/me", data={"name": "Bob"}, headers=headers).status_code in (401, 403)
     r = proxied.post(
         "/r/prorate/comments",
         data={"version": 1, "section": "Intent", "body": "Why?"},
         headers=headers,
     )
-    assert r.status_code == 401
+    assert r.status_code in (401, 403)
     assert api_threads(proxied) == []
 
 
-SIGN_IN_COPY = "Sign in through your company login to use verifair."
+SIGN_IN_COPY = "Sign in to use verifair."
 CSP = (
     "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
     " frame-ancestors 'none'"
@@ -1477,25 +1483,32 @@ CSP = (
 def anonymous(shared_client):
     from fastapi.testclient import TestClient
 
-    return TestClient(shared_client.app)
+    return TestClient(shared_client.app, follow_redirects=False)
 
 
 @pytest.mark.parametrize(
-    ("method", "path"),
+    "path", ["/", "/p/x", "/r/x", "/docs", "/redoc", "/openapi.json", "/missing"]
+)
+def test_shared_mode_pages_without_a_session_go_to_sign_in(anonymous, path):
+    r = anonymous.get(path)
+    assert (r.status_code, r.headers["location"]) == (
+        303,
+        f"/login?next={url_quote(path, safe='')}",
+    )
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert "set-cookie" not in r.headers
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "headers"),
     [
-        ("get", "/"),
-        ("get", "/p/x"),
-        ("get", "/r/x"),
-        ("get", "/docs"),
-        ("get", "/redoc"),
-        ("get", "/openapi.json"),
-        ("get", "/missing"),
-        ("post", "/me"),
-        ("post", "/r/x/comments"),
+        ("get", "/r/x", {"HX-Request": "true"}),
+        ("post", "/me", {}),
+        ("post", "/r/x/comments", {}),
     ],
 )
-def test_shared_mode_without_identity_is_401(anonymous, method, path):
-    r = getattr(anonymous, method)(path)
+def test_shared_mode_htmx_and_posts_without_a_session_are_401(anonymous, method, path, headers):
+    r = getattr(anonymous, method)(path, headers=headers)
     assert r.status_code == 401
     assert r.headers["content-type"].startswith("text/html")
     assert SIGN_IN_COPY in r.text and 'href="/static/app.css"' in r.text
@@ -1516,8 +1529,8 @@ def test_shared_mode_non_members_are_403_and_deactivation_takes_effect(
     conn.close()
     for who in ["gone@example.com", "stranger@example.com", "<b>x</b>@example.com"]:
         for r in [
-            shared_client.get("/", headers={"X-Forwarded-Email": who}),
-            shared_client.post("/me", data={"name": "M"}, headers={"X-Forwarded-Email": who}),
+            shared_client.get("/", headers=signed_in(who)),
+            shared_client.post("/me", data={"name": "M"}, headers=signed_in(who)),
         ]:
             assert r.status_code == 403
             assert r.headers["content-type"].startswith("text/html")
@@ -1533,24 +1546,11 @@ def test_shared_mode_non_members_are_403_and_deactivation_takes_effect(
             assert "<b>" not in r.text
 
 
-def test_shared_mode_header_is_matched_case_insensitively(shared_client, as_user):
-    page = shared_client.get(
-        "/access/members", headers={"X-Forwarded-Email": " Admin@Example.COM "}
-    )
-    assert page.status_code == 200 and "Add member" in page.text
+def test_shared_mode_email_is_matched_case_insensitively(anonymous, as_user, provider):
     as_user("bob@example.com")
-    bob = shared_client.get("/", headers={"X-Forwarded-Email": "BOB@example.com"})
+    provider.sign_in(anonymous, email="BOB@Example.com")
+    bob = anonymous.get("/")
     assert bob.status_code == 200 and '<span class="me">bob</span>' in bob.text
-    for value in ("Agent", "AGENT"):
-        r = shared_client.get("/", headers={"X-Forwarded-Email": value})
-        assert r.status_code == 401 and SIGN_IN_COPY in r.text
-
-
-def test_shared_mode_duplicate_identity_header_is_401(anonymous):
-    pair = [("X-Forwarded-Email", "admin@example.com"), ("X-Forwarded-Email", "eve@example.com")]
-    for values in (pair, pair[:1] * 2):
-        r = anonymous.get("/access", headers=values)
-        assert r.status_code == 401 and SIGN_IN_COPY in r.text
 
 
 def test_shared_mode_denials_are_logged_with_reason_and_path(
@@ -1564,13 +1564,13 @@ def test_shared_mode_denials_are_logged_with_reason_and_path(
     db.update_user(conn, "gone@example.com", active=False)
     conn.close()
     anonymous.get("/r/x")
-    anonymous.get("/", headers=[("X-Forwarded-Email", "a"), ("X-Forwarded-Email", "b")])
-    anonymous.get("/p/q", headers={"X-Forwarded-Email": "stranger@example.com"})
-    anonymous.get("/access", headers={"X-Forwarded-Email": "gone@example.com"})
+    anonymous.get("/", headers={"Cookie": "vf_session=forged.session"})
+    anonymous.get("/p/q", headers=signed_in("stranger@example.com"))
+    anonymous.get("/access", headers=signed_in("gone@example.com"))
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("membership ")]
     assert lines == [
-        "membership denied reason=missing-header path='/r/x'",
-        "membership denied reason=duplicate-header path='/'",
+        "membership denied reason=no-session path='/r/x'",
+        "membership denied reason=bad-session path='/'",
         "membership denied reason=not-member path='/p/q'",
         "membership denied reason=inactive path='/access'",
     ]
@@ -1580,7 +1580,7 @@ def test_shared_mode_denials_are_logged_with_reason_and_path(
 def test_shared_mode_denial_log_escapes_control_characters(anonymous, caplog):
     caplog.set_level("INFO", logger="verifair")
     anonymous.get("/r/%1B%5B2K")
-    assert "membership denied reason=missing-header path='/r/\\x1b[2K'" in caplog.text
+    assert "membership denied reason=no-session path='/r/\\x1b[2K'" in caplog.text
     assert "\x1b" not in caplog.text
 
 
@@ -1615,9 +1615,7 @@ def test_shared_mode_member_is_the_users_row_and_gets_no_cookies(
 
 
 def test_shared_mode_browser_check_still_applies_to_members(anonymous):
-    r = anonymous.post(
-        "/me", data={"name": "M"}, headers={"X-Forwarded-Email": "admin@example.com"}
-    )
+    r = anonymous.post("/me", data={"name": "M"}, headers=signed_in("admin@example.com"))
     assert (r.status_code, r.json()) == (403, {"detail": "browser request required"})
 
 
@@ -1759,14 +1757,14 @@ AUTHOR_COPY = "Only alice can sign this report."
 
 def test_identity_header_only_author_can_sign(proxied):
     push(proxied)
-    bob = {"X-Forwarded-Email": "bob@example.com"}
+    bob = signed_in("bob@example.com")
     page = proxied.get("/r/prorate", headers=bob).text
     assert AUTHOR_COPY in page and "Sign this version" not in page
     r = proxied.post("/r/prorate/sign", data={"version": 1}, headers=bob)
     assert r.status_code == 403 and AUTHOR_COPY in r.text
     assert api_report(proxied)["status"] == "unsigned"
 
-    alice = {"X-Forwarded-Email": "alice@example.com"}
+    alice = signed_in("alice@example.com")
     assert "Sign this version" in proxied.get("/r/prorate", headers=alice).text
     ok = proxied.post("/r/prorate/sign", data={"version": 1}, headers=alice)
     assert ok.status_code == 200 and "Signed by <b>alice</b>" in ok.text
@@ -1799,7 +1797,7 @@ def test_identity_header_nobody_may_sign_a_report_without_owner(proxied, author)
     )
     conn.close()
     for who in ("alice@example.com", "bob@example.com"):
-        headers = {"X-Forwarded-Email": who}
+        headers = signed_in(who)
         page = proxied.get("/r/prorate", headers=headers).text
         assert NO_OWNER_COPY in page and "Sign this version" not in page
         r = proxied.post("/r/prorate/sign", data={"version": 1}, headers=headers)
@@ -2179,7 +2177,7 @@ def moderation(shared_client, shared_settings, as_user):
     from verifair import db
 
     people = {
-        "admin": {"X-Forwarded-Email": "admin@example.com"},
+        "admin": signed_in("admin@example.com"),
         "owner": as_user("owner@example.com", name="Olga Owner"),
         "carol": as_user("carol@example.com", name="Carol Creator"),
         "dave": as_user("dave@example.com", name="Dave Other"),
@@ -2533,16 +2531,17 @@ def test_user_block_local_and_shared(client, shared_client, as_user):
     assert '<details class="me"' in page and 'action="/me"' in page
     assert f'data-copy-identity="{r.cookies["vf_id"]}"' in page
     assert (
-        "Settings need a sign-in proxy. Set VERIFAIR_IDENTITY_HEADER to turn them on." in page
+        "Settings need shared mode with sign-in. Set VERIFAIR_OIDC_ISSUER to turn them on." in page
         and "README" not in page
     )
-    assert "/access" not in page
+    assert "/access" not in page and 'action="/logout"' not in page
 
     bob = shared_client.get("/", headers=as_user("bob@example.com", name="Bob Builder")).text
     assert '<span class="me">Bob Builder</span>' in bob and ">Member<" in bob
     assert 'data-copy-identity="bob@example.com"' in bob
     assert 'href="/access/tokens"' in bob and 'href="/access/members"' not in bob
-    assert "sign-in proxy" not in bob
+    assert "Settings need" not in bob
+    assert '<form method="post" action="/logout" class="signout">' in bob
     admin = shared_client.get("/").text
     assert ">Admin<" in admin and 'href="/access/members"' in admin
 

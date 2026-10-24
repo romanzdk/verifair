@@ -153,13 +153,13 @@ def plain_id(value: str) -> bool:
 
 
 def _shared(request: Request) -> bool:
-    return request.app.state.settings.identity_header is not None
+    return request.app.state.settings.shared
 
 
 async def current_user(request: Request) -> tuple[str, str | None]:
     member = request.state.member
-    request.state.user_from_header = _shared(request)
-    if request.state.user_from_header:
+    request.state.signed_in = _shared(request)
+    if request.state.signed_in:
         if member is None:
             raise HTTPException(401, "sign in required")
         return member["id"], member["name"]
@@ -253,7 +253,7 @@ def _shell(request: Request, conn: db.Connection, user: tuple[str, str | None], 
     return _nav(work or _work(request, conn, user[0])) | {
         "user_id": user[0],
         "user_name": user[1],
-        "user_from_header": request.state.user_from_header,
+        "signed_in": request.state.signed_in,
         "shared": _shared(request),
         "member": member,
         "is_admin": member is not None and member["role"] == "admin",
@@ -335,7 +335,7 @@ def _links(report: db.Row) -> list[tuple[str, str]]:
 
 def _sign_refusal(request: Request, report: db.Row, user_id: str) -> str | None:
     owner, author = report["author_id"], report["author"]
-    if not request.state.user_from_header:
+    if not request.state.signed_in:
         return None
     if owner is None:
         return rules.NO_OWNER
@@ -1417,7 +1417,7 @@ def remove_review(
 @router.post("/me")
 def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str, Form()] = "/"):
     if _shared(request):
-        raise HTTPException(403, "identity is set by the proxy")
+        raise HTTPException(403, "your name comes from the members list")
     name = name.strip()
     if not next.startswith("/") or next.startswith(("//", "/\\")):
         next = "/"

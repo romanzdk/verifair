@@ -11,11 +11,19 @@ class Settings:
     base_url: str
     slack_webhook_url: str | None
     required_sections: tuple[str, ...] = ()
-    identity_header: str | None = None
     bootstrap_admin_id: str | None = None
     db_pool_size: int = 10
     smtp_url: str | None = None
     email_from: str | None = None
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    session_secret: str | None = None
+    oidc_allowed_domains: tuple[str, ...] = ()
+
+    @property
+    def shared(self) -> bool:
+        return self.oidc_issuer is not None
 
 
 DEFAULT_REQUIRED_SECTIONS = "Verification,Rollback,Security impact"
@@ -29,6 +37,48 @@ def one_address(value: str) -> bool:
     return "@" in value and getaddresses([value]) == [("", value)]
 
 
+def https_or_local(url) -> bool:
+    if not isinstance(url, str):
+        return False
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return False
+    return bool(host) and (
+        parts.scheme == "https" or (parts.scheme == "http" and host in ("localhost", "127.0.0.1"))
+    )
+
+
+def check_oidc(settings: Settings) -> None:
+    if not settings.shared:
+        return
+    required = {
+        "VERIFAIR_OIDC_CLIENT_ID": settings.oidc_client_id,
+        "VERIFAIR_OIDC_CLIENT_SECRET": settings.oidc_client_secret,
+        "VERIFAIR_SESSION_SECRET": settings.session_secret,
+    }
+    if missing := [name for name, value in required.items() if not value]:
+        verb = "is" if len(missing) == 1 else "are"
+        raise RuntimeError(
+            f"{', '.join(missing)} {verb} required when VERIFAIR_OIDC_ISSUER is set."
+        )
+    if len(settings.session_secret) < 32:
+        raise RuntimeError(
+            "VERIFAIR_SESSION_SECRET must be at least 32 characters."
+            " Create one with: openssl rand -base64 48"
+        )
+    if not https_or_local(settings.oidc_issuer):
+        raise RuntimeError(
+            "VERIFAIR_OIDC_ISSUER must be an https URL such as https://accounts.google.com"
+        )
+    if not https_or_local(settings.base_url):
+        raise RuntimeError(
+            "VERIFAIR_BASE_URL must be the https URL people open, such as"
+            " https://verifair.example.com. Sign-in needs it for the redirect URI."
+        )
+
+
 def _valid_smtp_url(url: str) -> bool:
     parts = urlsplit(url)
     try:
@@ -38,12 +88,18 @@ def _valid_smtp_url(url: str) -> bool:
 
 
 def load_settings() -> Settings:
+    if os.environ.get("VERIFAIR_IDENTITY_HEADER"):
+        raise RuntimeError(
+            "VERIFAIR_IDENTITY_HEADER was removed. verifair now signs people in itself:"
+            " set VERIFAIR_OIDC_ISSUER, VERIFAIR_OIDC_CLIENT_ID, VERIFAIR_OIDC_CLIENT_SECRET"
+            " and VERIFAIR_SESSION_SECRET instead. See docs/access.md."
+        )
     api_token = os.environ.get("VERIFAIR_API_TOKEN") or None
-    identity_header = os.environ.get("VERIFAIR_IDENTITY_HEADER") or None
-    if not api_token and not identity_header:
+    oidc_issuer = os.environ.get("VERIFAIR_OIDC_ISSUER", "").strip() or None
+    if not api_token and not oidc_issuer:
         raise RuntimeError(
             "VERIFAIR_API_TOKEN is required in local mode."
-            " Set VERIFAIR_IDENTITY_HEADER for shared mode."
+            " Set VERIFAIR_OIDC_ISSUER for shared mode."
         )
     database_url = os.environ.get("VERIFAIR_DATABASE_URL")
     if not database_url:
@@ -75,9 +131,15 @@ def load_settings() -> Settings:
         required_sections=_split(
             os.environ.get("VERIFAIR_REQUIRED_SECTIONS", DEFAULT_REQUIRED_SECTIONS)
         ),
-        identity_header=identity_header,
         bootstrap_admin_id=os.environ.get("VERIFAIR_BOOTSTRAP_ADMIN_ID", "").strip() or None,
         db_pool_size=int(pool_size),
         smtp_url=smtp_url,
         email_from=email_from,
+        oidc_issuer=oidc_issuer,
+        oidc_client_id=os.environ.get("VERIFAIR_OIDC_CLIENT_ID", "").strip() or None,
+        oidc_client_secret=os.environ.get("VERIFAIR_OIDC_CLIENT_SECRET", "").strip() or None,
+        session_secret=os.environ.get("VERIFAIR_SESSION_SECRET", "").strip() or None,
+        oidc_allowed_domains=tuple(
+            d.lower() for d in _split(os.environ.get("VERIFAIR_OIDC_ALLOWED_DOMAINS", ""))
+        ),
     )

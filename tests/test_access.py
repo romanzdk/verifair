@@ -5,18 +5,19 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from conftest import signed_in
 from fastapi import HTTPException
 from psycopg.pq import TransactionStatus
 
 from verifair import db, web
 
-ADMIN = {"X-Forwarded-Email": "admin@example.com"}
+ADMIN = signed_in("admin@example.com")
 LAST_ADMIN = "There must be at least one active admin."
 EXISTS = "That member already exists."
 COPY_ONCE = "Copy it now. It will not be shown again."
 LOCAL_NOTE = (
-    "Access management needs a sign-in proxy. Start verifair with"
-    " <code>VERIFAIR_IDENTITY_HEADER</code> set to the header your proxy sends."
+    "Access management needs shared mode with sign-in. Start verifair with"
+    " <code>VERIFAIR_OIDC_ISSUER</code> set to your sign-in provider."
 )
 ALREADY_CREATED = (
     "This token was already created. Its secret was shown only once."
@@ -96,7 +97,7 @@ def test_admin_adds_promotes_deactivates_and_reactivates(shared_client, conn, ca
     assert (r.status_code, r.headers["location"]) == (303, "/access/members")
     carol = db.get_user(conn, "carol@example.com")
     assert (carol["name"], carol["role"], carol["active"]) == ("Carol C", "member", 1)
-    who = {"X-Forwarded-Email": "carol@example.com"}
+    who = signed_in("carol@example.com")
     assert shared_client.get("/", headers=who).status_code == 200
     token, old = _token(conn, "carol@example.com")
 
@@ -286,7 +287,7 @@ def test_settings_links_by_role_and_mode(shared_client, as_user, conn, client):
         assert 'href="/access/tokens"' in member, path
         assert 'href="/access/members"' not in member, path
         local = client.get(path).text
-        assert "/access" not in local and "Settings need a sign-in proxy" in local, path
+        assert "/access" not in local and "Settings need shared mode with sign-in" in local, path
 
 
 def test_report_context_refuses_moderation_without_a_member_in_shared_mode(conn):
@@ -526,8 +527,8 @@ def test_denied_page_has_a_heading_and_links_back(shared_client, conn, as_user):
             True,
             True,
         ),
-        (shared_client.get("/", headers={"X-Forwarded-Email": "x@example.com"}), False, False),
-        (shared_client.get("/", headers={"X-Forwarded-Email": "gone@example.com"}), False, False),
+        (shared_client.get("/", headers=signed_in("x@example.com")), False, False),
+        (shared_client.get("/", headers=signed_in("gone@example.com")), False, False),
     ]:
         assert r.status_code == 403
         assert '<main class="app-page denied">' in r.text and "<h1>No access</h1>" in r.text
@@ -535,8 +536,8 @@ def test_denied_page_has_a_heading_and_links_back(shared_client, conn, as_user):
         assert ('<a href="/">' in r.text) is home
         assert ('<a href="/access/tokens">Back to Agent tokens</a>' in r.text) is back
         assert "<script" not in r.text and 'class="topbar"' not in r.text
-    signin = shared_client.get("/", headers={"X-Forwarded-Email": ""})
-    assert signin.status_code == 401 and '<a href="/">Go to Inbox</a>' in signin.text
+    signin = shared_client.post("/me", headers={"Cookie": ""})
+    assert signin.status_code == 401 and '<a class="btn p" href="/login">Sign in</a>' in signin.text
     assert '<main class="app-page denied">' in signin.text and "<script" not in signin.text
 
 
@@ -608,7 +609,7 @@ def test_tokens_page_has_the_new_token_menu_and_the_agent_env(shared_client, con
 
 
 def test_api_use_stamps_last_used_outside_the_wait_transaction(shared_client, conn, monkeypatch):
-    bob = {"X-Forwarded-Email": "bob@example.com"}
+    bob = signed_in("bob@example.com")
     db.add_user(conn, id="bob@example.com", name="Bob", role="member")
     token, used = _token(conn, "bob@example.com", "used")
     _, unused = _token(conn, "bob@example.com", "unused")

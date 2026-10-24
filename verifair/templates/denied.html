@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>No access · verifair</title>
+<title>{{ title or "No access" }} · verifair</title>
 <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <main class="app-page denied">
-  <h1>No access</h1>
+  <h1>{{ title or "No access" }}</h1>
   <p>{{ message }}</p>
   {% if back or home %}<p>{% if back %}<a href="{{ back }}">Back to Agent tokens</a>{% if home %} · {% endif %}{% endif %}{% if home %}<a href="/">Go to Inbox</a>{% endif %}</p>{% endif %}
+  {% if signin %}<p><a class="btn p" href="/login">Sign in</a></p>{% endif %}
+  {% if signout %}<form method="post" action="/logout"><button class="btn">Sign out</button></form>{% endif %}
 </main>
 </body>
 </html>

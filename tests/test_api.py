@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from conftest import OIDC
 from fastapi.testclient import TestClient
 
 from verifair import db
@@ -33,9 +34,7 @@ def test_requires_token(client):
 
 
 def test_missing_shared_token_never_authenticates(settings, make_app):
-    shared = replace(
-        settings, api_token=None, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss"
-    )
+    shared = replace(settings, api_token=None, **OIDC, bootstrap_admin_id="boss")
     client = TestClient(make_app(shared))
     for headers, detail in [
         ({"Authorization": "Bearer None"}, SHARED_TOKEN),
@@ -615,18 +614,19 @@ def test_load_settings_required_sections(monkeypatch):
 
     monkeypatch.setenv("VERIFAIR_API_TOKEN", "t")
     monkeypatch.delenv("VERIFAIR_REQUIRED_SECTIONS", raising=False)
-    monkeypatch.delenv("VERIFAIR_IDENTITY_HEADER", raising=False)
+    monkeypatch.delenv("VERIFAIR_OIDC_ISSUER", raising=False)
     s = load_settings()
     assert s.required_sections == ("Verification", "Rollback", "Security impact")
-    assert s.identity_header is None
+    assert not s.shared
     monkeypatch.setenv("VERIFAIR_REQUIRED_SECTIONS", " A , ,B ")
-    monkeypatch.setenv("VERIFAIR_IDENTITY_HEADER", "X-User")
+    monkeypatch.setenv("VERIFAIR_OIDC_ISSUER", "https://idp.example.com")
     s = load_settings()
-    assert (s.required_sections, s.identity_header) == (("A", "B"), "X-User")
+    assert (s.required_sections, s.oidc_issuer) == (("A", "B"), "https://idp.example.com")
     monkeypatch.setenv("VERIFAIR_REQUIRED_SECTIONS", "")
+    monkeypatch.setenv("VERIFAIR_OIDC_ISSUER", " ")
     monkeypatch.setenv("VERIFAIR_IDENTITY_HEADER", "")
     s = load_settings()
-    assert (s.required_sections, s.identity_header) == ((), None)
+    assert (s.required_sections, s.shared) == ((), False)
 
 
 def test_provenance_and_commit_roundtrip(client):

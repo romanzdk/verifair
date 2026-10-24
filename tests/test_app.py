@@ -5,6 +5,7 @@ from dataclasses import replace
 
 import psycopg
 import pytest
+from conftest import OIDC, SessionClient, signed_in
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
@@ -20,12 +21,11 @@ def test_health(client):
 
 def test_missing_token_raises(monkeypatch):
     monkeypatch.delenv("VERIFAIR_API_TOKEN", raising=False)
-    monkeypatch.delenv("VERIFAIR_IDENTITY_HEADER", raising=False)
+    monkeypatch.delenv("VERIFAIR_OIDC_ISSUER", raising=False)
     with pytest.raises(RuntimeError) as error:
         load_settings()
     assert str(error.value) == (
-        "VERIFAIR_API_TOKEN is required in local mode."
-        " Set VERIFAIR_IDENTITY_HEADER for shared mode."
+        "VERIFAIR_API_TOKEN is required in local mode. Set VERIFAIR_OIDC_ISSUER for shared mode."
     )
 
 
@@ -120,7 +120,7 @@ def test_local_mode_refuses_a_database_with_members(settings, monkeypatch):
     with pytest.raises(RuntimeError) as error:
         create_app(settings)
     assert str(error.value) == (
-        "This database has members. Set VERIFAIR_IDENTITY_HEADER to run in shared mode."
+        "This database has members. Set VERIFAIR_OIDC_ISSUER to run in shared mode."
     )
     assert pools[0].closed
 
@@ -162,14 +162,21 @@ def test_startup_logs_the_bootstrap_outcome_and_an_ignored_shared_token(
     ]
 
 
-def test_shared_mode_loads_without_api_token(monkeypatch):
+def _oidc_env(monkeypatch):
     monkeypatch.delenv("VERIFAIR_API_TOKEN", raising=False)
-    monkeypatch.setenv("VERIFAIR_IDENTITY_HEADER", "X-Forwarded-Email")
+    monkeypatch.setenv("VERIFAIR_OIDC_ISSUER", OIDC["oidc_issuer"])
+    monkeypatch.setenv("VERIFAIR_OIDC_CLIENT_ID", OIDC["oidc_client_id"])
+    monkeypatch.setenv("VERIFAIR_OIDC_CLIENT_SECRET", OIDC["oidc_client_secret"])
+    monkeypatch.setenv("VERIFAIR_SESSION_SECRET", OIDC["session_secret"])
+
+
+def test_shared_mode_loads_without_api_token(monkeypatch):
+    _oidc_env(monkeypatch)
     monkeypatch.setenv("VERIFAIR_BOOTSTRAP_ADMIN_ID", "admin@example.com")
     s = load_settings()
-    assert (s.api_token, s.identity_header, s.bootstrap_admin_id) == (
+    assert (s.api_token, s.oidc_issuer, s.bootstrap_admin_id) == (
         None,
-        "X-Forwarded-Email",
+        OIDC["oidc_issuer"],
         "admin@example.com",
     )
 
@@ -209,12 +216,12 @@ def test_local_mode_startup_needs_no_users(settings, make_app):
         assert db.list_users(conn) == []
 
 
-def test_bootstrap_admin_id_without_the_identity_header_refuses_to_start(settings):
+def test_bootstrap_admin_id_without_sign_in_refuses_to_start(settings):
     with pytest.raises(RuntimeError) as error:
         create_app(replace(settings, bootstrap_admin_id="admin@example.com"))
     assert str(error.value) == (
-        "VERIFAIR_BOOTSTRAP_ADMIN_ID is set but VERIFAIR_IDENTITY_HEADER is not."
-        " Set the header to run in shared mode."
+        "VERIFAIR_BOOTSTRAP_ADMIN_ID is set but VERIFAIR_OIDC_ISSUER is not."
+        " Set up sign-in to run in shared mode."
     )
     with closing(db.connect(settings.database_url)) as conn:
         db.init_schema(conn)
@@ -229,13 +236,12 @@ def test_empty_bootstrap_admin_id_is_none(monkeypatch, value):
 
 
 def test_bootstrap_admin_id_is_stripped(monkeypatch, new_database_url, make_app):
-    monkeypatch.delenv("VERIFAIR_API_TOKEN", raising=False)
+    _oidc_env(monkeypatch)
     monkeypatch.setenv("VERIFAIR_DATABASE_URL", new_database_url())
-    monkeypatch.setenv("VERIFAIR_IDENTITY_HEADER", "X-Forwarded-Email")
     monkeypatch.setenv("VERIFAIR_BOOTSTRAP_ADMIN_ID", " admin@example.com\n")
     s = load_settings()
     assert s.bootstrap_admin_id == "admin@example.com"
-    client = TestClient(make_app(s), headers={"X-Forwarded-Email": "admin@example.com"})
+    client = SessionClient(make_app(s), headers=signed_in("admin@example.com"))
     assert client.get("/access").status_code == 200
 
 
@@ -397,7 +403,7 @@ def test_shared_mode_startup_lower_cases_local_mode_ids_once(
     shared_settings = replace(shared_settings, database_url=settings.database_url)
     _seed_local_mode_ids(settings, make_app)
     caplog.set_level("INFO", logger="verifair")
-    client = TestClient(make_app(shared_settings), headers={"Sec-Fetch-Site": "same-origin"})
+    client = SessionClient(make_app(shared_settings), headers={"Sec-Fetch-Site": "same-origin"})
     assert _stored_ids(settings.database_url) == {
         "reports": [("legacy", None), ("old", "jane@example.com"), ("unowned", None)],
         "signatures": [("legacy", "jane@example.com"), ("old", "jane@example.com")],
@@ -415,7 +421,7 @@ def test_shared_mode_startup_lower_cases_local_mode_ids_once(
         for id in ("jane@example.com", "bob@example.com"):
             db.add_user(conn, id=id, name=id.partition("@")[0], role="member")
         token, _ = db.create_token(conn, owner_id="jane@example.com", label="agent")
-    jane = {"X-Forwarded-Email": "JANE@Example.COM"}
+    jane = signed_in("jane@example.com")
     pushed = client.post(
         "/api/reports",
         json={"project": "p", "title": "Old change", "risk": "low", "body": "## A\ny", "id": "old"},
@@ -424,7 +430,7 @@ def test_shared_mode_startup_lower_cases_local_mode_ids_once(
     assert (pushed.status_code, pushed.json()["version"]) == (201, 2)
     assert "Old change" in client.get("/changes?scope=author", headers=jane).text
     assert client.post("/r/old/sign", data={"version": 2}, headers=jane).status_code == 200
-    bob = client.get("/", headers={"X-Forwarded-Email": "bob@example.com"})
+    bob = client.get("/", headers=signed_in("bob@example.com"))
     assert "Old change" in bob.text
 
     before = _stored_ids(settings.database_url)
@@ -494,7 +500,7 @@ def test_readyz_is_200_when_the_database_answers(client):
 
 
 def test_readyz_is_public_in_shared_mode(shared_client):
-    response = shared_client.get("/readyz", headers={"X-Forwarded-Email": ""})
+    response = shared_client.get("/readyz", headers=signed_in(""))
     assert (response.status_code, response.json()) == (200, {"ok": True})
 
 

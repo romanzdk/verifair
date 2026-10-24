@@ -48,7 +48,7 @@ async def require_token(request: Request) -> None:
     settings = request.app.state.settings
     given = request.headers.get("Authorization", "")
     request.state.token_owner = request.state.token = None
-    if settings.identity_header:
+    if settings.shared:
         path = request.url.path
         scheme, _, token = given.partition(" ")
         if not given:

@@ -38,7 +38,7 @@
 <main class="app-page" id="vf_main">
 {% if not shared %}
   <div class="ph"><div><h1>Agent tokens</h1></div></div>
-  <p>Access management needs a sign-in proxy. Start verifair with <code>VERIFAIR_IDENTITY_HEADER</code> set to the header your proxy sends.</p>
+  <p>Access management needs shared mode with sign-in. Start verifair with <code>VERIFAIR_OIDC_ISSUER</code> set to your sign-in provider.</p>
 {% else %}
   {% set active_count = tokens|rejectattr("revoked_at")|list|length %}
   <div class="ph"><div><h1>Agent tokens</h1><div class="meta">{{ active_count }} active token{{ "s" if active_count != 1 }}{% if all_tokens is defined %} · {{ all_tokens|rejectattr("revoked_at")|list|length }} across the workspace{% endif %}</div></div></div>

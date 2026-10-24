@@ -3,19 +3,19 @@ from contextlib import closing
 from dataclasses import replace
 
 import pytest
-from fastapi.testclient import TestClient
+from conftest import OIDC, SessionClient, signed_in
 
 from verifair import db
 
 TOKEN = {"Authorization": "Bearer t"}
 AGENTS = {}
-ALICE = {"X-Forwarded-Email": "alice@example.com"}
-BOB = {"X-Forwarded-Email": "bob@example.com"}
+ALICE = signed_in("alice@example.com")
+BOB = signed_in("bob@example.com")
 
 
 @pytest.fixture
 def team(settings, make_app, monkeypatch):
-    shared = replace(settings, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss")
+    shared = replace(settings, **OIDC, bootstrap_admin_id="boss")
     app = make_app(shared)
     conn = db.connect(shared.database_url)
     for id in ("alice@example.com", "bob@example.com", "carol@example.com"):
@@ -24,7 +24,7 @@ def team(settings, make_app, monkeypatch):
         monkeypatch.setitem(AGENTS, id, {"Authorization": f"Bearer {token}"})
     conn.close()
     monkeypatch.setitem(TOKEN, "Authorization", AGENTS["alice@example.com"]["Authorization"])
-    return TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
+    return SessionClient(app, headers={"Sec-Fetch-Site": "same-origin"})
 
 
 def main(page):
@@ -201,9 +201,7 @@ def test_no_matches_is_a_useful_empty_state_and_not_a_missing_project(team):
     assert "another scope" not in empty.text
     missing = team.get("/p/missing?scope=author", headers=ALICE)
     assert missing.status_code == 404
-    reviews = team.get(
-        "/changes?scope=reviewer", headers={"X-Forwarded-Email": "carol@example.com"}
-    )
+    reviews = team.get("/changes?scope=reviewer", headers=signed_in("carol@example.com"))
     assert "No review requests for you yet" in reviews.text
     assert 'href="?scope=all&amp;tab=all"' in reviews.text
 
@@ -404,7 +402,7 @@ def test_sidebar_counts(team):
     assert "nav-n" not in nav_link(page, "/p/other")
     assert 'class="nav-n acc">1<' in nav_link(team.get("/r/r1", headers=ALICE).text, "/")
     assert 'class="nav-n acc">1<' in nav_link(team.get("/", headers=BOB).text, "/")
-    carol = {"X-Forwarded-Email": "carol@example.com"}
+    carol = signed_in("carol@example.com")
     assert "nav-n" not in nav_link(team.get("/", headers=carol).text, "/")
 
 
