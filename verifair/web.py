@@ -1516,7 +1516,7 @@ def add_member(
     if not (_fits(clean_id, 200) and _fits(clean_name, 60)):
         return refuse(MEMBER_INPUT, 422)
     # before lower-casing, since "\u212a".lower() is an ASCII "k"
-    if not (id.isascii() and email_id(clean_id)):
+    if not (id.strip().isascii() and email_id(clean_id)):
         return refuse(MEMBER_EMAIL, 422)
     try:
         db.add_user(conn, id=clean_id, name=clean_name, role=role)

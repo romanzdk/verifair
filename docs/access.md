@@ -93,7 +93,7 @@ verifair only accepts an email that the provider marks as verified (the `email_v
 - verifair keeps you signed in for 7 days with a cookie signed by `VERIFAIR_SESSION_SECRET`. After that you sign in again. Changing the secret signs everyone out. Every replica must use the same secret, or people are signed out when a request reaches another replica. On HTTPS the cookies are named `__Host-vf_session` and `__Host-vf_signin`, so other subdomains cannot set them.
 - **Sign out** is at the bottom of the sidebar. It ends the session in that browser only, not in other browsers and not your session at the provider. **Reset sign-in** and deactivation end all of a member's sessions.
 - verifair checks membership on every request. A deactivated member is refused on their next request, even with a valid session cookie.
-- verifair reads the provider's configuration at the first sign-in after a start and keeps it. If the provider cannot be reached for that first read, verifair waits 30 seconds before it tries again, so sign-in pages fail fast meanwhile. After the configuration is read, a provider that is down shows the "could not reach" page after a 10 second timeout. People who are already signed in keep working.
+- verifair reads the provider's configuration at the first sign-in after a start and keeps it. If the provider cannot be reached for that first read, verifair waits 30 seconds before it tries again, so sign-in pages fail fast meanwhile. After the configuration is read, a provider that is down shows the "could not reach" page at the end of sign-in, after a 10 second timeout. People who are already signed in keep working.
 - If you move to a different provider (a new `VERIFAIR_OIDC_ISSUER`), the old links no longer match, so clear them once: `psql "$VERIFAIR_DATABASE_URL" -c "UPDATE users SET oidc_sub=NULL"`. Each member's next sign-in links them again.
 - verifair checks the ID token it gets straight from the provider over HTTPS: issuer, audience, expiry, nonce, verified email and allowed domains. The sign-in uses `state` and PKCE, so a sign-in started on one browser cannot be finished on another.
 
@@ -146,7 +146,7 @@ A deactivated member is refused on their next request, is signed out in every br
 
 A reset alone lets whoever signs in next with that email claim the member, so if you think someone else signed in as them, use this order:
 
-1. Deactivate the member. verifair never links or signs in a deactivated member.
+1. Deactivate the member. verifair never links or signs in a deactivated member, and their agent tokens are revoked. If they are the only admin, make someone else an admin first.
 2. Fix or remove the wrong account at the provider.
 3. **Reset sign-in**.
 4. Reactivate the member. Their next sign-in links them again.

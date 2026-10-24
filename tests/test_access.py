@@ -708,3 +708,10 @@ def test_admin_resets_a_members_sign_in(shared_client, conn, as_user, caplog):
         "/access/users/nobody@example.com", data={"reset": "1"}, headers=ADMIN
     )
     assert missing.status_code == 404
+
+
+def test_a_pasted_email_with_non_breaking_spaces_is_trimmed(shared_client):
+    data = {"id": " Eve@example.com ", "name": "Eve", "role": "member"}
+    r = shared_client.post("/access/users", data=data, headers=ADMIN, follow_redirects=False)
+    assert r.status_code == 303
+    assert "eve@example.com" in shared_client.get("/access/members", headers=ADMIN).text
