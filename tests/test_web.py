@@ -1061,6 +1061,21 @@ def test_verdict_refused_while_unsigned(client):
     assert (g["status"], g["verdicts"]) == ("unsigned", [])
 
 
+def test_unsigned_version_shows_disabled_verdict_buttons_with_the_reason(client):
+    push(client)
+    client.cookies.set("vf_id", "review00")
+    client.cookies.set("vf_name", "Alice")
+    page = client.get("/r/prorate").text
+    assert f'<p class="note">{UNSIGNED_COPY}</p>' in page
+    assert '<div class="vmsg" tabindex="-1"' in page
+    assert page.count(" disabled>") >= 3
+    sign(client)
+    client.cookies.set("vf_name", "Alice")
+    page = client.get("/r/prorate").text
+    assert UNSIGNED_COPY not in page
+    assert 'value="approve">' in page and " disabled>" not in page
+
+
 def test_signer_cannot_review_own_version(client):
     push(client)
     sign(client)

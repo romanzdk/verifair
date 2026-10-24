@@ -243,13 +243,19 @@ def _page(
     return _with_id_cookie(request, response)
 
 
-def _nav_oob(request: Request, conn: sqlite3.Connection, user, ctx: dict) -> dict:
-    shell = _shell(request, conn, user)
-    return shell | {"nav_oob": True, "here": ctx["url"], "active_project": ctx["report"]["project"]}
+def _nav_oob(request: Request, conn: sqlite3.Connection, user, ctx: dict) -> str:
+    nav = _shell(request, conn, user) | {
+        "nav_oob": True,
+        "here": ctx["url"],
+        "active_project": ctx["report"]["project"],
+    }
+    return templates.get_template("_nav.html").render(nav)
 
 
-def _partial(request: Request, names: list[str], ctx: dict, headers: dict | None = None):
-    html = "".join(templates.get_template(n).render(ctx) for n in names)
+def _partial(
+    request: Request, names: list[str], ctx: dict, headers: dict | None = None, tail: str = ""
+):
+    html = "".join(templates.get_template(n).render(ctx) for n in names) + tail
     return _with_id_cookie(request, HTMLResponse(html, headers=headers))
 
 
@@ -364,7 +370,11 @@ def report_context(
         "versions": db.list_versions(conn, id)[::-1],
         "links": _links(report),
         "my_verdict": rules.latest_verdicts(verdicts, current).get(user_id),
-        "self_review": SELF_REVIEW if signature and signature["signer_id"] == user_id else None,
+        "verdict_block": UNSIGNED
+        if signature is None
+        else SELF_REVIEW
+        if signature["signer_id"] == user_id
+        else None,
         "user_id": user_id,
         "can_moderate": {
             t.root["id"] for t in threads if _can_moderate(shared, member, user_id, t.root, report)
@@ -780,8 +790,9 @@ def post_verdict(
     settings = request.app.state.settings
     background.add_task(notify.send, settings, notify.verdict_text(report, row, settings.base_url))
     ctx = report_context(conn, report, version, user_id, request.state.member, _shared(request))
-    ctx |= {"oob": True} | _nav_oob(request, conn, user, ctx)
-    return _partial(request, ["_verdict.html", "_sidebar.html", "_nav.html"], ctx)
+    ctx |= {"oob": True}
+    nav = _nav_oob(request, conn, user, ctx)
+    return _partial(request, ["_verdict.html", "_sidebar.html"], ctx, tail=nav)
 
 
 @router.post("/r/{id}/sign")
@@ -811,8 +822,9 @@ def sign(
         text = notify.ready_for_review_text(report, version, name, settings.base_url)
         background.add_task(notify.send, settings, text)
     ctx = report_context(conn, report, version, user_id, request.state.member, _shared(request))
-    ctx |= {"oob": True, "verdict_oob": True} | _nav_oob(request, conn, user, ctx)
-    return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html", "_nav.html"], ctx)
+    ctx |= {"oob": True, "verdict_oob": True}
+    nav = _nav_oob(request, conn, user, ctx)
+    return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html"], ctx, tail=nav)
 
 
 @router.post("/me")

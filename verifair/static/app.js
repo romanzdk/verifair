@@ -231,6 +231,11 @@ document.addEventListener("focusout", (event) => {
 highlight();
 showNavForNameError();
 document.body.addEventListener("htmx:afterSwap", highlight);
+document.body.addEventListener("htmx:afterSettle", (event) => {
+  if (event.detail.pathInfo?.requestPath?.endsWith("/verdict")) {
+    document.querySelector("#vf_verdict .vmsg")?.focus();
+  }
+});
 document.body.addEventListener("htmx:responseError", (event) => showRequestError(event, errorCopy(event.detail.xhr.status)));
 document.body.addEventListener("htmx:sendError", (event) =>
   showRequestError(event, "Connection lost. Your text is still here, try again."),
@@ -246,19 +251,19 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
   if (active && nav.scrollWidth > nav.clientWidth) {
     nav.scrollLeft = Math.max(0, active.offsetLeft - 16);
   }
-  document.querySelectorAll("[data-copy-identity], [data-copy-target]").forEach(button => {
+  document.addEventListener("click", async event => {
+    const button = event.target.closest("[data-copy-identity], [data-copy-target]");
+    if (!button) return;
     const field = button.dataset.copyTarget && document.getElementById(button.dataset.copyTarget);
-    button.addEventListener("click", async () => {
-      const result = button.parentElement.querySelector("[data-copy-result]");
-      try {
-        await navigator.clipboard.writeText(field ? field.value ?? field.textContent : button.dataset.copyIdentity);
-        result.textContent = field?.tagName === "PRE" ? "Copied." : field ? "Token copied." : "Identity copied.";
-      } catch {
-        field?.select?.();
-        result.textContent = field?.tagName === "PRE" ? "Select the text above to copy it."
-          : field ? "Select the token above to copy it." : "Select the ID above to copy it.";
-      }
-    });
+    const result = button.parentElement.querySelector("[data-copy-result]");
+    try {
+      await navigator.clipboard.writeText(field ? field.value ?? field.textContent : button.dataset.copyIdentity);
+      result.textContent = field?.tagName === "PRE" ? "Copied." : field ? "Token copied." : "Identity copied.";
+    } catch {
+      field?.select?.();
+      result.textContent = field?.tagName === "PRE" ? "Select the text above to copy it."
+        : field ? "Select the token above to copy it." : "Select the ID above to copy it.";
+    }
   });
   // Browsers skip autofocus when the URL has a fragment, and scrolling to the fragment moves
   // focus, so focus the field once that is done
