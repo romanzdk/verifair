@@ -49,8 +49,9 @@ The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When the auth proxy
 - Back up with `pg_dump -Fc "$VERIFAIR_DATABASE_URL" > verifair.dump`. Restore into an empty database as verifair's role with `pg_restore --no-owner -d <empty database> verifair.dump`, so that role owns the restored tables.
 - The image trusts `X-Forwarded-*` headers from any address. Set `FORWARDED_ALLOW_IPS` to your proxy's IP.
 - `FORWARDED_ALLOW_IPS` does not protect the identity header. It only decides whose `X-Forwarded-For` and `X-Forwarded-Proto` uvicorn believes. verifair reads the identity header from every request, so anyone who can reach verifair directly, not through the proxy, can claim any identity. Make sure only the proxy can reach it: run the proxy as a sidecar and set `UVICORN_HOST=127.0.0.1`, or use a network policy that only lets the proxy in.
-- Give the Kubernetes liveness and readiness probes on `/healthz` a timeout of at least 5 seconds (`timeoutSeconds: 5`). Under heavy load the answer can take a few seconds, and a shorter timeout restarts a pod that is only busy.
-- With `UVICORN_HOST=127.0.0.1`, an HTTP probe from outside the container cannot reach `/healthz`. Use an exec probe with the same command as the image `HEALTHCHECK`, or probe `/healthz` through the proxy. oauth2-proxy then needs `--skip-auth-route=GET=^/healthz$`, or it asks the probe to sign in.
+- Use `/healthz` for the liveness probe and `/readyz` for the readiness probe. `/healthz` does not touch the database, so a database outage does not restart pods. `/readyz` returns 200 `{"ok": true}` when the database answers `SELECT 1`, and 503 `{"ok": false}` with `Retry-After: 5` when it is down or no connection is free within 2 seconds, so the pod stops getting traffic until the database is back. Both are public, also in shared mode.
+- Give both probes a timeout of at least 5 seconds (`timeoutSeconds: 5`). Under heavy load the answer can take a few seconds, and a shorter timeout restarts a pod that is only busy.
+- With `UVICORN_HOST=127.0.0.1`, an HTTP probe from outside the container cannot reach `/healthz`. Use an exec probe with the same command as the image `HEALTHCHECK`, or probe `/healthz` through the proxy. oauth2-proxy then needs `--skip-auth-route=GET=^/(healthz|readyz)$`, or it asks the probe to sign in.
 
 ### Upgrading an existing HTTP deployment
 
