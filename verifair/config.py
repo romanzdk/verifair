@@ -35,6 +35,9 @@ def load_settings() -> Settings:
             "VERIFAIR_DATABASE_URL is required,"
             " for example postgresql://verifair:verifair@localhost:5432/verifair"
         )
+    pool_size = os.environ.get("VERIFAIR_DB_POOL_SIZE", "10")
+    if not pool_size.isdecimal() or int(pool_size) < 1:
+        raise RuntimeError("VERIFAIR_DB_POOL_SIZE must be a whole number of 1 or more.")
     return Settings(
         api_token=api_token,
         database_url=database_url,
@@ -45,5 +48,5 @@ def load_settings() -> Settings:
         ),
         identity_header=identity_header,
         bootstrap_admin_id=os.environ.get("VERIFAIR_BOOTSTRAP_ADMIN_ID", "").strip() or None,
-        db_pool_size=int(os.environ.get("VERIFAIR_DB_POOL_SIZE", "10")),
+        db_pool_size=int(pool_size),
     )

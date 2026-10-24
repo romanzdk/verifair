@@ -42,6 +42,15 @@ def test_pool_size_comes_from_the_environment(monkeypatch):
     assert load_settings().db_pool_size == 3
 
 
+@pytest.mark.parametrize("value", ["", "ten", "0", "-2", "2.5"])
+def test_bad_pool_size_is_a_clear_error(monkeypatch, value):
+    monkeypatch.setenv("VERIFAIR_API_TOKEN", "t")
+    monkeypatch.setenv("VERIFAIR_DB_POOL_SIZE", value)
+    with pytest.raises(RuntimeError) as error:
+        load_settings()
+    assert str(error.value) == "VERIFAIR_DB_POOL_SIZE must be a whole number of 1 or more."
+
+
 def _record_pools(monkeypatch):
     pools = []
     open_pool = db.open_pool

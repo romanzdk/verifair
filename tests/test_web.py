@@ -489,7 +489,7 @@ def test_first_visit_shows_inline_name_prompt(client):
     assert 'class="name-prompt"' not in client.get("/r/prorate").text
 
 
-@pytest.mark.parametrize("name", ["  ", "x" * 61])
+@pytest.mark.parametrize("name", ["  ", "x" * 61, "Al\x00ice"])
 def test_set_name_invalid_redirects_back_with_error(client, name):
     push(client)
     r = client.post("/me", data={"name": name, "next": "/r/prorate"}, follow_redirects=False)
@@ -2124,7 +2124,6 @@ def test_on_this_page_numbers_sit_in_their_own_column(client):
         ),
         ("/r/prorate/comments/1/reply", {"version": 1, "body": "\x00"}),
         ("/r/prorate/verdict", {"version": 1, "verdict": "request_changes", "summary": "\x00"}),
-        ("/me", {"name": "Al\x00ice"}),
     ],
 )
 def test_web_form_with_a_nul_character_is_422(client, path, data):

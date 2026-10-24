@@ -22,6 +22,8 @@ docker compose up --build
 
 Open http://localhost:8000. The agent token is `change-me`. Set `VERIFAIR_API_TOKEN` before you start to use another one. Users set a display name (kept in a cookie). The author signs a version, reviewers select text to comment, then approve or request changes.
 
+The compose passwords and token are for local use. Change them for any shared setup.
+
 This is local mode. For a team, use shared mode. See [Roles and access](#roles-and-access).
 
 To run from source, start only the database and point verifair at it:
@@ -156,7 +158,7 @@ VERIFAIR_API_TOKEN=change-me VERIFAIR_URL=https://verifair.example.com VERIFAIR_
 }
 ```
 
-- `status` is `unsigned`, `awaiting_review`, `changes_requested` or `approved`. It is `unsigned` until someone signs `current_version`; after that it only counts verdicts on `current_version` from people other than its signer. Earlier verdicts by the signer remain in the history, including after a database upgrade.
+- `status` is `unsigned`, `awaiting_review`, `changes_requested` or `approved`. It is `unsigned` until someone signs `current_version`; after that it only counts verdicts on `current_version` from people other than its signer. Earlier verdicts by the signer remain in the history.
 - `signed_by` and `signed_at` describe the signature on `current_version`, or are `null`. `agent`, `model` and `session_url` are `null` when the push did not send them.
 - `verdict` is `approve` or `request_changes`. `current` is true when the verdict was given on `current_version`.
 
@@ -212,7 +214,7 @@ Response (`open=true` leaves out resolved threads):
 - `prefix` and `suffix` hold optional context immediately before and after the quote, used to choose between repeated matches.
 - Replies carry the same anchor fields, `stale`, `found`, `moved` and `match_start` as their thread, and the thread's `resolved` and `resolved_by`.
 - `author_type` is `agent` or `human`.
-- `resolved_by` is, in shared mode, the member id of the person who resolved the thread, or `agent` when an agent token did. It is `null` for open threads, in local mode, and for threads resolved before the upgrade to shared mode.
+- `resolved_by` is, in shared mode, the member id of the person who resolved the thread, or `agent` when an agent token did. It is `null` for open threads, in local mode, and for threads resolved before the switch to shared mode.
 
 Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?, prefix?, suffix?, blocking?}`. The response is 201 with one comment (same fields as above, without `stale`, `found`, `moved`, `match_start` and `replies`). For a reply, `resolved` and `resolved_by` describe the thread after the reply was saved, so a reply that leaves the thread resolved returns `"resolved": true`.
 
@@ -352,7 +354,7 @@ export VERIFAIR_BOOTSTRAP_ADMIN_ID=jane@example.com
 uv run uvicorn verifair.asgi:app
 ```
 
-With compose, put the same settings in a `docker-compose.override.yml` next to `docker-compose.yml`. Compose reads it on its own. `!reset null` removes the API token the main file sets:
+With compose, put the same settings in a `docker-compose.override.yml` next to `docker-compose.yml`. Compose reads it on its own. `!reset null` (Compose 2.24.4 or newer) removes the API token the main file sets:
 
 ```yaml
 services:
@@ -465,7 +467,7 @@ docker run --rm -e VERIFAIR_API_TOKEN=change-me \
   -p 127.0.0.1:8000:8000 verifair
 ```
 
-This needs a running Postgres. Replace `<db-host>` with its address.
+This needs a running Postgres. `host.docker.internal` reaches a Postgres on your own machine (Docker Desktop). On Linux, or for another server, replace it with the database host.
 
 The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When the auth proxy runs next to verifair in the same pod, set `UVICORN_HOST=127.0.0.1` so only the proxy can reach it. The image `HEALTHCHECK` still works then, because it runs inside the container.
 
@@ -477,7 +479,7 @@ The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When the auth proxy
 - Set `VERIFAIR_BASE_URL` to the public HTTPS URL, for example `https://verifair.example.com`. It is used in notification links and in the push response, and enables secure cookies. Keep the browser on this origin and have the reverse proxy preserve `Sec-Fetch-Site`.
 - Serve it at the root of a domain. Sub-paths (like `/verifair/`) are not supported.
 - verifair needs a Postgres 17 database where it can create tables. Where Postgres runs in production is not decided here.
-- Startup creates and updates the schema under an advisory lock, so several replicas can start at once.
+- Startup creates and updates the schema under an advisory lock, so several replicas can start at once. A start can wait up to 5 seconds behind writes in progress, then stops with a clear message. Restart it to try again.
 - You can run several replicas, because all state is in Postgres. Keep `replicas × VERIFAIR_DB_POOL_SIZE` below the server's `max_connections`.
 - Back up with `pg_dump -Fc "$VERIFAIR_DATABASE_URL" > verifair.dump`. Restore with `pg_restore -d <empty database> verifair.dump`.
 - The image trusts `X-Forwarded-*` headers from any address. Set `FORWARDED_ALLOW_IPS` to your proxy's IP.

@@ -122,6 +122,10 @@ ALREADY_CREATED = (
 )
 
 
+def _fits(value: str, longest: int) -> bool:
+    return 1 <= len(value) <= longest and "\x00" not in value
+
+
 def plain_id(value: str) -> bool:
     return PLAIN_ID.fullmatch(value) is not None and value.lower() not in (".", "..", "agent")
 
@@ -827,15 +831,13 @@ def sign(
 
 
 @router.post("/me")
-def set_name(
-    request: Request, name: Annotated[str, Form(), NoNul], next: Annotated[str, Form()] = "/"
-):
+def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str, Form()] = "/"):
     if _shared(request):
         raise HTTPException(403, "identity is set by the proxy")
     name = name.strip()
     if not next.startswith("/") or next.startswith(("//", "/\\")):
         next = "/"
-    if not 1 <= len(name) <= 60:
+    if not _fits(name, 60):
         return RedirectResponse(f"{next}{'&' if '?' in next else '?'}name_error=1", 303)
     response = RedirectResponse(next, status_code=303)
     response.set_cookie(
@@ -919,7 +921,7 @@ def add_member(
     user: User,
     member: Member,
     id: Annotated[str, Form()] = "",
-    name: Annotated[str, Form(), NoNul] = "",
+    name: Annotated[str, Form()] = "",
     role: Annotated[Literal["admin", "member"], Form()] = "member",
 ):
     if member["role"] != "admin":
@@ -932,7 +934,7 @@ def add_member(
         )
 
     clean_id, clean_name = id.strip().lower(), name.strip()
-    if not (1 <= len(clean_id) <= 200 and 1 <= len(clean_name) <= 60):
+    if not (_fits(clean_id, 200) and _fits(clean_name, 60)):
         return refuse(MEMBER_INPUT, 422)
     if clean_id == "agent":
         return refuse(MEMBER_AGENT, 422)
@@ -985,11 +987,11 @@ def new_token(
     conn: Conn,
     user: User,
     member: Member,
-    label: Annotated[str, Form(), NoNul] = "",
+    label: Annotated[str, Form()] = "",
     nonce: Annotated[str, Form(max_length=64), NoNul] = "",
 ):
     label = label.strip()
-    if not 1 <= len(label) <= 60:
+    if not _fits(label, 60):
         return _access(request, conn, user, "tokens", error=LABEL_INPUT, status=422)
     try:
         token, row = db.create_token(conn, owner_id=member["id"], label=label, nonce=nonce or None)

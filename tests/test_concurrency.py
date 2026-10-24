@@ -1,9 +1,10 @@
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from contextlib import closing, contextmanager
 
 import pytest
+from psycopg.pq import TransactionStatus
 
 from verifair import db
 from verifair.app import create_app
@@ -226,7 +227,21 @@ def test_wait_reuses_pooled_connections(client):
     assert after.get("connections_num", 0) == before.get("connections_num", 0)
 
 
-def test_pool_connection_is_clean_after_a_failed_request(client):
+def test_pool_connection_is_idle_when_a_request_releases_it(client, monkeypatch):
+    pool = client.app.state.pool
+    real = pool.connection
+    released = []
+
+    # pool.connection() commits on exit, so only the status just before that shows a leak
+    @contextmanager
+    def checked(*args, **kwargs):
+        with real(*args, **kwargs) as conn:
+            try:
+                yield conn
+            finally:
+                released.append(conn.info.transaction_status)
+
+    monkeypatch.setattr(pool, "connection", checked)
     _report(client)
     _report(client)
     client.cookies.set("vf_name", "Alice")
@@ -234,3 +249,5 @@ def test_pool_connection_is_clean_after_a_failed_request(client):
     assert "A newer version" in stale.text
     response = client.get("/api/reports/r1", headers={"Authorization": "Bearer t"})
     assert response.status_code == 200
+    assert len(released) >= 4
+    assert set(released) == {TransactionStatus.IDLE}

@@ -144,6 +144,7 @@ def test_admin_adds_promotes_deactivates_and_reactivates(shared_client, conn, ca
         {"id": "e" * 201, "name": "Eve"},
         {"id": "eve@example.com", "name": "  "},
         {"id": "eve@example.com", "name": "E" * 61},
+        {"id": "eve@example.com", "name": "Ev\x00e"},
     ],
 )
 def test_add_member_validates_id_and_name(shared_client, conn, data):
@@ -227,7 +228,7 @@ def test_resending_the_new_token_form_does_not_create_a_second_token(shared_clie
     assert len(db.list_tokens(conn)) == 1
 
 
-@pytest.mark.parametrize("label", ["", "   ", "x" * 61])
+@pytest.mark.parametrize("label", ["", "   ", "x" * 61, "lap\x00top"])
 def test_new_token_needs_a_label(shared_client, conn, label):
     r = shared_client.post("/access/tokens", data={"label": label}, headers=ADMIN)
     assert r.status_code == 422 and "Enter a label (1–60 characters)." in r.text
