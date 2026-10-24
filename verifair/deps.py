@@ -2,8 +2,9 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
+import anyio
+import anyio.to_thread
 from fastapi import FastAPI, Request
-from fastapi.concurrency import contextmanager_in_threadpool
 from psycopg_pool import PoolTimeout
 from starlette.concurrency import run_in_threadpool
 
@@ -21,8 +22,23 @@ async def borrow(app: FastAPI) -> AsyncIterator[db.Connection]:
     except TimeoutError:
         raise PoolTimeout(f"couldn't get a connection after {pool.timeout:.2f} sec") from None
     try:
-        async with contextmanager_in_threadpool(pool.connection()) as conn:
+        # shielded so a dropped request still gets and returns the connection, and the GC
+        # never has to (FastAPI's contextmanager_in_threadpool skips __exit__ on cancel)
+        borrowed = pool.connection()
+        with anyio.CancelScope(shield=True):
+            conn = await run_in_threadpool(borrowed.__enter__)
+        exc_info = (None, None, None)
+        try:
             yield conn
+        except BaseException as error:
+            exc_info = (type(error), error, error.__traceback__)
+            raise
+        finally:
+            # own limiter: returning a connection must not queue behind busy worker threads
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(
+                    borrowed.__exit__, *exc_info, limiter=anyio.CapacityLimiter(1)
+                )
     finally:
         slots.release()
 

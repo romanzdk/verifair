@@ -1,9 +1,12 @@
+import gc
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 
+import anyio
 import anyio.to_thread
+import httpx
 import pytest
 from psycopg.pq import TransactionStatus
 from psycopg_pool import PoolTimeout
@@ -318,3 +321,30 @@ def test_connection_is_back_in_the_pool_before_background_tasks_run(client, monk
     monkeypatch.setattr(notify, "send", send)
     assert _report(client).status_code == 201
     assert borrowed == [True]
+
+
+# A dropped request used to hand its connection back only when the garbage collector found it
+def test_a_cancelled_request_gives_its_connection_back(settings, make_app, monkeypatch):
+    app = make_app(settings)
+    app.state.pool.timeout = 1
+    auth = {"Authorization": "Bearer t"}
+    payload = {"id": "r1", "project": "p", "title": "T", "risk": "low", "body": "b"}
+    _slow(monkeypatch, "get_signature", 0.5)
+
+    async def main():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            pushed = await client.post("/api/reports", json=payload, headers=auth)
+            assert pushed.status_code == 201
+            with anyio.move_on_after(0.1) as scope:
+                await client.get("/api/reports/r1", headers=auth)
+            assert scope.cancelled_caught
+            with anyio.fail_after(3):
+                return (await client.post("/api/reports", json=payload, headers=auth)).status_code
+
+    gc.disable()
+    try:
+        assert anyio.run(main) == 201
+    finally:
+        gc.enable()
+    assert app.state.pool_slots._value == 1
