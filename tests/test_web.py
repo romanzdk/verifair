@@ -2169,6 +2169,12 @@ def test_comment_with_quote_missing_from_section_is_refused(client):
     assert api_threads(client) == []
 
 
+REQUESTED = re.compile(
+    r'<span class="rn" title="([^"]*)">[^<]*</span>(?:<button[^>]*>Remove</button>)?</div>'
+    r'\s*<p class="rev-state">([^<]+)</p>'
+)
+
+
 def _rail_reviewers(page):
     return page.split("<h4>Reviewers</h4>")[1].split("<h4>Versions</h4>")[0]
 
@@ -2177,9 +2183,7 @@ def test_sidebar_skips_the_signer_among_requested_reviewers(client):
     push(client, reviewers=["signer00", "carol000"])
     sign(client)
     rail = _rail_reviewers(client.get("/r/prorate").text)
-    assert re.findall(r'<span class="rn">([^<]*)</span> · ([^<]*)</div>', rail) == [
-        ("carol000", "review requested")
-    ]
+    assert REQUESTED.findall(rail) == [("carol000", "review requested")]
 
 
 def test_sidebar_lists_requested_reviewers_next_to_verdicts(client):
@@ -2187,7 +2191,7 @@ def test_sidebar_lists_requested_reviewers_next_to_verdicts(client):
     sign(client)
     rail = _rail_reviewers(client.get("/r/prorate").text)
     assert "Nobody yet." not in rail
-    assert re.findall(r'<span class="rn">([^<]*)</span> · ([^<]*)</div>', rail) == [
+    assert REQUESTED.findall(rail) == [
         ("bob00000", "review requested"),
         ("carol000", "review requested"),
     ]
@@ -2197,6 +2201,4 @@ def test_sidebar_lists_requested_reviewers_next_to_verdicts(client):
     rail = _rail_reviewers(client.get("/r/prorate").text)
     assert rail.count('class="rev"') == 2
     assert ">approved v1</span>" in rail and "Bob" in rail
-    assert re.findall(r'<span class="rn">([^<]*)</span> · ([^<]*)</div>', rail) == [
-        ("carol000", "review requested")
-    ]
+    assert REQUESTED.findall(rail) == [("carol000", "review requested")]

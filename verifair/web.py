@@ -125,6 +125,7 @@ DEACTIVATED = "Your access to this workspace was turned off. Ask an admin to rea
 LABEL_INPUT = "Enter a label (1–60 characters)."
 ADMIN_ONLY = "Only an admin can manage members."
 REVIEWER_REFUSED = "Pick an active member who does not own this report."
+REVIEWER_KEPT = "{name} already gave a verdict on this version, so the request stays."
 OWNER_ONLY = "Only the token owner or an admin can revoke it."
 ALREADY_CREATED = (
     "This token was already created. Its secret was shown only once."
@@ -160,6 +161,15 @@ async def current_user(request: Request) -> tuple[str, str | None]:
 
 
 User = Annotated[tuple[str, str | None], Depends(current_user)]
+
+
+async def access_member(request: Request) -> db.Row:
+    if not _shared(request):
+        raise HTTPException(404, "not found")
+    return request.state.member
+
+
+Member = Annotated[db.Row, Depends(access_member)]
 
 
 def _secure(request: Request) -> bool:
@@ -363,7 +373,7 @@ def report_context(
     users = db.list_users(conn) if shared or resolved_by or requested else []
     names = {u["id"]: u["name"] for u in users}
     judged = rules.latest_verdicts(verdicts, current)
-    can_request = shared and version == current
+    can_change = version == current
     return {
         "report": report,
         "url": f"/r/{url_quote(id)}",
@@ -401,16 +411,25 @@ def report_context(
             t.root["id"] for t in threads if _can_moderate(shared, member, user_id, t.root, report)
         },
         "resolvers": {cid: names.get(by, by) for cid, by in resolved_by.items()},
-        "removable": {p for p in requested if p not in judged} if can_request else set(),
-        "request_options": [
-            u
-            for u in users
-            if can_request
-            and u["active"]
-            and u["id"] != report["author_id"]
-            and u["id"] not in all_requested
-        ],
+        "removable": {p for p in requested if p not in judged} if can_change else set(),
+        "request_options": _request_options(users, report, all_requested)
+        if shared and can_change
+        else [],
+        "requests_note": not can_change and (shared or bool(all_requested)),
     }
+
+
+def _request_options(users: list[db.Row], report: db.Row, requested: list[str]) -> list[dict]:
+    active = sorted((u for u in users if u["active"]), key=lambda u: (u["name"].lower(), u["id"]))
+    names = Counter(u["name"].lower() for u in active)
+    return [
+        {
+            "id": u["id"],
+            "label": u["name"] if names[u["name"].lower()] == 1 else f"{u['name']} ({u['id']})",
+        }
+        for u in active
+        if u["id"] != report["author_id"] and u["id"] not in requested
+    ]
 
 
 def _thread_response(
@@ -901,10 +920,16 @@ def _email_reviewers(request, background, conn, report, version, recipients, add
     background.add_task(notify.email, settings, report["id"], subject, letters)
 
 
-def _reviewers_response(request: Request, conn: db.Connection, report, user, error=None):
+def _reviewers_response(
+    request: Request, conn: db.Connection, report, user, error=None, row=None, status=None
+):
+    if not request.headers.get("HX-Request"):
+        if error:
+            raise HTTPException(422, error)
+        return RedirectResponse(f"/r/{url_quote(report['id'])}", 303)
     latest = db.latest_version(conn, report["id"])
-    ctx = report_context(conn, report, latest, user[0], request.state.member, True)
-    ctx["reviewer_error"] = error
+    ctx = report_context(conn, report, latest, user[0], request.state.member, _shared(request))
+    ctx |= {"reviewer_error": error, "error_row": row, "reviewer_status": status}
     return _partial(request, ["_sidebar.html"], ctx, tail=_nav_oob(request, conn, user, ctx))
 
 
@@ -921,8 +946,6 @@ def request_review(
     report = _require_report(conn, id)
     target = db.get_user(conn, reviewer_id.strip().lower())
     if target is None or not target["active"] or target["id"] == report["author_id"]:
-        if not request.headers.get("HX-Request"):
-            raise HTTPException(422, REVIEWER_REFUSED)
         return _reviewers_response(request, conn, report, user, REVIEWER_REFUSED)
     if db.add_review_request(conn, id, target["id"], requested_by=user[0]):
         log.info(
@@ -931,19 +954,27 @@ def request_review(
         latest = db.latest_version(conn, id)
         if target["id"] != user[0] and db.get_signature(conn, id, latest):
             _email_reviewers(request, background, conn, report, latest, [target["id"]], user[1])
-    return _reviewers_response(request, conn, report, user)
+    status = f"Requested {target['name']}."
+    return _reviewers_response(request, conn, report, user, status=status)
 
 
 @router.post("/r/{id}/reviewers/{reviewer_id:path}/remove")
-def remove_review(
-    id: str, reviewer_id: str, request: Request, conn: Conn, user: User, member: Member
-):
+def remove_review(id: str, reviewer_id: str, request: Request, conn: Conn, user: User):
     report = _require_report(conn, id)
+    if _shared(request):
+        reviewer_id = reviewer_id.lower()
+    judged = rules.latest_verdicts(db.list_verdicts(conn, id), db.latest_version(conn, id))
+    if reviewer_id in judged:
+        name = judged[reviewer_id]["reviewer_name"]
+        error = REVIEWER_KEPT.format(name=name)
+        return _reviewers_response(request, conn, report, user, error, row=reviewer_id)
     if db.remove_review_request(conn, id, reviewer_id):
         log.info(
             "access action=remove_reviewer actor=%s target=%s report=%s", user[0], reviewer_id, id
         )
-    return _reviewers_response(request, conn, report, user)
+    member = db.get_user(conn, reviewer_id)
+    status = f"Removed the request for {member['name'] if member else reviewer_id}."
+    return _reviewers_response(request, conn, report, user, status=status)
 
 
 @router.post("/me")
@@ -1001,15 +1032,6 @@ def _access(
 def _denied(request: Request, message: str, back: str | None = "/access/tokens", home: bool = True):
     ctx = {"message": message, "back": back, "home": home}
     return templates.TemplateResponse(request, "denied.html", ctx, status_code=403)
-
-
-async def access_member(request: Request) -> db.Row:
-    if not _shared(request):
-        raise HTTPException(404, "not found")
-    return request.state.member
-
-
-Member = Annotated[db.Row, Depends(access_member)]
 
 
 @router.get("/access")

@@ -13,6 +13,11 @@ ALICE = {"X-Forwarded-Email": "alice@example.com"}
 BOB = {"X-Forwarded-Email": "bob@example.com"}
 HX = {"HX-Request": "true"}
 REFUSED = "Pick an active member who does not own this report."
+KEPT = "carol already gave a verdict on this version, so the request stays."
+ROW = re.compile(
+    r'<span class="rn" title="([^"]*)">[^<]*</span>(?:<button[^>]*>Remove</button>)?</div>'
+    r'\s*<p class="rev-state">([^<]+)</p>'
+)
 
 
 @pytest.fixture
@@ -46,14 +51,16 @@ def test_member_requests_and_removes_a_review(shared_client, team, caplog):
     assert db.requested_reviewers(team, "r") == ["carol@example.com"]
     assert r.text.startswith('<aside class="side" id="vf_sidebar">')
     assert 'id="vf_nav" popover aria-label="Main" hx-swap-oob="true"' in r.text
-    assert re.search(r'<span class="rn">carol</span> · review requested<button', r.text)
+    assert ROW.findall(r.text) == [("carol", "review requested")]
+    assert '<p class="dismiss" data-rev-status>Requested carol.</p>' in r.text
     assert 'hx-post="/r/r/reviewers/carol%40example.com/remove"' in r.text
     assert add(shared_client, "carol@example.com").status_code == 200
     assert db.requested_reviewers(team, "r") == ["carol@example.com"]
     added = "access action=add_reviewer actor=bob@example.com target=carol@example.com report=r"
     assert caplog.text.count(added) == 1
     r = shared_client.post("/r/r/reviewers/carol%40example.com/remove", headers=BOB | HX)
-    assert r.status_code == 200 and "carol" not in rail(r.text).split("<form")[0]
+    assert r.status_code == 200 and ROW.findall(r.text) == []
+    assert '<p class="dismiss" data-rev-status>Removed the request for carol.</p>' in r.text
     assert db.requested_reviewers(team, "r") == []
     assert (
         "access action=remove_reviewer actor=bob@example.com target=carol@example.com report=r"
@@ -71,6 +78,31 @@ def test_picker_lists_active_members_who_are_not_the_owner_or_requested(shared_c
         "bob@example.com",
     ]
     assert 'hx-post="/r/r/reviewers"' in picker and 'name="reviewer_id"' in picker
+    assert 'method="post" action="/r/r/reviewers"' in picker
+    assert 'aria-label="Request a review from" required>' in picker
+    assert '<option value="" disabled selected>Choose a member…</option>' in picker
+    assert '<button class="btn sm" aria-label="Request review">Request</button>' in picker
+
+
+def test_picker_sorts_by_name_and_tells_same_names_apart(shared_client, team):
+    for id, name in (("c2@example.com", "Carol"), ("zed@example.com", "anna")):
+        db.add_user(team, id=id, name=name, role="member")
+    picker = rail(shared_client.get("/r/r", headers=BOB).text).split('<form class="addrev"')[1]
+    assert re.findall(r'<option value="[^"]+">([^<]+)</option>', picker) == [
+        "admin",
+        "anna",
+        "bob",
+        "Carol (c2@example.com)",
+        "carol (carol@example.com)",
+    ]
+
+
+def test_old_versions_say_where_to_change_requests(shared_client, team):
+    db.push_report(team, project="p", title="T", risk="high", body=BODY, id="r")
+    old = rail(shared_client.get("/r/r/v/1", headers=BOB).text)
+    assert '<p class="dismiss">Open the latest version to change requests.</p>' in old
+    assert "addrev" not in old
+    assert "Open the latest" not in rail(shared_client.get("/r/r", headers=BOB).text)
 
 
 @pytest.mark.parametrize("who", ["alice@example.com", "ghost@example.com", "gone@example.com", ""])
@@ -84,17 +116,48 @@ def test_owner_unknown_and_inactive_members_cannot_be_requested(shared_client, t
     assert db.requested_reviewers(team, "r") == []
 
 
-def test_remove_keeps_verdicts_and_hides_the_button_once_judged(shared_client, team):
+def test_a_reviewer_with_a_verdict_on_this_version_stays(shared_client, team):
     add(shared_client, "bob@example.com")
     add(shared_client, "carol@example.com")
     shared_client.post("/r/r/sign", data={"version": 1}, headers=ALICE)
-    shared_client.post("/r/r/verdict", data={"version": 1, "verdict": "approve"}, headers=BOB)
+    carol = {"X-Forwarded-Email": "carol@example.com"}
+    shared_client.post("/r/r/verdict", data={"version": 1, "verdict": "approve"}, headers=carol)
     page = rail(shared_client.get("/r/r", headers=ALICE).text)
-    assert "/reviewers/carol%40example.com/remove" in page
-    assert "/reviewers/bob%40example.com/remove" not in page
-    shared_client.post("/r/r/reviewers/bob%40example.com/remove", headers=ALICE | HX)
-    assert db.requested_reviewers(team, "r") == ["carol@example.com"]
-    assert [v["reviewer_id"] for v in db.list_verdicts(team, "r")] == ["bob@example.com"]
+    assert "/reviewers/bob%40example.com/remove" in page
+    assert "/reviewers/carol%40example.com/remove" not in page
+    path = "/r/r/reviewers/carol%40example.com/remove"
+    plain = shared_client.post(path, headers=ALICE)
+    assert (plain.status_code, plain.json()) == (422, {"detail": KEPT})
+    page = rail(shared_client.post(path, headers=ALICE | HX).text)
+    carol_row = page.split('title="carol"')[1].split('class="rev-item"')[0]
+    assert f'<p class="error" role="alert">{KEPT}</p>' in carol_row
+    assert db.requested_reviewers(team, "r") == ["bob@example.com", "carol@example.com"]
+    db.push_report(team, project="p", title="T", risk="high", body=BODY, id="r")
+    assert "/reviewers/carol%40example.com/remove" in shared_client.get("/r/r", headers=BOB).text
+    shared_client.post(path, headers=ALICE | HX)
+    assert db.requested_reviewers(team, "r") == ["bob@example.com"]
+    assert [v["reviewer_id"] for v in db.list_verdicts(team, "r")] == ["carol@example.com"]
+
+
+def test_remove_path_ids_are_lower_cased(shared_client, team):
+    add(shared_client, "carol@example.com")
+    shared_client.post("/r/r/reviewers/Carol%40Example.COM/remove", headers=BOB | HX)
+    assert db.requested_reviewers(team, "r") == []
+
+
+def test_without_htmx_the_routes_redirect_to_the_report(shared_client, team):
+    r = shared_client.post(
+        "/r/r/reviewers",
+        data={"reviewer_id": "carol@example.com"},
+        headers=BOB,
+        follow_redirects=False,
+    )
+    assert (r.status_code, r.headers["location"]) == (303, "/r/r")
+    r = shared_client.post(
+        "/r/r/reviewers/carol%40example.com/remove", headers=BOB, follow_redirects=False
+    )
+    assert (r.status_code, r.headers["location"]) == (303, "/r/r")
+    assert db.requested_reviewers(team, "r") == []
 
 
 def test_ids_with_special_characters_round_trip(shared_client, team):
@@ -114,12 +177,18 @@ def test_reviews_can_be_requested_on_unowned_reports(shared_client, team):
     assert db.requested_reviewers(team, "legacy") == ["carol@example.com"]
 
 
-def test_local_mode_has_no_picker_and_refuses_the_routes(client, settings):
+def test_local_mode_can_remove_but_not_add(client, settings):
     with closing(db.connect(settings.database_url)) as conn:
-        db.push_report(conn, project="p", title="T", risk="low", body=BODY, id="r")
-    assert 'class="addrev"' not in client.get("/r/r").text
-    assert client.post("/r/r/reviewers", data={"reviewer_id": "bob"}).status_code == 404
-    assert client.post("/r/r/reviewers/bob/remove").status_code == 404
+        db.push_report(
+            conn, project="p", title="T", risk="low", body=BODY, id="r", reviewers=["Bob"]
+        )
+        page = client.get("/r/r").text
+        assert 'class="addrev"' not in page and 'hx-post="/r/r/reviewers/Bob/remove"' in page
+        assert client.post("/r/r/reviewers", data={"reviewer_id": "x"}).status_code == 404
+        r = client.post("/r/r/reviewers/Bob/remove", headers=HX)
+        assert r.status_code == 200 and ROW.findall(r.text) == []
+        assert "Removed the request for Bob." in r.text
+        assert db.requested_reviewers(conn, "r") == []
 
 
 class Outbox:

@@ -186,7 +186,7 @@ function errorAnchor(event) {
   // When the swap removes the source element, htmx re-fires afterRequest on an ancestor and
   // detail.elt points there; requestConfig.elt is still the element that sent the request.
   const elt = event.detail.requestConfig?.elt || event.detail.elt;
-  const anchor = elt.closest("form") || elt;
+  const anchor = elt.closest("form, .rev-item") || elt;
   if (!anchor.isConnected) return anchor.id ? document.getElementById(anchor.id) : null;
   return anchor === document.body ? document.querySelector("main") || anchor : anchor;
 }
@@ -250,15 +250,32 @@ document.addEventListener("focusout", (event) => {
 highlight();
 showNavForNameError();
 document.body.addEventListener("htmx:afterSwap", highlight);
+// The rail is swapped whole, so focus goes back to the picker, or to the Remove button that took
+// the removed one's place, and the change is read out from a live region outside the rail.
+function settleReviewers(sent) {
+  const rail = document.getElementById("vf_sidebar");
+  const removes = (root) => Array.from(root.querySelectorAll(".rev .btn"));
+  const at = sent ? removes(sent.closest("aside") || rail).indexOf(sent) : -1;
+  const next = (at >= 0 && removes(rail)[at]) || rail.querySelector(".addrev select") || removes(rail).at(-1);
+  next?.focus();
+  const status = rail.querySelector("[data-rev-status]");
+  const live = document.getElementById("vf_rev_live");
+  if (status && live) live.textContent = status.textContent;
+}
+
 document.body.addEventListener("htmx:afterSettle", (event) => {
-  if (event.detail.pathInfo?.requestPath?.endsWith("/verdict")) {
+  const path = event.detail.pathInfo?.requestPath || "";
+  if (path.endsWith("/verdict")) {
     document.querySelector("#vf_verdict .vmsg")?.focus();
+  } else if (/\/reviewers(\/[^/]+\/remove)?$/.test(path)) {
+    settleReviewers(event.detail.requestConfig?.elt);
   }
 });
 document.body.addEventListener("htmx:responseError", (event) => showRequestError(event, errorCopy(event.detail.xhr.status, event.detail.xhr.responseText)));
-document.body.addEventListener("htmx:sendError", (event) =>
-  showRequestError(event, "Connection lost. Your text is still here, try again."),
-);
+document.body.addEventListener("htmx:sendError", (event) => {
+  const typed = errorAnchor(event)?.querySelector?.("textarea");
+  showRequestError(event, typed ? "Connection lost. Your text is still here, try again." : "Connection lost. Try again.");
+});
 document.body.addEventListener("htmx:afterRequest", (event) => {
   const anchor = event.detail.successful && errorAnchor(event);
   if (anchor) clearRequestError(anchor);
