@@ -1164,3 +1164,17 @@ def test_nul_character_in_a_report_id_is_404(client):
     push(client)
     for path in ("/api/reports/pro%00rate", "/api/reports/pro%00rate/comments"):
         assert client.get(path, headers=H).status_code == 404, path
+
+
+def test_a_nan_in_the_payload_gets_a_strict_json_422(client):
+    text = '{"project": "p", "title": "T", "risk": NaN, "body": "b"}'
+    response = client.post(
+        "/api/reports", content=text, headers=H | {"Content-Type": "application/json"}
+    )
+
+    def refuse(constant):
+        raise ValueError(constant)
+
+    assert response.status_code == 422
+    detail = json.loads(response.text, parse_constant=refuse)["detail"]
+    assert [(e["loc"], "input" in e) for e in detail] == [(["body", "risk"], False)]

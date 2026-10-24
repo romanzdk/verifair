@@ -144,8 +144,14 @@ def create_app(settings: Settings) -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):
         # the errors echo the input, and ensure_ascii escapes a lone surrogate there that
-        # JSONResponse's UTF-8 encoding would turn into a 500
-        body = json.dumps({"detail": jsonable_encoder(error.errors())}, separators=(",", ":"))
+        # JSONResponse's UTF-8 encoding would turn into a 500. A NaN or Infinity in the
+        # input has no strict JSON form, so then the echo is left out.
+        errors = jsonable_encoder(error.errors())
+        try:
+            body = json.dumps({"detail": errors}, separators=(",", ":"), allow_nan=False)
+        except ValueError:
+            errors = [{k: v for k, v in e.items() if k != "input"} for e in errors]
+            body = json.dumps({"detail": errors}, separators=(",", ":"))
         return Response(body, 422, media_type="application/json")
 
     @app.get("/healthz")
