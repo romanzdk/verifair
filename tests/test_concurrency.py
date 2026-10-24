@@ -1,10 +1,12 @@
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 
 import pytest
 
 from verifair import db
+from verifair.app import create_app
 from verifair.db import (
     AlreadyCreated,
     LastAdmin,
@@ -164,3 +166,71 @@ def test_reopening_a_blocking_thread_waits_for_an_approval_in_flight(url):
     c.close()
     took = _write_during_approval_took(url, lambda c: reopen_thread(c, "r1", root["id"]))
     assert took >= 0.25
+
+
+def test_two_replicas_start_on_an_empty_database_at_once(shared_settings, monkeypatch):
+    _slow(monkeypatch, "init_schema")
+    barrier = threading.Barrier(2)
+    apps, errors = [], []
+
+    def start():
+        barrier.wait()
+        try:
+            apps.append(create_app(shared_settings))
+        except Exception as error:
+            errors.append(error)
+
+    threads = [threading.Thread(target=start) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for app in apps:
+        app.state.pool.close()
+    assert errors == []
+    with closing(db.connect(shared_settings.database_url)) as c:
+        assert [u["id"] for u in db.list_users(c)] == ["admin@example.com"]
+
+
+def _report(client, id="r1"):
+    payload = {"id": id, "project": "p", "title": "T", "risk": "low", "body": "b"}
+    return client.post("/api/reports", json=payload, headers={"Authorization": "Bearer t"})
+
+
+def test_wait_does_not_hold_a_connection_between_ticks(client):
+    assert client.app.state.settings.db_pool_size == 1
+    _report(client)
+    waiting = threading.Thread(
+        target=client.get,
+        args=("/api/reports/r1/wait?timeout=2",),
+        kwargs={"headers": {"Authorization": "Bearer t"}},
+    )
+    waiting.start()
+    time.sleep(0.3)
+    started = time.monotonic()
+    second_push = _report(client)
+    push_seconds = time.monotonic() - started
+    waiting.join()
+    assert second_push.status_code == 201
+    assert push_seconds < 1.5
+
+
+def test_wait_reuses_pooled_connections(client):
+    _report(client)
+    pool = client.app.state.pool
+    before = pool.get_stats()
+    response = client.get("/api/reports/r1/wait?timeout=1.2", headers={"Authorization": "Bearer t"})
+    after = pool.get_stats()
+    assert response.json()["event"] == "timeout"
+    assert after.get("requests_num", 0) - before.get("requests_num", 0) >= 2
+    assert after.get("connections_num", 0) == before.get("connections_num", 0)
+
+
+def test_pool_connection_is_clean_after_a_failed_request(client):
+    _report(client)
+    _report(client)
+    client.cookies.set("vf_name", "Alice")
+    stale = client.post("/r/r1/comments", data={"version": "1", "section": "A", "body": "late"})
+    assert "A newer version" in stale.text
+    response = client.get("/api/reports/r1", headers={"Authorization": "Bearer t"})
+    assert response.status_code == 200

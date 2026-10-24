@@ -1,9 +1,12 @@
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+import psycopg
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from psycopg_pool import ConnectionPool
 from starlette.concurrency import run_in_threadpool
 
 from verifair import api, db, web
@@ -15,14 +18,14 @@ CSP = (
 )
 log = logging.getLogger("verifair")
 SIGN_IN = "Sign in through your company login to use verifair."
+STARTUP_LOCKED = (
+    "Startup waited too long for a database lock held by another transaction. Restart to try again."
+)
 
 
-def _get_user(db_path: str, user_id: str):
-    conn = db.connect(db_path)
-    try:
+def _get_user(pool: ConnectionPool, user_id: str):
+    with pool.connection() as conn:
         return db.get_user(conn, user_id)
-    finally:
-        conn.close()
 
 
 async def _membership_denial(request: Request, settings: Settings):
@@ -34,7 +37,7 @@ async def _membership_denial(request: Request, settings: Settings):
     elif user_id in ("", "agent"):
         reason = "missing-header"
     else:
-        user = await run_in_threadpool(_get_user, settings.db_path, user_id)
+        user = await run_in_threadpool(_get_user, request.app.state.pool, user_id)
         if user is not None and user["active"]:
             request.state.member = user
             return None
@@ -60,27 +63,40 @@ def create_app(settings: Settings) -> FastAPI:
         )
     if settings.identity_header and settings.api_token:
         log.warning("VERIFAIR_API_TOKEN is ignored in shared mode. Agents need member tokens.")
-    conn = db.connect(settings.db_path)
+    pool = db.open_pool(settings.database_url, settings.db_pool_size)
     try:
-        db.init_schema(conn)
-        if not settings.identity_header and db.list_users(conn):
-            raise RuntimeError(
-                "This database has members. Set VERIFAIR_IDENTITY_HEADER to run in shared mode."
-            )
-        if settings.identity_header and admin_id:
-            if db.bootstrap_admin(conn, admin_id):
-                log.info("bootstrap admin created id=%s", admin_id.lower())
-            else:
-                log.info("bootstrap skipped: members exist")
-        if settings.identity_header and not db.list_users(conn):
-            raise RuntimeError("VERIFAIR_BOOTSTRAP_ADMIN_ID is required to create the first admin")
-        if settings.identity_header and (changed := db.lowercase_human_ids(conn)):
-            log.info("lowercased ids values=%d", changed)
-    finally:
-        conn.close()
+        # init_schema's advisory lock lasts until this commit, so replicas starting
+        # together run the checks and the bootstrap one after another
+        with pool.connection() as conn, conn.transaction():
+            db.init_schema(conn)
+            if not settings.identity_header and db.list_users(conn):
+                raise RuntimeError(
+                    "This database has members. Set VERIFAIR_IDENTITY_HEADER to run in shared mode."
+                )
+            if settings.identity_header and admin_id:
+                if db.bootstrap_admin(conn, admin_id):
+                    log.info("bootstrap admin created id=%s", admin_id.lower())
+                else:
+                    log.info("bootstrap skipped: members exist")
+            if settings.identity_header and not db.list_users(conn):
+                raise RuntimeError(
+                    "VERIFAIR_BOOTSTRAP_ADMIN_ID is required to create the first admin"
+                )
+    except psycopg.errors.LockNotAvailable as error:
+        pool.close()
+        raise RuntimeError(STARTUP_LOCKED) from error
+    except BaseException:
+        pool.close()
+        raise
 
-    app = FastAPI(title="verifair")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        pool.close()
+
+    app = FastAPI(title="verifair", lifespan=lifespan)
     app.state.settings = settings
+    app.state.pool = pool
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.include_router(api.router)
     app.include_router(web.router)
@@ -90,9 +106,12 @@ def create_app(settings: Settings) -> FastAPI:
         path = request.url.path
         is_api = path.startswith("/api/")
         request.state.member = None
-        response = None
-        if settings.identity_header and not (
-            is_api or path == "/healthz" or path.startswith("/static/")
+        # Postgres text cannot hold NUL, so no stored id can match such a path
+        response = JSONResponse({"detail": "Not Found"}, 404) if "\x00" in path else None
+        if (
+            response is None
+            and settings.identity_header
+            and not (is_api or path == "/healthz" or path.startswith("/static/"))
         ):
             response = await _membership_denial(request, settings)
         if response is None and request.method == "POST" and not is_api:

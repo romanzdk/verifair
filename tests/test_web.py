@@ -394,17 +394,17 @@ def test_comment_escapes_html(client):
     assert "&lt;b&gt;x&lt;/b&gt;" in client.get("/r/prorate").text
 
 
-def test_web_posts_notify(tmp_path, monkeypatch):
+def test_web_posts_notify(settings, make_app, monkeypatch):
+    from dataclasses import replace
+
     from fastapi.testclient import TestClient
 
     from verifair import notify
-    from verifair.app import create_app
-    from verifair.config import Settings
 
     sent = []
     monkeypatch.setattr(notify, "send", lambda settings, text: sent.append(text))
-    settings = Settings("t", str(tmp_path / "n.db"), "http://localhost:8000", "https://hooks/x")
-    client = TestClient(create_app(settings), headers={"Sec-Fetch-Site": "same-origin"})
+    settings = replace(settings, slack_webhook_url="https://hooks/x")
+    client = TestClient(make_app(settings), headers={"Sec-Fetch-Site": "same-origin"})
     push(client)
     assert sent[0] == "Draft report v1 in billing-service: Prorate http://localhost:8000/r/prorate"
     sign(client)
@@ -777,17 +777,16 @@ def test_app_js_caps_quote_and_maps_error_copy():
 
 
 @pytest.fixture
-def proxied(settings, monkeypatch):
+def proxied(settings, make_app, monkeypatch):
     from dataclasses import replace
 
     from fastapi.testclient import TestClient
 
     from verifair import db
-    from verifair.app import create_app
 
     shared = replace(settings, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss")
-    app = create_app(shared)
-    conn = db.connect(shared.db_path)
+    app = make_app(shared)
+    conn = db.connect(shared.database_url)
     for id in ("alice@example.com", "bob@example.com"):
         db.add_user(conn, id=id, name=id.partition("@")[0], role="member")
     token, _ = db.create_token(conn, owner_id="alice@example.com", label="agent")
@@ -849,12 +848,11 @@ CSP = (
 )
 
 
-def _anonymous(shared_settings):
+@pytest.fixture
+def anonymous(shared_client):
     from fastapi.testclient import TestClient
 
-    from verifair.app import create_app
-
-    return TestClient(create_app(shared_settings))
+    return TestClient(shared_client.app)
 
 
 @pytest.mark.parametrize(
@@ -871,8 +869,8 @@ def _anonymous(shared_settings):
         ("post", "/r/x/comments"),
     ],
 )
-def test_shared_mode_without_identity_is_401(shared_settings, method, path):
-    r = getattr(_anonymous(shared_settings), method)(path)
+def test_shared_mode_without_identity_is_401(anonymous, method, path):
+    r = getattr(anonymous, method)(path)
     assert r.status_code == 401
     assert r.headers["content-type"].startswith("text/html")
     assert SIGN_IN_COPY in r.text and 'href="/static/app.css"' in r.text
@@ -888,7 +886,7 @@ def test_shared_mode_non_members_are_403_and_deactivation_takes_effect(
 
     gone = as_user("gone@example.com")
     assert shared_client.get("/", headers=gone).status_code == 200
-    conn = db.connect(shared_settings.db_path)
+    conn = db.connect(shared_settings.database_url)
     db.update_user(conn, "gone@example.com", active=False)
     conn.close()
     for who in ["gone@example.com", "stranger@example.com", "<b>x</b>@example.com"]:
@@ -923,24 +921,23 @@ def test_shared_mode_header_is_matched_case_insensitively(shared_client, as_user
         assert r.status_code == 401 and SIGN_IN_COPY in r.text
 
 
-def test_shared_mode_duplicate_identity_header_is_401(shared_settings):
+def test_shared_mode_duplicate_identity_header_is_401(anonymous):
     pair = [("X-Forwarded-Email", "admin@example.com"), ("X-Forwarded-Email", "eve@example.com")]
     for values in (pair, pair[:1] * 2):
-        r = _anonymous(shared_settings).get("/access", headers=values)
+        r = anonymous.get("/access", headers=values)
         assert r.status_code == 401 and SIGN_IN_COPY in r.text
 
 
 def test_shared_mode_denials_are_logged_with_reason_and_path(
-    shared_client, shared_settings, as_user, caplog
+    anonymous, shared_client, shared_settings, as_user, caplog
 ):
     from verifair import db
 
     caplog.set_level("INFO", logger="verifair")
     as_user("gone@example.com")
-    conn = db.connect(shared_settings.db_path)
+    conn = db.connect(shared_settings.database_url)
     db.update_user(conn, "gone@example.com", active=False)
     conn.close()
-    anonymous = _anonymous(shared_settings)
     anonymous.get("/r/x")
     anonymous.get("/", headers=[("X-Forwarded-Email", "a"), ("X-Forwarded-Email", "b")])
     anonymous.get("/p/q", headers={"X-Forwarded-Email": "stranger@example.com"})
@@ -955,9 +952,9 @@ def test_shared_mode_denials_are_logged_with_reason_and_path(
     assert all(r.levelname == "INFO" for r in caplog.records if "membership" in r.getMessage())
 
 
-def test_shared_mode_denial_log_escapes_control_characters(shared_settings, caplog):
+def test_shared_mode_denial_log_escapes_control_characters(anonymous, caplog):
     caplog.set_level("INFO", logger="verifair")
-    _anonymous(shared_settings).get("/r/%1B%5B2K")
+    anonymous.get("/r/%1B%5B2K")
     assert "membership denied reason=missing-header path='/r/\\x1b[2K'" in caplog.text
     assert "\x1b" not in caplog.text
 
@@ -968,7 +965,7 @@ def test_shared_mode_member_is_the_users_row_and_gets_no_cookies(
     from verifair import db
 
     bob = as_user("bob@example.com", name="Bob Builder")
-    conn = db.connect(shared_settings.db_path)
+    conn = db.connect(shared_settings.database_url)
     db.push_report(conn, project="p", title="T", risk="low", body="## A\nx")
     conn.close()
     shared_client.cookies.set("vf_id", "mallory0")
@@ -984,7 +981,7 @@ def test_shared_mode_member_is_the_users_row_and_gets_no_cookies(
         "/r/t/comments", data={"version": 1, "section": "A", "body": "Why?"}, headers=bob
     )
     assert r.status_code == 200 and "set-cookie" not in r.headers
-    conn = db.connect(shared_settings.db_path)
+    conn = db.connect(shared_settings.database_url)
     comment = db.list_comments(conn, "t")[0]
     conn.close()
     assert (comment["author_id"], comment["author_name"]) == ("bob@example.com", "Bob Builder")
@@ -992,15 +989,14 @@ def test_shared_mode_member_is_the_users_row_and_gets_no_cookies(
     assert '<span class="me">admin</span>' in admin
 
 
-def test_shared_mode_browser_check_still_applies_to_members(shared_settings):
-    r = _anonymous(shared_settings).post(
+def test_shared_mode_browser_check_still_applies_to_members(anonymous):
+    r = anonymous.post(
         "/me", data={"name": "M"}, headers={"X-Forwarded-Email": "admin@example.com"}
     )
     assert (r.status_code, r.json()) == (403, {"detail": "browser request required"})
 
 
-def test_shared_mode_health_static_and_api_skip_the_membership_check(shared_settings):
-    anonymous = _anonymous(shared_settings)
+def test_shared_mode_health_static_and_api_skip_the_membership_check(anonymous):
     assert anonymous.get("/healthz").json() == {"ok": True}
     assert anonymous.get("/static/app.css").status_code == 200
     assert anonymous.get("/api/reports/x").json() == {"detail": "invalid token"}
@@ -1172,7 +1168,7 @@ NO_OWNER_COPY = "This report has no owner. Push it again with an agent token und
 def test_identity_header_nobody_may_sign_a_report_without_owner(proxied, author):
     from verifair import db
 
-    conn = db.connect(proxied.app.state.settings.db_path)
+    conn = db.connect(proxied.app.state.settings.database_url)
     db.push_report(
         conn, project="billing-service", title="Prorate", risk="high", body=SAMPLE, author=author
     )
@@ -1388,7 +1384,7 @@ def test_approval_rechecks_blockers_committed_before_insert(
     original = db.add_verdict
 
     def interleave(conn, **kwargs):
-        with closing(db.connect(settings.db_path)) as other:
+        with closing(db.connect(settings.database_url)) as other:
             if mutation == "comment":
                 db.add_comment(
                     other,
@@ -1416,8 +1412,9 @@ def test_approval_rechecks_blockers_committed_before_insert(
 
 
 def test_approval_holds_write_lock_during_validation(client, settings, monkeypatch):
-    import sqlite3
     from contextlib import closing
+
+    import psycopg
 
     from verifair import db, rules
 
@@ -1428,8 +1425,8 @@ def test_approval_holds_write_lock_during_validation(client, settings, monkeypat
     attempted = []
 
     def try_concurrent_writer(threads):
-        with closing(db.connect(settings.db_path)) as other:
-            other.execute("PRAGMA busy_timeout=0")
+        with closing(db.connect(settings.database_url)) as other:
+            other.execute("SET lock_timeout = '50ms'")
             try:
                 db.add_comment(
                     other,
@@ -1439,8 +1436,7 @@ def test_approval_holds_write_lock_during_validation(client, settings, monkeypat
                     author_name="Carol",
                     body="Concurrent blocker",
                 )
-            except sqlite3.OperationalError as error:
-                assert "locked" in str(error)
+            except psycopg.errors.LockNotAvailable:
                 attempted.append("locked")
             else:
                 attempted.append("committed")
@@ -1465,7 +1461,7 @@ def test_request_changes_rechecks_own_thread_before_insert(client, settings, mon
     original = db.add_verdict
 
     def interleave(conn, **kwargs):
-        with closing(db.connect(settings.db_path)) as other:
+        with closing(db.connect(settings.database_url)) as other:
             db.resolve_thread(other, "prorate", cid)
         return original(conn, **kwargs)
 
@@ -1508,7 +1504,7 @@ def test_blocking_toggle_checks_version_inside_write_transaction(client, setting
     original = db.set_blocking
 
     def interleave(conn, *args, **kwargs):
-        with closing(db.connect(settings.db_path)) as other:
+        with closing(db.connect(settings.database_url)) as other:
             db.push_report(
                 other,
                 project="billing-service",
@@ -1563,7 +1559,7 @@ def moderation(shared_client, shared_settings, as_user):
         "carol": as_user("carol@example.com", name="Carol Creator"),
         "dave": as_user("dave@example.com", name="Dave Other"),
     }
-    conn = db.connect(shared_settings.db_path)
+    conn = db.connect(shared_settings.database_url)
     db.push_report(
         conn,
         project="p",
@@ -1592,12 +1588,12 @@ def moderation(shared_client, shared_settings, as_user):
 def _moderation_state(shared_settings, cid):
     from verifair import db
 
-    conn = db.connect(shared_settings.db_path)
+    conn = db.connect(shared_settings.database_url)
     row = conn.execute(
-        "SELECT resolved_at IS NOT NULL, resolved_by, blocking FROM comments WHERE id=?", (cid,)
+        "SELECT resolved_at IS NOT NULL, resolved_by, blocking FROM comments WHERE id=%s", (cid,)
     ).fetchone()
     conn.close()
-    return tuple(row)
+    return tuple(row.values())
 
 
 @pytest.mark.parametrize(
@@ -1702,7 +1698,7 @@ def test_resolved_summary_names_who_resolved(shared_client, shared_settings, mod
     from verifair import db
 
     people, human, agent = moderation
-    conn = db.connect(shared_settings.db_path)
+    conn = db.connect(shared_settings.database_url)
     token, _ = db.create_token(conn, owner_id="owner@example.com", label="agent")
     conn.close()
     shared_client.post(f"/r/r/comments/{human}/resolve", headers=people["carol"])
@@ -1739,7 +1735,7 @@ def test_thread_markup_for_allowed_users_matches_local_mode(shared_settings, mod
     from verifair import db, web
 
     _, human, agent = moderation
-    conn = db.connect(shared_settings.db_path)
+    conn = db.connect(shared_settings.database_url)
     report = db.get_report(conn, "r")
     template = web.templates.get_template("_thread.html")
 
@@ -1791,7 +1787,7 @@ def test_reopen_asks_first_only_when_the_user_cannot_resolve_it_again(
             button = reopen(who, cid)
             assert (confirm in button) is not ok and other not in button, (who, cid)
 
-    conn = db.connect(shared_settings.db_path)
+    conn = db.connect(shared_settings.database_url)
     report = db.get_report(conn, "r")
     template = web.templates.get_template("_thread.html")
 
@@ -1815,7 +1811,7 @@ def test_shared_mode_reply_reopens_only_when_the_replier_may_moderate(
     from verifair import db
 
     people, human, agent = moderation
-    conn = db.connect(shared_settings.db_path)
+    conn = db.connect(shared_settings.database_url)
     token, _ = db.create_token(conn, owner_id="owner@example.com", label="agent")
     conn.close()
     owners_agent = {"Authorization": f"Bearer {token}"}
@@ -1938,7 +1934,7 @@ def test_sidebar_collapses_after_eight_projects(client):
 
 def test_sidebar_links_encode_odd_names(client):
     name = "a b&c#?%"
-    conn = db.connect(client.app.state.settings.db_path)
+    conn = db.connect(client.app.state.settings.database_url)
     db.push_report(conn, project=name, title="T", risk="low", body="## A\nx", id="x y")
     conn.close()
     home = client.get("/").text
@@ -1956,16 +1952,18 @@ def test_name_form_error_takes_its_own_line():
 
 
 def test_page_query_count_does_not_grow_with_reports(client, settings, monkeypatch):
+    import psycopg
+
     connect = db.connect
+    execute = psycopg.Cursor.execute
     statements = []
 
-    def traced(path):
-        conn = connect(path)
-        conn.set_trace_callback(statements.append)
-        return conn
+    def traced(cursor, query, *args, **kwargs):
+        statements.append(query)
+        return execute(cursor, query, *args, **kwargs)
 
     def seed(start, stop):
-        conn = connect(settings.db_path)
+        conn = connect(settings.database_url)
         for n in range(start, stop):
             id = f"r{n}"
             db.push_report(
@@ -1998,7 +1996,7 @@ def test_page_query_count_does_not_grow_with_reports(client, settings, monkeypat
         return result
 
     client.cookies.set("vf_id", "review00")
-    monkeypatch.setattr(db, "connect", traced)
+    monkeypatch.setattr(psycopg.Cursor, "execute", traced)
     seed(0, 3)
     few = counts()
     seed(3, 30)
@@ -2105,3 +2103,49 @@ def test_on_this_page_numbers_sit_in_their_own_column(client):
     push(client)
     rail = client.get("/r/prorate").text.split('id="vf_sidebar"')[1]
     assert '<a href="#intent"><span class="toc-n">1</span>Intent</a>' in rail
+
+
+@pytest.mark.parametrize(
+    ("path", "data"),
+    [
+        ("/r/prorate/comments", {"version": 1, "section": "Intent", "body": "Why\x00"}),
+        ("/r/prorate/comments", {"version": 1, "section": "Intent\x00", "body": "Why?"}),
+        (
+            "/r/prorate/comments",
+            {"version": 1, "section": "Intent", "body": "Why?", "quote": "Full\x00"},
+        ),
+        (
+            "/r/prorate/comments",
+            {"version": 1, "section": "Intent", "body": "Why?", "prefix": "\x00"},
+        ),
+        (
+            "/r/prorate/comments",
+            {"version": 1, "section": "Intent", "body": "Why?", "suffix": "\x00"},
+        ),
+        ("/r/prorate/comments/1/reply", {"version": 1, "body": "\x00"}),
+        ("/r/prorate/verdict", {"version": 1, "verdict": "request_changes", "summary": "\x00"}),
+        ("/me", {"name": "Al\x00ice"}),
+    ],
+)
+def test_web_form_with_a_nul_character_is_422(client, path, data):
+    push(client)
+    sign(client)
+    _open_thread(client)
+    r = client.post(path, data=data, follow_redirects=False)
+    assert r.status_code == 422
+    assert len(api_threads(client)) == 1 and api_threads(client)[0]["replies"] == []
+    assert api_report(client)["verdicts"] == []
+
+
+def test_nul_character_in_a_web_path_is_404(client):
+    push(client)
+    for path in ("/r/pro%00rate", "/r/pro%00rate/v/1", "/p/billing%00"):
+        assert client.get(path).status_code == 404, path
+
+
+def test_name_cookie_with_a_nul_character_asks_for_a_name(client):
+    push(client)
+    client.cookies.set("vf_name", "Al%00ice")
+    r = client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Hi"})
+    assert r.status_code == 200 and 'action="/me"' in r.text
+    assert api_threads(client) == []

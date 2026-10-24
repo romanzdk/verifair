@@ -1,5 +1,4 @@
 import asyncio
-import sqlite3
 import threading
 import time
 from contextlib import closing
@@ -11,7 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from verifair import db
-from verifair.app import create_app
 
 H = {"Authorization": "Bearer t"}
 SAMPLE = "## Intent\nFull new price.\n\n## Edge cases\nFirst day."
@@ -33,17 +31,11 @@ def test_requires_token(client):
     assert bad.status_code == 401
 
 
-def test_missing_shared_token_never_authenticates(settings):
-    from dataclasses import replace
-
-    from fastapi.testclient import TestClient
-
-    from verifair.app import create_app
-
+def test_missing_shared_token_never_authenticates(settings, make_app):
     shared = replace(
         settings, api_token=None, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss"
     )
-    client = TestClient(create_app(shared))
+    client = TestClient(make_app(shared))
     for headers, detail in [
         ({"Authorization": "Bearer None"}, SHARED_TOKEN),
         ({"Authorization": "Bearer "}, "invalid token"),
@@ -199,8 +191,8 @@ def test_reply_older_than_root_does_not_break_listing(client, settings):
     push(client)
     root = _comment(client).json()["id"]
     reply = _comment(client, parent_id=root).json()["id"]
-    conn = connect(settings.db_path)
-    conn.execute("UPDATE comments SET created_at='2000-01-01T00:00:00+00:00' WHERE id=?", (reply,))
+    conn = connect(settings.database_url)
+    conn.execute("UPDATE comments SET created_at='2000-01-01T00:00:00+00:00' WHERE id=%s", (reply,))
     conn.close()
     r = client.get("/api/reports/prorate/comments", headers=H)
     assert r.status_code == 200
@@ -293,22 +285,13 @@ def test_unknown_parent_and_comment_404(client):
     assert client.post("/api/reports/prorate/comments/99/resolve", headers=H).status_code == 404
 
 
-def test_push_and_comment_notify_when_slack_configured(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-
+def test_push_and_comment_notify_when_slack_configured(settings, make_app, monkeypatch):
     from verifair import notify
-    from verifair.app import create_app
-    from verifair.config import Settings
 
     sent = []
     monkeypatch.setattr(notify, "send", lambda settings, text: sent.append(text))
-    settings = Settings(
-        api_token="t",
-        db_path=str(tmp_path / "n.db"),
-        base_url="http://localhost:8000",
-        slack_webhook_url="https://hooks.example/x",
-    )
-    client = TestClient(create_app(settings))
+    settings = replace(settings, slack_webhook_url="https://hooks.example/x")
+    client = TestClient(make_app(settings))
     push(client)
     assert len(sent) == 1
     assert sent[0].startswith("Draft report v1 in billing-service")
@@ -362,15 +345,9 @@ def test_blank_title_says_must_not_be_blank(client):
 
 
 @pytest.fixture
-def strict_client(settings):
-    from dataclasses import replace
-
-    from fastapi.testclient import TestClient
-
-    from verifair.app import create_app
-
+def strict_client(settings, make_app):
     required = ("Verification", "Rollback", "Security impact")
-    return TestClient(create_app(replace(settings, required_sections=required)))
+    return TestClient(make_app(replace(settings, required_sections=required)))
 
 
 def test_push_missing_required_sections_422(strict_client):
@@ -406,14 +383,8 @@ def test_required_headings_inside_markdown_fences_do_not_count(strict_client, fe
 
 
 @pytest.mark.parametrize("required", ["Intro", "Report"])
-def test_synthetic_ui_sections_do_not_satisfy_required_headings(settings, required):
-    from dataclasses import replace
-
-    from fastapi.testclient import TestClient
-
-    from verifair.app import create_app
-
-    client = TestClient(create_app(replace(settings, required_sections=(required,))))
+def test_synthetic_ui_sections_do_not_satisfy_required_headings(settings, make_app, required):
+    client = TestClient(make_app(replace(settings, required_sections=(required,))))
     body = "preamble\n\n## Other\ntext" if required == "Intro" else "just text"
     response = push(client, body=body)
     assert response.status_code == 422
@@ -429,7 +400,7 @@ def test_existing_replies_inherit_live_root_type(client, settings, initial):
     root = _comment(client, blocking=initial).json()
     reply = _comment(client, parent_id=root["id"]).json()
     nested = _comment(client, parent_id=reply["id"]).json()
-    with closing(db.connect(settings.db_path)) as conn:
+    with closing(db.connect(settings.database_url)) as conn:
         db.set_blocking(conn, "prorate", root["id"], not initial)
     [thread] = client.get("/api/reports/prorate/comments", headers=H).json()["threads"]
     assert thread["blocking"] is not initial
@@ -517,8 +488,8 @@ def test_signed_report_shows_signer_and_status(client, settings):
     from verifair import db
 
     push(client)
-    conn = db.connect(settings.db_path)
-    db.sign_version(conn, report_id="prorate", version=1, signer_id="u1", signer_name="Alice")
+    with closing(db.connect(settings.database_url)) as conn:
+        db.sign_version(conn, report_id="prorate", version=1, signer_id="u1", signer_name="Alice")
     g = client.get("/api/reports/prorate", headers=H).json()
     assert (g["status"], g["signed_by"]) == ("awaiting_review", "Alice")
     assert g["signed_at"]
@@ -573,7 +544,7 @@ def _wait(client, query="", **kw):
 def _later(settings, delay, action):
     def run():
         time.sleep(delay)
-        conn = db.connect(settings.db_path)
+        conn = db.connect(settings.database_url)
         try:
             action(conn)
         finally:
@@ -719,7 +690,7 @@ def test_wait_requires_token(client):
 @pytest.mark.parametrize("kind", ["verdict", "comment"])
 def test_wait_ignores_events_on_old_versions(client, settings, kind):
     push(client)
-    conn = db.connect(settings.db_path)
+    conn = db.connect(settings.database_url)
     try:
         (_verdict if kind == "verdict" else _root_comment)(conn)
     finally:
@@ -791,24 +762,6 @@ def test_wait_since_compares_instants_and_excludes_equal_timestamp(client):
     assert response.json()["event"] == "timeout"
 
 
-def test_wait_closes_every_poll_connection(client, monkeypatch):
-    push(client)
-    connections = []
-    original_connect = db.connect
-
-    def track_connect(path):
-        conn = original_connect(path)
-        connections.append(conn)
-        return conn
-
-    monkeypatch.setattr(db, "connect", track_connect)
-    assert _wait(client, "timeout=0.1").json()["event"] == "timeout"
-    assert len(connections) >= 2
-    for conn in connections:
-        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
-            conn.execute("SELECT 1")
-
-
 def test_wait_without_since_detects_new_rows_in_the_same_second(client, settings, monkeypatch):
     monkeypatch.setattr(db, "_now", lambda: "2000-01-01T00:00:00+00:00")
     push(client)
@@ -820,15 +773,15 @@ def test_wait_without_since_detects_new_rows_in_the_same_second(client, settings
     assert response.json()["next_since"] == "2000-01-01T00:00:00+00:00"
 
 
-def test_local_mode_refuses_an_empty_shared_token(settings):
-    client = TestClient(create_app(replace(settings, api_token="")))
+def test_local_mode_refuses_an_empty_shared_token(settings, make_app):
+    client = TestClient(make_app(replace(settings, api_token="")))
     for headers in [{"Authorization": "Bearer "}, {"Authorization": "Bearer"}, {}]:
         r = client.get("/api/reports/x", headers=headers)
         assert (r.status_code, r.json()) == (401, {"detail": "invalid token"}), headers
 
 
 def _agent(settings, id, role="member"):
-    with closing(db.connect(settings.db_path)) as conn:
+    with closing(db.connect(settings.database_url)) as conn:
         if db.get_user(conn, id) is None:
             db.add_user(conn, id=id, name=id.partition("@")[0], role=role)
         token, _ = db.create_token(conn, owner_id=id, label="agent")
@@ -850,8 +803,8 @@ def admin(shared_client, shared_settings):
     return _agent(shared_settings, "admin@example.com")
 
 
-def test_shared_mode_refuses_the_shared_token_and_accepts_member_tokens(shared_settings):
-    client = TestClient(create_app(replace(shared_settings, api_token="t")))
+def test_shared_mode_refuses_the_shared_token_and_accepts_member_tokens(shared_settings, make_app):
+    client = TestClient(make_app(replace(shared_settings, api_token="t")))
     alice = _agent(shared_settings, "alice@example.com")
     for auth in (H, {"Authorization": "Bearer change-me"}):
         r = push(client, auth=auth)
@@ -875,7 +828,7 @@ def test_revoked_or_deactivated_tokens_are_refused_on_the_next_call(
 ):
     assert push(shared_client, auth=alice).status_code == 201
     assert shared_client.get("/api/reports/prorate", headers=bob).status_code == 200
-    with closing(db.connect(shared_settings.db_path)) as conn:
+    with closing(db.connect(shared_settings.database_url)) as conn:
         [token] = db.list_tokens(conn, "alice@example.com")
         db.revoke_token(conn, token["id"])
         db.update_user(conn, "bob@example.com", active=False)
@@ -904,7 +857,7 @@ def test_push_to_another_members_report_is_refused_even_for_admins(
     shared_client, shared_settings, alice, bob, admin
 ):
     assert push(shared_client, auth=alice).status_code == 201
-    with closing(db.connect(shared_settings.db_path)) as conn:
+    with closing(db.connect(shared_settings.database_url)) as conn:
         db.push_report(conn, project="billing-service", title="Legacy", risk="low", body=SAMPLE)
     for auth, id, detail in [
         (bob, "prorate", NOT_OWNER),
@@ -926,7 +879,7 @@ def test_push_to_another_members_report_is_refused_even_for_admins(
 
 
 def test_shared_mode_reviewers_must_be_active_members(shared_client, shared_settings, alice, bob):
-    with closing(db.connect(shared_settings.db_path)) as conn:
+    with closing(db.connect(shared_settings.database_url)) as conn:
         db.add_user(conn, id="gone@example.com", name="gone", role="member")
         db.update_user(conn, "gone@example.com", active=False)
     for reviewers, bad in [
@@ -970,7 +923,7 @@ def test_agents_resolve_only_agent_threads_on_their_owners_reports(
     push(shared_client, auth=alice)
     url = "/api/reports/prorate/comments"
     agent_thread = shared_client.post(url, json={"body": "Note"}, headers=alice).json()["id"]
-    with closing(db.connect(shared_settings.db_path)) as conn:
+    with closing(db.connect(shared_settings.database_url)) as conn:
         human_thread, owners_thread = (
             db.add_comment(
                 conn, report_id="prorate", version=1, author_id=who, author_name=who, body="Why?"
@@ -996,7 +949,7 @@ def test_agents_resolve_only_agent_threads_on_their_owners_reports(
         url, json={"body": "Done", "parent_id": agent_thread}, headers=alice
     ).json()["id"]
     assert resolve(reply, alice).json() == {"resolved": True}
-    with closing(db.connect(shared_settings.db_path)) as conn:
+    with closing(db.connect(shared_settings.database_url)) as conn:
         rows = {c["id"]: c for c in db.list_comments(conn, "prorate")}
     assert rows[agent_thread]["resolved_by"] == "agent"
     assert rows[human_thread]["resolved_at"] is rows[owners_thread]["resolved_at"] is None
@@ -1005,7 +958,7 @@ def test_agents_resolve_only_agent_threads_on_their_owners_reports(
 def test_agents_cannot_comment_on_or_resolve_threads_of_unowned_reports(
     shared_client, shared_settings, alice
 ):
-    with closing(db.connect(shared_settings.db_path)) as conn:
+    with closing(db.connect(shared_settings.database_url)) as conn:
         db.push_report(conn, project="p", title="Legacy", risk="low", body=SAMPLE)
         cid = db.add_comment(
             conn, report_id="legacy", version=1, author_id="agent", author_name="a", body="x"
@@ -1060,7 +1013,7 @@ def test_reply_response_shows_the_thread_state_after_the_reply(
     push(shared_client, auth=alice)
     url = "/api/reports/prorate/comments"
     agent_thread = shared_client.post(url, json={"body": "Note"}, headers=alice).json()["id"]
-    with closing(db.connect(shared_settings.db_path)) as conn:
+    with closing(db.connect(shared_settings.database_url)) as conn:
         human_thread = db.add_comment(
             conn,
             report_id="prorate",
@@ -1090,7 +1043,7 @@ def test_shared_mode_token_refusals_are_logged_with_a_reason(
 ):
     caplog.set_level("INFO", logger="verifair")
     good = alice["Authorization"].removeprefix("Bearer ")
-    with closing(db.connect(shared_settings.db_path)) as conn:
+    with closing(db.connect(shared_settings.database_url)) as conn:
         revoked, row = db.create_token(conn, owner_id="alice@example.com", label="old")
         db.revoke_token(conn, row["id"])
         conn.execute("UPDATE users SET active=0 WHERE id='bob@example.com'")
@@ -1144,7 +1097,7 @@ def test_shared_mode_wait_logs_why_the_token_stopped_working(
 def test_shared_mode_token_refusal_logs_escape_control_characters(
     shared_client, shared_settings, alice, caplog
 ):
-    with closing(db.connect(shared_settings.db_path)) as conn:
+    with closing(db.connect(shared_settings.database_url)) as conn:
         db.push_report(
             conn,
             project="p",
@@ -1168,3 +1121,35 @@ def test_shared_mode_token_refusal_logs_escape_control_characters(
     assert "api token refused reason=missing path='/api/reports/\\x1b[2K'" in caplog.text
     assert "api token refused reason=revoked path='/api/reports/\\x1b[2K/wait'" in caplog.text
     assert "\x1b" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"title": "a\x00b"},
+        {"body": "## Intent\n\x00"},
+        {"author": "bot\x00"},
+        {"agent": "\x00"},
+        {"model": "m\x00"},
+        {"author_id": "a\x00@example.com"},
+        {"reviewers": ["r\x00@example.com"]},
+        {"links": [{"label": "MR\x00", "url": "https://mr/1"}]},
+        {"ticket_url": "https://t/\x00"},
+    ],
+)
+def test_push_with_a_nul_character_is_422(client, overrides):
+    assert push(client, **overrides).status_code == 422
+
+
+@pytest.mark.parametrize("field", ["body", "author", "section", "quote", "prefix", "suffix"])
+def test_comment_with_a_nul_character_is_422(client, field):
+    push(client)
+    payload = {"body": "Why?", "section": "Intent", "quote": "Full new price."}
+    r = _comment(client, **(payload | {field: payload.get(field, "x") + "\x00"}))
+    assert r.status_code == 422
+
+
+def test_nul_character_in_a_report_id_is_404(client):
+    push(client)
+    for path in ("/api/reports/pro%00rate", "/api/reports/pro%00rate/comments"):
+        assert client.get(path, headers=H).status_code == 404, path

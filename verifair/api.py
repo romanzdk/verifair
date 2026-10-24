@@ -2,8 +2,6 @@ import asyncio
 import json
 import logging
 import secrets
-import sqlite3
-from contextlib import closing
 from datetime import UTC, datetime
 from itertools import islice
 from time import monotonic
@@ -12,7 +10,15 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from psycopg_pool import ConnectionPool
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 from starlette.concurrency import run_in_threadpool
 
 from verifair import db, notify
@@ -51,7 +57,7 @@ def require_token(request: Request) -> None:
             _refuse_token("malformed", path)
         if not token.lstrip().startswith("vf_"):
             _refuse_token("shared-token", path, SHARED_TOKEN)
-        with closing(db.connect(settings.db_path)) as conn:
+        with request.app.state.pool.connection() as conn:
             owner, reason = db.authenticate_token(conn, token, touch=True)
         if owner is None:
             _refuse_token(reason, path)
@@ -64,7 +70,7 @@ def require_token(request: Request) -> None:
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
-Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
+Conn = Annotated[db.Connection, Depends(get_conn)]
 
 
 def _http_url(url: str) -> str:
@@ -98,14 +104,24 @@ Context = Annotated[str, Field(max_length=64)]
 SLUG = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
 
 
-class Link(BaseModel):
+class Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("*")
+    @classmethod
+    def _no_nul(cls, value):
+        for text in value if isinstance(value, list) else [value]:
+            if isinstance(text, str):
+                db.no_nul(text)
+        return value
+
+
+class Link(Input):
     label: str
     url: HttpUrl
 
 
-class ReportIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class ReportIn(Input):
     project: str = Field(pattern=SLUG)
     title: Annotated[
         str, StringConstraints(strip_whitespace=True, max_length=200), AfterValidator(_not_blank)
@@ -124,8 +140,7 @@ class ReportIn(BaseModel):
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{7,40}$")
 
 
-class CommentIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class CommentIn(Input):
     body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20000)]
     author: Author = "agent"
     parent_id: int | None = None
@@ -136,14 +151,14 @@ class CommentIn(BaseModel):
     blocking: bool = True
 
 
-def _require_report(conn: sqlite3.Connection, id: str) -> sqlite3.Row:
+def _require_report(conn: db.Connection, id: str) -> db.Row:
     report = db.get_report(conn, id)
     if report is None:
         raise HTTPException(404, "report not found")
     return report
 
 
-def _require_owner(report: sqlite3.Row, owner: sqlite3.Row | None) -> None:
+def _require_owner(report: db.Row, owner: db.Row | None) -> None:
     if owner is None:
         return
     if report["author_id"] is None:
@@ -152,11 +167,11 @@ def _require_owner(report: sqlite3.Row, owner: sqlite3.Row | None) -> None:
         raise HTTPException(403, NOT_OWNER)
 
 
-def _current_sections(conn: sqlite3.Connection, id: str) -> list[Section]:
+def _current_sections(conn: db.Connection, id: str) -> list[Section]:
     return split_sections(db.get_version(conn, id, db.latest_version(conn, id))["body"])
 
 
-def _comment_json(row: sqlite3.Row, root: sqlite3.Row | None = None) -> dict:
+def _comment_json(row: db.Row, root: db.Row | None = None) -> dict:
     root = row if root is None else root
     return {
         "id": row["id"],
@@ -177,7 +192,7 @@ def _comment_json(row: sqlite3.Row, root: sqlite3.Row | None = None) -> dict:
     }
 
 
-def _verdict_json(row: sqlite3.Row, current: int) -> dict:
+def _verdict_json(row: db.Row, current: int) -> dict:
     return {
         "reviewer": row["reviewer_name"],
         "reviewer_id": row["reviewer_id"],
@@ -281,7 +296,7 @@ def get_report(id: str, conn: Conn):
 
 
 def _poll_wait(
-    path: str,
+    pool: ConnectionPool,
     url_path: str,
     id: str,
     kind: str,
@@ -289,39 +304,43 @@ def _poll_wait(
     after: dict[str, int] | None,
     token: str | None,
 ) -> tuple[dict | None, dict[str, int]]:
-    with closing(db.connect(path)) as conn:
-        conn.execute("BEGIN")
+    with pool.connection() as conn:
         if token is not None and (reason := db.authenticate_token(conn, token)[1]):
             _refuse_token(reason, url_path)
-        _require_report(conn, id)
-        current = db.latest_version(conn, id)
-        rows = {}
-        if kind in ("any", "verdict"):
-            rows["verdict"] = db.list_verdicts(conn, id)
-        if kind in ("any", "comment"):
-            rows["comment"] = db.list_comments(conn, id)
-        if since is None and after is None:
-            return None, {
-                event: max((r["id"] for r in items), default=0) for event, items in rows.items()
-            }
-        events = []
-        for event, items in rows.items():
-            for row in items:
-                if row["version"] != current or (
-                    event == "comment" and row["parent_id"] is not None
-                ):
-                    continue
-                created = datetime.fromisoformat(row["created_at"])
-                if since is not None:
-                    if created <= since:
+        with conn.transaction():
+            # one snapshot for the version and the event lists of this tick
+            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            _require_report(conn, id)
+            current = db.latest_version(conn, id)
+            rows = {}
+            if kind in ("any", "verdict"):
+                rows["verdict"] = db.list_verdicts(conn, id)
+            if kind in ("any", "comment"):
+                rows["comment"] = db.list_comments(conn, id)
+            if since is None and after is None:
+                return None, {
+                    event: max((r["id"] for r in items), default=0) for event, items in rows.items()
+                }
+            events = []
+            for event, items in rows.items():
+                for row in items:
+                    if row["version"] != current or (
+                        event == "comment" and row["parent_id"] is not None
+                    ):
                         continue
-                elif row["id"] <= after[event]:
-                    continue
-                value = _verdict_json(row, current) if event == "verdict" else _comment_json(row)
-                events.append(
-                    (created, {"event": event, event: value, "next_since": row["created_at"]})
-                )
-        return min(events, key=lambda e: e[0])[1] if events else None, after or {}
+                    created = datetime.fromisoformat(row["created_at"])
+                    if since is not None:
+                        if created <= since:
+                            continue
+                    elif row["id"] <= after[event]:
+                        continue
+                    value = (
+                        _verdict_json(row, current) if event == "verdict" else _comment_json(row)
+                    )
+                    events.append(
+                        (created, {"event": event, event: value, "next_since": row["created_at"]})
+                    )
+            return min(events, key=lambda e: e[0])[1] if events else None, after or {}
 
 
 @router.get("/reports/{id}/wait")
@@ -340,7 +359,7 @@ async def wait_for_event(
     while True:
         event, after = await run_in_threadpool(
             _poll_wait,
-            request.app.state.settings.db_path,
+            request.app.state.pool,
             request.url.path,
             id,
             kind,

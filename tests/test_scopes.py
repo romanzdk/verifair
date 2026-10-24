@@ -5,7 +5,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from verifair import db
-from verifair.app import create_app
 
 TOKEN = {"Authorization": "Bearer t"}
 AGENTS = {}
@@ -14,10 +13,10 @@ BOB = {"X-Forwarded-Email": "bob@example.com"}
 
 
 @pytest.fixture
-def team(settings, monkeypatch):
+def team(settings, make_app, monkeypatch):
     shared = replace(settings, identity_header="X-Forwarded-Email", bootstrap_admin_id="boss")
-    app = create_app(shared)
-    conn = db.connect(shared.db_path)
+    app = make_app(shared)
+    conn = db.connect(shared.database_url)
     for id in ("alice@example.com", "bob@example.com", "carol@example.com"):
         db.add_user(conn, id=id, name=id.partition("@")[0], role="member")
         token, _ = db.create_token(conn, owner_id=id, label="agent")
@@ -189,7 +188,7 @@ def test_no_matches_is_a_useful_empty_state_and_not_a_missing_project(team):
 
 def test_identity_is_stable_across_browsers_and_not_matched_by_display_name(team):
     seed(team)
-    conn = db.connect(team.app.state.settings.db_path)
+    conn = db.connect(team.app.state.settings.database_url)
     db.push_report(
         conn,
         id="same-name",
@@ -235,7 +234,7 @@ def test_browser_signing_claims_unowned_changes_and_identity_is_available_to_cop
 
 
 def test_local_my_changes_matches_the_legacy_author(client):
-    conn = db.connect(client.app.state.settings.db_path)
+    conn = db.connect(client.app.state.settings.database_url)
     db.push_report(conn, project="p", title="Legacy", risk="low", body="a", author="alice000")
     db.push_report(conn, project="p", title="Owned", risk="low", body="b", author_id="alice000")
     db.push_report(conn, project="p", title="Other", risk="low", body="c", author="bob00000")
@@ -246,24 +245,8 @@ def test_local_my_changes_matches_the_legacy_author(client):
     assert 'href="/r/other"' not in mine
 
 
-def test_schema_upgrade_recovers_owner_from_latest_signature_only(settings):
-    conn = db.connect(settings.db_path)
-    db.init_schema(conn)
-    db.push_report(conn, project="p", title="Signed", risk="low", body="v1")
-    db.sign_version(conn, report_id="signed", version=1, signer_id="alice000", signer_name="Alice")
-    db.push_report(conn, project="p", title="Signed", risk="low", body="v2", id="signed")
-    db.sign_version(conn, report_id="signed", version=2, signer_id="bob00000", signer_name="Bob")
-    db.push_report(conn, project="p", title="Draft", risk="low", body="v1", author="Alice")
-    conn.execute("UPDATE reports SET author_id=NULL")
-    db.init_schema(conn)
-    db.init_schema(conn)
-    assert db.get_report(conn, "signed")["author_id"] == "bob00000"
-    assert db.get_report(conn, "draft")["author_id"] is None
-    conn.close()
-
-
 def test_shared_my_changes_ignores_a_legacy_author_equal_to_the_user(team):
-    conn = db.connect(team.app.state.settings.db_path)
+    conn = db.connect(team.app.state.settings.database_url)
     db.push_report(
         conn,
         id="legacy",
@@ -331,10 +314,10 @@ def test_inbox_orders_high_risk_then_oldest(team):
             publish(team, id, by=bob, risk=risk, reviewers=["alice@example.com"]).status_code == 201
         )
         assert team.post(f"/r/{id}/sign", headers=BOB, data={"version": 1}).status_code == 200
-    conn = db.connect(team.app.state.settings.db_path)
+    conn = db.connect(team.app.state.settings.database_url)
     with conn:
         for id, (_, at) in signed.items():
-            conn.execute("UPDATE signatures SET created_at=? WHERE report_id=?", (at, id))
+            conn.execute("UPDATE signatures SET created_at=%s WHERE report_id=%s", (at, id))
     conn.close()
     review = inbox(team, ALICE)["Needs your review"]
     order = [review.index(f'href="/r/{id}"') for id in ("high-new", "low-old", "low-new")]

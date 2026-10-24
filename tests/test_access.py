@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from psycopg.pq import TransactionStatus
 
 from verifair import db, web
 
@@ -24,7 +25,7 @@ ALREADY_CREATED = (
 
 @pytest.fixture
 def conn(shared_client, shared_settings):
-    with closing(db.connect(shared_settings.db_path)) as conn:
+    with closing(db.connect(shared_settings.database_url)) as conn:
         yield conn
 
 
@@ -273,7 +274,7 @@ def test_local_mode_access_is_a_note_and_posts_are_404(client):
 def test_settings_links_by_role_and_mode(shared_client, as_user, conn, client):
     db.push_report(conn, project="p", title="T", risk="low", body="## A\nx", id="r")
     bob = as_user("bob@example.com")
-    local_db = db.connect(str(client.app.state.settings.db_path))
+    local_db = db.connect(client.app.state.settings.database_url)
     db.push_report(local_db, project="p", title="T", risk="low", body="## A\nx", id="r")
     local_db.close()
     for path in ("/", "/p/p", "/r/r"):
@@ -326,14 +327,10 @@ def test_member_deactivated_mid_request_gets_the_denied_page(
     assert db.list_tokens(conn) == []
 
 
-def test_browser_check_refusals_on_access_keep_the_security_headers(
-    shared_client, shared_settings, conn
-):
+def test_browser_check_refusals_on_access_keep_the_security_headers(shared_client, conn):
     from fastapi.testclient import TestClient
 
-    from verifair.app import create_app
-
-    bare = TestClient(create_app(shared_settings), headers=ADMIN)
+    bare = TestClient(shared_client.app, headers=ADMIN)
     for r in [
         shared_client.post(
             "/access/tokens", data={"label": "x"}, headers=ADMIN | {"Sec-Fetch-Site": "cross-site"}
@@ -620,7 +617,8 @@ def test_api_use_stamps_last_used_outside_the_wait_transaction(shared_client, co
     authenticate = db.authenticate_token
 
     def spy(conn, token, **kwargs):
-        calls.append((kwargs.get("touch", False), conn.in_transaction))
+        in_transaction = conn.info.transaction_status != TransactionStatus.IDLE
+        calls.append((kwargs.get("touch", False), in_transaction))
         return authenticate(conn, token, **kwargs)
 
     monkeypatch.setattr(db, "authenticate_token", spy)
@@ -628,8 +626,7 @@ def test_api_use_stamps_last_used_outside_the_wait_transaction(shared_client, co
         "/api/reports/r/wait?timeout=0.1", headers={"Authorization": f"Bearer {token}"}
     )
     assert r.status_code == 200
-    assert (True, False) in calls and (False, True) in calls
-    assert all(not in_transaction for touch, in_transaction in calls if touch)
+    assert set(calls) == {(True, False), (False, False)}
     page = shared_client.get("/access/tokens", headers=bob).text
     rows = {
         t: page.split(f"<code>{t}</code>")[1].split("</tr>")[0] for t in (used["id"], unused["id"])
@@ -642,3 +639,23 @@ def test_api_use_stamps_last_used_outside_the_wait_transaction(shared_client, co
         r'<td data-label="Created"><time datetime="[^"]+" title="[^"]+">just now</time>',
         rows[unused["id"]],
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "data"),
+    [
+        ("/access/users", {"id": "bob@example.com", "name": "B\x00b"}),
+        ("/access/users", {"id": "b\x00b@example.com", "name": "Bob"}),
+        ("/access/tokens", {"label": "lap\x00top"}),
+        ("/access/tokens", {"label": "laptop", "nonce": "n\x00"}),
+    ],
+)
+def test_access_form_with_a_nul_character_is_422(shared_client, conn, path, data):
+    assert shared_client.post(path, data=data, headers=ADMIN).status_code == 422
+    assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
+    assert db.list_tokens(conn) == []
+
+
+def test_nul_character_in_an_access_path_is_404(shared_client):
+    for path in ("/access/users/admin%00@example.com", "/access/tokens/x%00/revoke"):
+        assert shared_client.post(path, headers=ADMIN).status_code == 404, path

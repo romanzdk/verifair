@@ -8,7 +8,12 @@ REPORT = {"id": "prorate", "project": "billing-service", "title": "Prorate", "ri
 
 
 def make_settings(url):
-    return Settings(api_token="t", db_path=":memory:", base_url="http://x", slack_webhook_url=url)
+    return Settings(
+        api_token="t",
+        database_url="postgresql://unused",
+        base_url="http://x",
+        slack_webhook_url=url,
+    )
 
 
 def test_report_pushed_text():

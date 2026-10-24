@@ -3,7 +3,6 @@ import json
 import logging
 import re
 import secrets
-import sqlite3
 import zlib
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -16,6 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Re
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
+from pydantic import AfterValidator
 
 from verifair import db, notify, rules
 from verifair.deps import get_conn
@@ -89,7 +89,7 @@ templates.env.globals |= {
     "icon": icon,
 }
 
-Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
+Conn = Annotated[db.Connection, Depends(get_conn)]
 YEAR = 365 * 24 * 3600
 USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
 PLAIN_ID = re.compile(r"[^/\\\x00-\x1f\x7f\s]+")
@@ -103,8 +103,9 @@ BLOCKED = (
     "Resolve the open blocking threads first. Ask the person who started each one, the report"
     " owner for agent threads, or an admin to resolve it or mark it non-blocking."
 )
-Body = Annotated[str, Form(max_length=20000)]
-Anchor = Annotated[str, Form(max_length=2000)]
+NoNul = AfterValidator(db.no_nul)
+Body = Annotated[str, Form(max_length=20000), NoNul]
+Anchor = Annotated[str, Form(max_length=2000), NoNul]
 LAST_ADMIN = "There must be at least one active admin."
 MEMBER_EXISTS = "That member already exists."
 MEMBER_INPUT = "Enter an id (1–200 characters) and a name (1–60 characters)."
@@ -140,8 +141,8 @@ def current_user(request: Request) -> tuple[str, str | None]:
     if not user_id or user_id == "agent" or not USER_ID.fullmatch(user_id):
         # FastAPI drops cookies set on an injected Response when the route returns its own
         user_id = request.state.new_vf_id = secrets.token_urlsafe(8)
-    name = request.cookies.get("vf_name")
-    return user_id, unquote(name) if name else None
+    name = unquote(request.cookies.get("vf_name", ""))
+    return user_id, name if name and "\x00" not in name else None
 
 
 User = Annotated[tuple[str, str | None], Depends(current_user)]
@@ -174,7 +175,7 @@ def _in_scope(row: dict, scope: str, user_id: str, legacy: bool) -> bool:
     return True
 
 
-def _work(request: Request, conn: sqlite3.Connection, user_id: str) -> dict:
+def _work(request: Request, conn: db.Connection, user_id: str) -> dict:
     legacy = not _shared(request)
     rows = _change_rows(conn, db.list_reports(conn))
     mine = {row["report"]["id"] for row in rows if _in_scope(row, "author", user_id, legacy)}
@@ -211,9 +212,7 @@ def _nav(work: dict) -> dict:
     }
 
 
-def _shell(
-    request: Request, conn: sqlite3.Connection, user: tuple[str, str | None], work=None
-) -> dict:
+def _shell(request: Request, conn: db.Connection, user: tuple[str, str | None], work=None) -> dict:
     url = request.url.remove_query_params("name_error")
     member = request.state.member
     return _nav(work or _work(request, conn, user[0])) | {
@@ -231,7 +230,7 @@ def _shell(
 
 def _page(
     request: Request,
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     user: tuple[str, str | None],
     name: str,
     ctx: dict,
@@ -243,7 +242,7 @@ def _page(
     return _with_id_cookie(request, response)
 
 
-def _nav_oob(request: Request, conn: sqlite3.Connection, user, ctx: dict) -> str:
+def _nav_oob(request: Request, conn: db.Connection, user, ctx: dict) -> str:
     nav = _shell(request, conn, user) | {
         "nav_oob": True,
         "here": ctx["url"],
@@ -281,7 +280,7 @@ def _require_body(body: str) -> str:
     return body
 
 
-def _require_report(conn: sqlite3.Connection, id: str) -> sqlite3.Row:
+def _require_report(conn: db.Connection, id: str) -> db.Row:
     report = db.get_report(conn, id)
     if report is None:
         raise HTTPException(404, "report not found")
@@ -292,14 +291,14 @@ def _ticket_label(url: str) -> str:
     return url.rstrip("/").rsplit("/", 1)[-1]
 
 
-def _links(report: sqlite3.Row) -> list[tuple[str, str]]:
+def _links(report: db.Row) -> list[tuple[str, str]]:
     links = [(link["label"], link["url"]) for link in json.loads(report["links"])]
     if report["ticket_url"]:
         links.insert(0, (_ticket_label(report["ticket_url"]), report["ticket_url"]))
     return links
 
 
-def _sign_refusal(request: Request, report: sqlite3.Row, user_id: str) -> str | None:
+def _sign_refusal(request: Request, report: db.Row, user_id: str) -> str | None:
     owner, author = report["author_id"], report["author"]
     if not request.state.user_from_header:
         return None
@@ -311,7 +310,7 @@ def _sign_refusal(request: Request, report: sqlite3.Row, user_id: str) -> str | 
 
 
 def _can_moderate(
-    shared: bool, member: sqlite3.Row | None, user_id: str, root: sqlite3.Row, report: sqlite3.Row
+    shared: bool, member: db.Row | None, user_id: str, root: db.Row, report: db.Row
 ) -> bool:
     if shared and member is None:
         return False
@@ -325,11 +324,11 @@ def _can_moderate(
 
 
 def report_context(
-    conn: sqlite3.Connection,
-    report: sqlite3.Row,
+    conn: db.Connection,
+    report: db.Row,
     version: int,
     user_id: str,
-    member: sqlite3.Row | None,
+    member: db.Row | None,
     shared: bool,
 ) -> dict:
     id = report["id"]
@@ -438,7 +437,7 @@ def index(request: Request, conn: Conn, user: User, scope: str | None = None):
     return _page(request, conn, user, "inbox.html", ctx, work=work)
 
 
-def _change_rows(conn: sqlite3.Connection, reports: list[sqlite3.Row]) -> list[dict]:
+def _change_rows(conn: db.Connection, reports: list[db.Row]) -> list[dict]:
     ids = [report["id"] for report in reports]
     verdicts_by, requests_by = db.verdicts_by_report(conn, ids), db.requests_by_report(conn, ids)
     names = {u["id"]: u["name"] for u in db.list_users(conn)}
@@ -482,7 +481,7 @@ def _plural(n: int, word: str) -> str:
 
 def _list_page(
     request: Request,
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     user: tuple[str, str | None],
     *,
     scope: str,
@@ -614,9 +613,9 @@ def post_comment(
     version: Annotated[int, Form()],
     section: Anchor,
     body: Body,
-    quote: Annotated[str | None, Form(max_length=2000)] = None,
-    prefix: Annotated[str | None, Form(max_length=64)] = None,
-    suffix: Annotated[str | None, Form(max_length=64)] = None,
+    quote: Annotated[str | None, Form(max_length=2000), NoNul] = None,
+    prefix: Annotated[str | None, Form(max_length=64), NoNul] = None,
+    suffix: Annotated[str | None, Form(max_length=64), NoNul] = None,
     blocking: Annotated[Literal["0", "1"], Form()] = "1",
 ):
     report = _require_report(conn, id)
@@ -743,7 +742,7 @@ def post_verdict(
     background: BackgroundTasks,
     version: Annotated[int, Form()],
     verdict: Annotated[Literal["approve", "request_changes"], Form()],
-    summary: Annotated[str, Form(max_length=2000)] = "",
+    summary: Annotated[str, Form(max_length=2000), NoNul] = "",
 ):
     report = _require_report(conn, id)
     user_id, name = user
@@ -828,7 +827,9 @@ def sign(
 
 
 @router.post("/me")
-def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str, Form()] = "/"):
+def set_name(
+    request: Request, name: Annotated[str, Form(), NoNul], next: Annotated[str, Form()] = "/"
+):
     if _shared(request):
         raise HTTPException(403, "identity is set by the proxy")
     name = name.strip()
@@ -845,7 +846,7 @@ def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str
 
 def _access(
     request: Request,
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     user,
     page: Literal["tokens", "members"],
     *,
@@ -884,13 +885,13 @@ def _denied(request: Request, message: str, back: str | None = "/access/tokens",
     return templates.TemplateResponse(request, "denied.html", ctx, status_code=403)
 
 
-def access_member(request: Request) -> sqlite3.Row:
+def access_member(request: Request) -> db.Row:
     if not _shared(request):
         raise HTTPException(404, "not found")
     return request.state.member
 
 
-Member = Annotated[sqlite3.Row, Depends(access_member)]
+Member = Annotated[db.Row, Depends(access_member)]
 
 
 @router.get("/access")
@@ -918,7 +919,7 @@ def add_member(
     user: User,
     member: Member,
     id: Annotated[str, Form()] = "",
-    name: Annotated[str, Form()] = "",
+    name: Annotated[str, Form(), NoNul] = "",
     role: Annotated[Literal["admin", "member"], Form()] = "member",
 ):
     if member["role"] != "admin":
@@ -984,8 +985,8 @@ def new_token(
     conn: Conn,
     user: User,
     member: Member,
-    label: Annotated[str, Form()] = "",
-    nonce: Annotated[str, Form(max_length=64)] = "",
+    label: Annotated[str, Form(), NoNul] = "",
+    nonce: Annotated[str, Form(max_length=64), NoNul] = "",
 ):
     label = label.strip()
     if not 1 <= len(label) <= 60:

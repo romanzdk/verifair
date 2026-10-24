@@ -160,6 +160,12 @@ def _short(user_id: str) -> str:
     return f"{user_id[:4]}…"
 
 
+def no_nul(text: str | None) -> str | None:
+    if text is not None and "\x00" in text:
+        raise ValueError("must not contain NUL characters")
+    return text
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 

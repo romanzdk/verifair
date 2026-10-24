@@ -271,7 +271,6 @@ def test_project_exists(conn):
     assert not db.project_exists(conn, "alpha")
 
 
-@pytest.mark.xfail(strict=True, reason="Task 3")
 def test_get_conn_route_write_is_visible_to_other_connection(new_database_url):
     url = new_database_url()
     init = connect(url)
