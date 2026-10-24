@@ -951,6 +951,8 @@ def update_member(
         )
     except db.LastAdmin:
         return _access(request, conn, user, "members", error=LAST_ADMIN, status=409)
+    except db.InactiveMember as e:
+        return _access(request, conn, user, "members", error=str(e), status=409)
     except ValueError:
         raise HTTPException(404, "member not found") from None
     log.info(

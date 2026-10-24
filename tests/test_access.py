@@ -168,6 +168,14 @@ def test_last_admin_cannot_demote_or_deactivate_themselves(shared_client, conn):
         assert (admin["role"], admin["active"]) == ("admin", 1)
 
 
+def test_role_change_for_a_deactivated_member_is_refused(shared_client, conn):
+    db.add_user(conn, id="gone@example.com", name="Gone", role="member")
+    db.update_user(conn, "gone@example.com", active=False)
+    r = shared_client.post("/access/users/gone@example.com", data={"role": "admin"}, headers=ADMIN)
+    assert r.status_code == 409 and "Reactivate this member before changing their role." in r.text
+    assert db.get_user(conn, "gone@example.com")["role"] == "member"
+
+
 def test_admin_may_deactivate_themselves_when_another_admin_exists(shared_client, conn):
     db.add_user(conn, id="second@example.com", name="Second", role="admin")
     r = shared_client.post(

@@ -217,14 +217,14 @@ def test_list_reports_newest_first_with_latest_version(conn):
     conn.execute("UPDATE reports SET created_at = '2026-01-01T00:00:00+00:00' WHERE id = 'r1'")
     conn.execute("UPDATE reports SET created_at = '2026-01-02T00:00:00+00:00' WHERE id = 'r2'")
 
-    rows = list_reports(conn, "p")
+    rows = [r for r in list_reports(conn) if r["project"] == "p"]
     assert [r["id"] for r in rows] == ["r2", "r1"]
     assert [r["latest_version"] for r in rows] == [1, 1]
     assert [r["open_threads"] for r in rows] == [0, 0]
 
     push_report(conn, project="p", title="First", risk="low", body="a2", id="r1")
     add_comment(conn, report_id="r1", version=2, author_id="u1", author_name="Alice", body="?")
-    by_id = {r["id"]: r for r in list_reports(conn, "p")}
+    by_id = {r["id"]: r for r in list_reports(conn)}
     assert by_id["r1"]["latest_version"] == 2
     assert by_id["r1"]["open_threads"] == 1
     assert by_id["r2"]["open_threads"] == 0
@@ -236,15 +236,34 @@ def test_list_reports_all_projects_and_latest_signature(conn):
     db.sign_version(conn, report_id="a", version=1, signer_id="alice", signer_name="Alice")
     push_report(conn, project="p", title="A", risk="low", body="v2", id="a")
 
-    rows = {r["id"]: r for r in list_reports(conn, None)}
+    rows = {r["id"]: r for r in list_reports(conn)}
     assert set(rows) == {"a", "b"}
     assert (rows["a"]["signer_id"], rows["a"]["signed_at"]) == (None, None)
     assert (rows["b"]["signer_id"], rows["b"]["signed_at"]) == (None, None)
 
     signature = db.sign_version(conn, report_id="a", version=2, signer_id="alice", signer_name="A")
-    rows = {r["id"]: r for r in list_reports(conn, None)}
+    rows = {r["id"]: r for r in list_reports(conn)}
     assert rows["a"]["signer_id"] == "alice"
     assert rows["a"]["signed_at"] == signature["created_at"]
+
+
+def test_rows_by_report_ignore_reports_outside_the_loaded_ids(conn):
+    for id in ("a", "b"):
+        push_report(conn, project="p", title=id, risk="low", body="v1", id=id, reviewers=["x"])
+        db.add_verdict(
+            conn, report_id=id, version=1, reviewer_id="x", reviewer_name="X", verdict="approve"
+        )
+    assert [v["report_id"] for v in db.verdicts_by_report(conn, ["a"])["a"]] == ["a"]
+    assert list(db.verdicts_by_report(conn, ["a"])) == ["a"]
+    assert db.requests_by_report(conn, ["a"]) == {"a": ["x"]}
+    assert db.requests_by_report(conn, ["a", "none"]) == {"a": ["x"], "none": []}
+    assert db.verdicts_by_report(conn, []) == {}
+
+
+def test_rows_by_report_work_past_the_sqlite_variable_limit(conn):
+    push_report(conn, project="p", title="a", risk="low", body="v1", id="a")
+    ids = [f"r{n}" for n in range(40000)] + ["a"]
+    assert db.requests_by_report(conn, ids)["a"] == []
 
 
 def test_project_exists(conn):
@@ -582,6 +601,18 @@ def test_update_user_refuses_to_remove_last_active_admin(conn, change):
     assert update_user(conn, "a", role="admin", active=True)[0]["role"] == "admin"
     update_user(conn, "b", active=True)
     update_user(conn, "a", **change)
+
+
+def test_update_user_refuses_a_role_change_for_an_inactive_member(conn):
+    add_user(conn, id="boss", name="Boss", role="admin")
+    add_user(conn, id="m", name="M", role="member")
+    update_user(conn, "m", active=False)
+    with pytest.raises(db.InactiveMember):
+        update_user(conn, "m", role="admin")
+    assert get_user(conn, "m")["role"] == "member"
+    assert not conn.in_transaction
+    assert update_user(conn, "m", role="member", active=False)[0]["active"] == 0
+    assert update_user(conn, "m", role="admin", active=True)[0]["role"] == "admin"
 
 
 def test_concurrent_demotion_of_last_two_admins_leaves_one(tmp_path, monkeypatch):

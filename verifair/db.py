@@ -122,6 +122,10 @@ class LastAdmin(Exception):
     pass
 
 
+class InactiveMember(Exception):
+    pass
+
+
 class NotOwner(Exception):
     pass
 
@@ -362,8 +366,7 @@ def project_exists(conn: sqlite3.Connection, project: str) -> bool:
     )
 
 
-def list_reports(conn: sqlite3.Connection, project: str | None = None) -> list[sqlite3.Row]:
-    where, parameters = ("WHERE r.project=?", (project,)) if project is not None else ("", ())
+def list_reports(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT r.*, s.signer_id, s.created_at AS signed_at,"
         " (SELECT MAX(version) FROM versions v WHERE v.report_id = r.id) AS latest_version,"
@@ -371,29 +374,30 @@ def list_reports(conn: sqlite3.Connection, project: str | None = None) -> list[s
         "  AND c.parent_id IS NULL AND c.resolved_at IS NULL) AS open_threads"
         " FROM reports r LEFT JOIN signatures s ON s.report_id = r.id"
         " AND s.version = (SELECT MAX(version) FROM versions v WHERE v.report_id = r.id)"
-        f" {where} ORDER BY r.created_at DESC, r.rowid DESC",
-        parameters,
+        " ORDER BY r.created_at DESC, r.rowid DESC"
     ).fetchall()
 
 
 def _by_report(conn: sqlite3.Connection, sql: str, ids: list[str]) -> dict[str, list[sqlite3.Row]]:
     grouped: dict[str, list[sqlite3.Row]] = {id: [] for id in ids}
-    if ids:
-        for row in conn.execute(sql.format(", ".join("?" * len(ids))), ids):
+    for row in conn.execute(sql):
+        if row["report_id"] in grouped:
             grouped[row["report_id"]].append(row)
     return grouped
 
 
 def verdicts_by_report(conn: sqlite3.Connection, ids: list[str]) -> dict[str, list[sqlite3.Row]]:
-    return _by_report(conn, "SELECT * FROM verdicts WHERE report_id IN ({}) ORDER BY id", ids)
+    return _by_report(
+        conn,
+        "SELECT id, report_id, version, reviewer_id, reviewer_name, verdict, created_at"
+        " FROM verdicts ORDER BY id",
+        ids,
+    )
 
 
 def requests_by_report(conn: sqlite3.Connection, ids: list[str]) -> dict[str, list[str]]:
     rows = _by_report(
-        conn,
-        "SELECT report_id, reviewer_id FROM review_requests WHERE report_id IN ({})"
-        " ORDER BY reviewer_id",
-        ids,
+        conn, "SELECT report_id, reviewer_id FROM review_requests ORDER BY reviewer_id", ids
     )
     return {id: [r["reviewer_id"] for r in group] for id, group in rows.items()}
 
@@ -643,8 +647,10 @@ def update_user(
         user = get_user(conn, id)
         if user is None:
             raise ValueError(f"user {id!r} not found")
-        role = role or user["role"]
         active = bool(user["active"]) if active is None else active
+        if not user["active"] and not active and role not in (None, user["role"]):
+            raise InactiveMember("Reactivate this member before changing their role.")
+        role = role or user["role"]
         if user["role"] == "admin" and user["active"] and (role != "admin" or not active):
             others = conn.execute(
                 "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1 AND id!=?", (id,)
