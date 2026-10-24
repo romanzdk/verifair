@@ -241,6 +241,23 @@ def test_list_reports_newest_first_with_latest_version(conn):
     assert by_id["r2"]["open_threads"] == 0
 
 
+def test_list_reports_all_projects_and_latest_signature(conn):
+    push_report(conn, project="p", title="A", risk="low", body="v1", id="a")
+    push_report(conn, project="q", title="B", risk="low", body="v1", id="b")
+    db.sign_version(conn, report_id="a", version=1, signer_id="alice", signer_name="Alice")
+    push_report(conn, project="p", title="A", risk="low", body="v2", id="a")
+
+    rows = {r["id"]: r for r in list_reports(conn, None)}
+    assert set(rows) == {"a", "b"}
+    assert (rows["a"]["signer_id"], rows["a"]["signed_at"]) == (None, None)
+    assert (rows["b"]["signer_id"], rows["b"]["signed_at"]) == (None, None)
+
+    signature = db.sign_version(conn, report_id="a", version=2, signer_id="alice", signer_name="A")
+    rows = {r["id"]: r for r in list_reports(conn, None)}
+    assert rows["a"]["signer_id"] == "alice"
+    assert rows["a"]["signed_at"] == signature["created_at"]
+
+
 def test_list_projects_distinct_sorted(conn):
     for project in ("zeta", "alpha", "zeta"):
         push_report(conn, project=project, title="T", risk="low", body="b")

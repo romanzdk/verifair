@@ -257,7 +257,7 @@ def test_local_mode_access_is_a_note_and_posts_are_404(client):
 def test_access_link_on_landing_pages_in_shared_mode_only(shared_client, conn, client):
     db.push_report(conn, project="p", title="T", risk="low", body="## A\nx", id="r")
     for path in ("/", "/p/p"):
-        assert 'href="/access"' in shared_client.get(path, headers=ADMIN).text, path
+        assert 'href="/access/tokens"' in shared_client.get(path, headers=ADMIN).text, path
     review = shared_client.get("/r/r", headers=ADMIN).text
     assert "/access" not in review.split('<div class="app-main">')[1]
     assert 'href="/access"' not in client.get("/").text

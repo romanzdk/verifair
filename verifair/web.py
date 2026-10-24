@@ -4,8 +4,9 @@ import logging
 import re
 import secrets
 import sqlite3
+import zlib
 from collections import Counter
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote as url_quote
@@ -30,7 +31,35 @@ def _date(iso: str) -> str:
     return f"{d.day} {d:%b %Y}"
 
 
+def _elapsed(iso: str, now: datetime | None) -> timedelta:
+    return (now or datetime.now(UTC)) - datetime.fromisoformat(iso)
+
+
+def age(iso: str, now: datetime | None = None) -> str:
+    seconds = _elapsed(iso, now).total_seconds()
+    if seconds < 60:
+        return "now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h"
+    return f"{int(seconds // 86400)}d"
+
+
+def ago(iso: str, now: datetime | None = None) -> str:
+    if age(iso, now) == "now":
+        return "just now"
+    if _elapsed(iso, now) < timedelta(days=30):
+        return f"{age(iso, now)} ago"
+    return _date(iso)
+
+
+def avatar(id: str) -> str:
+    return f"c{zlib.crc32(id.encode()) % 5}"
+
+
 templates.env.filters["date"] = _date
+templates.env.filters |= {"age": age, "ago": ago, "avatar": avatar}
 templates.env.filters["segment"] = lambda value: url_quote(value, safe="")
 VERSION = importlib.metadata.version("verifair")
 
@@ -42,13 +71,29 @@ def icon(name: str, cls: str = "ic") -> Markup:
     )
 
 
-templates.env.globals |= {"STATUS_LABELS": rules.STATUS_LABELS, "VERSION": VERSION, "icon": icon}
+OPEN_STATUSES = ("unsigned", "awaiting_review", "changes_requested")
+TABS = ("open", "awaiting_review", "changes_requested", "unsigned", "approved", "all")
+TAB_LABELS = {"open": "Open", **rules.STATUS_LABELS, "all": "All"}
+STATUS_ICONS = {
+    "unsigned": "circle-dashed",
+    "awaiting_review": "circle-dot",
+    "changes_requested": "circle-x",
+    "approved": "circle-check",
+}
+templates.env.globals |= {
+    "STATUS_LABELS": rules.STATUS_LABELS,
+    "STATUS_ICONS": STATUS_ICONS,
+    "TABS": TABS,
+    "TAB_LABELS": TAB_LABELS,
+    "VERSION": VERSION,
+    "icon": icon,
+}
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 YEAR = 365 * 24 * 3600
 USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
 PLAIN_ID = re.compile(r"[^/\\\x00-\x1f\x7f\s]+")
-TABS = ("awaiting_review", "changes_requested", "unsigned", "approved")
+STATUS_ORDER = ("awaiting_review", "changes_requested", "unsigned", "approved")
 SCOPES = {"all": "All changes", "author": "My changes", "reviewer": "My reviews"}
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 UNSIGNED = "The author has not signed this version yet."
@@ -338,12 +383,14 @@ def _landing_scope(scope: str, user_id: str) -> dict:
 
 
 @router.get("/")
-def index(request: Request, conn: Conn, user: User, scope: str = "all"):
-    scope_context = _landing_scope(scope, user[0])
+def index(request: Request, conn: Conn, user: User, scope: str | None = None):
+    if scope is not None:
+        return RedirectResponse(f"/changes?scope={scope}" if scope in SCOPES else "/changes", 303)
+    scope_context = _landing_scope("all", user[0])
     scope = scope_context["scope"]
     projects = []
     totals = Counter()
-    priority = {status: i for i, status in enumerate(TABS)}
+    priority = {status: i for i, status in enumerate(STATUS_ORDER)}
     for project in db.list_projects(conn):
         reports = sorted(
             db.list_reports(
@@ -385,26 +432,63 @@ def index(request: Request, conn: Conn, user: User, scope: str = "all"):
             "projects": projects,
             "totals": totals,
             "total_changes": sum(totals.values()),
-            "tabs": TABS,
+            "tabs": STATUS_ORDER,
         },
     )
 
 
-@router.get("/p/{project}")
-def project_page(
-    project: str,
+def _change_rows(conn: sqlite3.Connection, reports: list[sqlite3.Row], user_id: str) -> list[dict]:
+    names = {u["id"]: u["name"] for u in db.list_users(conn)}
+    rows = []
+    for report in reports:
+        id, version = report["id"], report["latest_version"]
+        verdicts = db.list_verdicts(conn, id)
+        latest = rules.latest_verdicts(verdicts, version)
+        verdict_names = {v["reviewer_id"]: v["reviewer_name"] for v in verdicts}
+        people = [*db.requested_reviewers(conn, id), *(v["reviewer_id"] for v in verdicts)]
+        reviewers = []
+        for person in dict.fromkeys(people):
+            if person in latest:
+                mark = latest[person]["verdict"]
+            else:
+                mark = "stale" if person in verdict_names else None
+            name = verdict_names.get(person) or names.get(person) or person
+            reviewers.append({"id": person, "name": name, "mark": mark})
+        rows.append(
+            {
+                "report": report,
+                "status": rules.compute_status(
+                    verdicts,
+                    version,
+                    signed=report["signed_at"] is not None,
+                    signer_id=report["signer_id"],
+                ),
+                "ticket": _ticket_label(report["ticket_url"]) if report["ticket_url"] else None,
+                "signed_at": report["signed_at"],
+                "reviewed_by": set(latest),
+                "reviewers": reviewers,
+            }
+        )
+    return rows
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'s' if n != 1 else ''}"
+
+
+def _list_page(
     request: Request,
-    conn: Conn,
-    user: User,
-    tab: str = "all",
-    scope: str = "all",
+    conn: sqlite3.Connection,
+    user: tuple[str, str | None],
+    *,
+    scope: str,
+    tab: str,
+    project: str | None = None,
 ):
-    scope_context = _landing_scope(scope, user[0])
-    scope = scope_context["scope"]
-    if tab not in (*TABS, "all"):
-        tab = "all"
-    if project not in db.list_projects(conn):
-        raise HTTPException(404, "project not found")
+    if scope not in SCOPES:
+        scope = "all"
+    if tab not in TABS:
+        tab = "open"
     reports = sorted(
         db.list_reports(
             conn, project, scope=scope, user_id=user[0], legacy_author=not _shared(request)
@@ -412,22 +496,42 @@ def project_page(
         key=lambda r: (r["updated_at"], r["id"]),
         reverse=True,
     )
-    rows = [
-        {
-            "report": r,
-            "status": _status(conn, r["id"], r["latest_version"]),
-            "ticket": _ticket_label(r["ticket_url"]) if r["ticket_url"] else None,
-        }
-        for r in reports
-    ]
-    ctx = scope_context | {
+    rows = _change_rows(conn, reports, user[0])
+    by_status = Counter(row["status"] for row in rows)
+    counts = {status: by_status[status] for status in rules.STATUS_LABELS} | {
+        "open": sum(by_status[status] for status in OPEN_STATUSES),
+        "all": len(rows),
+    }
+    awaiting = counts["awaiting_review"]
+    if project is None:
+        projects = len({r["project"] for r in reports})
+        meta = (
+            f"{_plural(len(rows), 'change')} in {_plural(projects, 'project')}"
+            f" · {awaiting} awaiting review"
+        )
+    else:
+        meta = f"{_plural(len(rows), 'change')} · {awaiting} awaiting review"
+        if reports:
+            meta += f" · updated {ago(max(r['updated_at'] for r in reports))}"
+    if tab == "all":
+        shown = rows
+    elif tab == "open":
+        shown = [row for row in rows if row["status"] in OPEN_STATUSES]
+    else:
+        shown = [row for row in rows if row["status"] == tab]
+    where = " in this project" if project else ""
+    ctx = {
+        "title": project or SCOPES[scope],
+        "meta": meta,
         "project": project,
+        "active": scope if project is None else None,
+        "active_project": project,
+        "scope": scope,
         "tab": tab,
-        "tabs": TABS,
-        "counts": Counter(row["status"] for row in rows),
-        "total": len(rows),
-        "rows": [row for row in rows if tab == "all" or row["status"] == tab],
+        "counts": counts,
+        "rows": shown,
         "empty_title": {
+            "open": "No open changes",
             "all": "No changes yet",
             "awaiting_review": "No changes awaiting review",
             "changes_requested": "No changes requested",
@@ -436,19 +540,44 @@ def project_page(
         }[tab],
         "empty_description": (
             f"Try another status, or view all {len(reports)} matching "
-            f"change{'s' if len(reports) != 1 else ''} in this project."
+            f"change{'s' if len(reports) != 1 else ''}{where}."
         ),
         "empty_url": "?tab=all" + (f"&scope={scope}" if scope != "all" else ""),
         "empty_action": "View all changes" if tab != "all" else None,
     }
-    if not reports and scope != "all":
+    if not reports:
+        scope_context = _landing_scope(scope, user[0])
         ctx.update(
             empty_title=scope_context["scope_empty_title"],
-            empty_description="View everyone's changes in this project, or choose another scope.",
+            empty_description=scope_context["scope_empty_description"],
             empty_url="?scope=all&tab=all",
-            empty_action="View everyone's changes",
+            empty_action=None,
         )
-    return _page(request, conn, user, "project.html", ctx)
+        if scope != "all":
+            ctx.update(
+                empty_description=f"View everyone's changes{where}, or choose another scope.",
+                empty_action="View everyone's changes",
+            )
+    return _page(request, conn, user, "changes.html", ctx)
+
+
+@router.get("/changes")
+def changes(request: Request, conn: Conn, user: User, scope: str = "all", tab: str = "open"):
+    return _list_page(request, conn, user, scope=scope, tab=tab)
+
+
+@router.get("/p/{project}")
+def project_page(
+    project: str,
+    request: Request,
+    conn: Conn,
+    user: User,
+    tab: str = "open",
+    scope: str = "all",
+):
+    if project not in db.list_projects(conn):
+        raise HTTPException(404, "project not found")
+    return _list_page(request, conn, user, scope=scope, tab=tab, project=project)
 
 
 @router.get("/r/{id}")

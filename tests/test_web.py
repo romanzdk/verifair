@@ -1,5 +1,6 @@
 import importlib.metadata
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -48,7 +49,20 @@ def test_index_lists_projects_with_counts(client):
     assert 'href="/p/billing-service"' in r.text
 
 
-def test_project_page_tabs_and_unknown_404(client):
+def test_age_and_ago():
+    now = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
+    assert web.age("2026-10-24T11:59:30+00:00", now) == "now"
+    assert web.age("2026-10-24T11:35:00+00:00", now) == "25m"
+    assert web.age("2026-10-24T09:00:00+00:00", now) == "3h"
+    assert web.age("2026-10-22T12:00:00+00:00", now) == "2d"
+    assert web.ago("2026-10-24T11:59:30+00:00", now) == "just now"
+    assert web.ago("2026-10-22T12:00:00+00:00", now) == "2d ago"
+    assert web.ago("2026-09-01T00:00:00+00:00", now) == "1 Sep 2026"
+    assert re.fullmatch(r"c[0-4]", web.avatar("alice000"))
+    assert web.avatar("alice000") == web.avatar("alice000")
+
+
+def test_changes_tabs_default_to_open_and_count_by_status(client):
     push(client)
     push(client, title="Retry webhooks", risk="low", ticket_url=None)
     push(client, title="Unsigned one", ticket_url=None)
@@ -57,26 +71,55 @@ def test_project_page_tabs_and_unknown_404(client):
     client.cookies.set("vf_name", "Alice")
     client.post("/r/retry-webhooks/verdict", data={"version": 1, "verdict": "approve"})
 
-    r = client.get("/p/billing-service")
-    assert r.status_code == 200
-    assert "Awaiting review · 1" in r.text and "Approved · 1" in r.text
-    assert "Unsigned one" in r.text and "Retry webhooks" in r.text
-    pending = client.get("/p/billing-service?tab=awaiting_review")
-    assert "Prorate" in pending.text and "Unsigned one" not in pending.text
-    assert "Retry webhooks" not in pending.text
-    unsigned = client.get("/p/billing-service?tab=unsigned")
-    assert "Unsigned one" in unsigned.text and "Prorate" not in unsigned.text
-    assert "Prorate" in r.text and "BILL-412" in r.text
+    def page_of(url):
+        r = client.get(url)
+        assert r.status_code == 200
+        return r.text
 
-    approved = client.get("/p/billing-service?tab=approved")
-    assert "Retry webhooks" in approved.text and "Prorate" not in approved.text
-    everything = client.get("/p/billing-service?tab=all")
-    assert "Retry webhooks" in everything.text and "Prorate" in everything.text
+    everything = page_of("/changes")
+    assert 'aria-label="Open · 2"' in everything
+    assert 'aria-label="Approved · 1"' in everything
+    assert 'aria-label="All · 3"' in everything
+    assert re.search(r'<a href="\?tab=open"[^>]*aria-current="page"', everything)
+    assert "Prorate" in everything and "Unsigned one" in everything
+    assert "Retry webhooks" not in everything
+    assert "billing-service ·" in everything
 
+    approved = page_of("/changes?tab=approved")
+    assert "Retry webhooks" in approved
+    assert "Prorate" not in approved and "Unsigned one" not in approved
+    bogus = page_of("/changes?tab=bogus")
+    assert bogus.split('<main class="app-page"')[1] == everything.split('<main class="app-page"')[1]
+    assert "Retry webhooks" in page_of("/changes?tab=all")
+    pending = page_of("/changes?tab=awaiting_review")
+    assert "Prorate" in pending and "Unsigned one" not in pending
+
+    project = page_of("/p/billing-service")
+    for label in ('aria-label="Open · 2"', 'aria-label="Approved · 1"', 'aria-label="All · 3"'):
+        assert label in project
+    rows = project.split('<main class="app-page"')[1]
+    assert "billing-service ·" not in rows
+    assert "BILL-412" in rows and "Retry webhooks" not in rows
+    assert page_of("/p/billing-service?tab=bogus").count('class="chg"') == 2
     assert client.get("/p/nope").status_code == 404
-    assert "All statuses · 3" in r.text
-    bogus = client.get("/p/billing-service?tab=bogus")
-    assert bogus.status_code == 200 and "Prorate" in bogus.text and "Retry webhooks" in bogus.text
+
+
+def test_change_row_shows_risk_reviewers_and_threads(client):
+    push(client, reviewers=["bob00000"], risk="high")
+    sign(client)
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
+    client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
+    page = client.get("/changes?tab=all").text
+    row = page.split('<a class="chg"')[1].split("</a>")[0]
+    assert 'class="risk high"' in row and "High" in row
+    assert 'class="badge b-approved"' in row
+    assert 'class="v ok"' in row
+    assert 'title="Alice · approved v1"' in row
+    assert 'title="bob00000 · review requested"' in row
+    assert 'title="1 open thread"' in row
+    assert 'title="Author: agent"' in row and "icons.svg#bot" in row
+    assert "💬" not in page
 
 
 def test_unsigned_project_opens_with_its_changes_visible(client):
@@ -1703,11 +1746,11 @@ def test_icon_sprite_has_every_icon_the_templates_use():
     used = {
         name
         for template in (root / "templates").glob("*.html")
-        for name in re.findall(r'icon\(\s*"([a-z0-9-]+)"', template.read_text())
+        for name in re.findall(r'icon\(\s*"([a-z0-9-]+)"(?!\s*~)', template.read_text())
     }
     sprite = (root / "static" / "icons.svg").read_text()
     assert {"menu", "inbox", "user-check", "folder", "copy", "book-open"} <= used
-    for name in used | {"risk-low", "risk-medium", "risk-high"}:
+    for name in used | {"risk-low", "risk-medium", "risk-high"} | set(web.STATUS_ICONS.values()):
         assert f'id="{name}"' in sprite, name
     assert "ISC" in sprite
 

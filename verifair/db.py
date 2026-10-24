@@ -360,14 +360,17 @@ def list_projects(conn: sqlite3.Connection) -> list[str]:
 
 def list_reports(
     conn: sqlite3.Connection,
-    project: str,
+    project: str | None,
     *,
     scope: str = "all",
     user_id: str | None = None,
     legacy_author: bool = True,
 ) -> list[sqlite3.Row]:
-    conditions = ["r.project=?"]
-    parameters = [project]
+    conditions = ["1=1"]
+    parameters = []
+    if project is not None:
+        conditions.append("r.project=?")
+        parameters.append(project)
     if scope == "author" and legacy_author:
         conditions.append("(r.author_id=? OR (r.author_id IS NULL AND r.author=?))")
         parameters.extend((user_id, user_id))
@@ -380,13 +383,13 @@ def list_reports(
         )
         parameters.append(user_id)
     return conn.execute(
-        "SELECT r.*,"
+        "SELECT r.*, s.signer_id, s.created_at AS signed_at,"
         " (SELECT MAX(version) FROM versions v WHERE v.report_id = r.id) AS latest_version,"
         " (SELECT COUNT(*) FROM comments c WHERE c.report_id = r.id"
         "  AND c.parent_id IS NULL AND c.resolved_at IS NULL) AS open_threads"
-        " FROM reports r WHERE "
-        + " AND ".join(conditions)
-        + " ORDER BY r.created_at DESC, r.rowid DESC",
+        " FROM reports r LEFT JOIN signatures s ON s.report_id = r.id"
+        " AND s.version = (SELECT MAX(version) FROM versions v WHERE v.report_id = r.id)"
+        " WHERE " + " AND ".join(conditions) + " ORDER BY r.created_at DESC, r.rowid DESC",
         parameters,
     ).fetchall()
 

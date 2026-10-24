@@ -1,0 +1,32 @@
+{% macro change_row(row, show_project=True, waiting=False) %}
+{% set r = row.report %}{% set st = row.status %}
+{% set when = row.signed_at if waiting and row.signed_at else r.updated_at %}
+{% set marks = {"approve": ("ok", "check"), "request_changes": ("no", "x"), "stale": ("stale", "check")} %}
+{% set what = {"approve": "approved v" ~ r.latest_version, "request_changes": "requested changes on v" ~ r.latest_version, "stale": "reviewed an earlier version"} %}
+<a class="chg" href="/r/{{ r.id|urlencode }}">
+  <span class="si {{ st }}" title="{{ STATUS_LABELS[st] }}">{{ icon(STATUS_ICONS[st]) }}</span>
+  <div class="chg-main">
+    <div class="chg-t">{{ r.title }}</div>
+    <div class="chg-m">{{ (([r.project] if show_project else []) + ["v" ~ r.latest_version] + ([row.ticket] if row.ticket else []))|join(" · ") }}</div>
+  </div>
+  <span class="badge b-{{ st }}">{{ STATUS_LABELS[st] }}</span>
+  <span class="risk {{ r.risk }}">{{ icon("risk-" ~ r.risk, "ic14") }}{{ r.risk|capitalize }}</span>
+  <span class="av {{ (r.author_id or r.author)|avatar }}" title="Author: {{ r.author }}">{% if r.author == "agent" %}{{ icon("bot", "ic14") }}{% else %}{{ r.author[:1]|upper }}{% endif %}</span>
+  <span class="stack">
+    {% for rv in row.reviewers[:2] %}
+    <span class="av {{ rv.id|avatar }}" title="{{ rv.name }} · {{ what[rv.mark] if rv.mark else 'review requested' }}">{{ rv.name[:1]|upper }}{% if rv.mark %}<span class="v {{ marks[rv.mark][0] }}">{{ icon(marks[rv.mark][1], "") }}</span>{% endif %}</span>
+    {% endfor %}
+    {% if row.reviewers|length > 2 %}<span class="more">+{{ row.reviewers|length - 2 }}</span>{% endif %}
+  </span>
+  {% if r.open_threads %}<span class="cm" title="{{ r.open_threads }} open thread{{ 's' if r.open_threads != 1 }}">{{ icon("message-square", "ic14") }}<span class="cnt">{{ r.open_threads }}</span></span>{% else %}<span class="cm"></span>{% endif %}
+  <time class="when{% if waiting %} wait{% endif %}" datetime="{{ when }}" title="{{ when|date }} {{ when[11:16] }} UTC">{% if waiting %}waiting {{ when|age }}{% else %}{{ when|ago }}{% endif %}</time>
+</a>
+{% endmacro %}
+
+{% macro status_tabs(counts, tab, scope) %}
+<nav class="tabs" aria-label="Filter changes by status" data-status-nav>
+  {% for key in TABS %}
+  <a href="?tab={{ key }}{% if scope != 'all' %}&amp;scope={{ scope }}{% endif %}" aria-label="{{ TAB_LABELS[key] }} · {{ counts[key] }}"{% if tab == key %} aria-current="page"{% endif %}{% if not counts[key] %} class="zero"{% endif %}>{{ TAB_LABELS[key] }}<span class="tab-n">{{ counts[key] }}</span></a>
+  {% endfor %}
+</nav>
+{% endmacro %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "_rows.html" import change_row, status_tabs %}
+{% block title %}{{ title }} · verifair{% endblock %}
+{% block crumbs %}{% if project %}<a href="/p/{{ project|urlencode }}">{{ project }}</a>{{ icon("chevron-right", "ic14") }}<span class="cur">Changes</span>{% else %}<span class="cur">{{ title }}</span>{% endif %}{% endblock %}
+{% block actions %}<a class="btn" href="/docs">{{ icon("book-open", "ic14") }}<span class="lbl">Push a report</span></a>{% endblock %}
+{% block content %}
+<main class="app-page">
+  <div class="ph"><div><h1>{{ title }}</h1><div class="meta">{{ meta }}</div></div></div>
+  {{ status_tabs(counts, tab, scope) }}
+  {% if rows %}
+  <div class="list">{% for row in rows %}{{ change_row(row, show_project=not project) }}{% endfor %}</div>
+  {% else %}
+  <div class="blank">
+    <h2>{{ empty_title }}</h2>
+    <p>{{ empty_description }}</p>
+    {% if empty_action %}<a class="btn" href="{{ empty_url }}">{{ empty_action }}</a>{% endif %}
+  </div>
+  {% endif %}
+</main>
+{% endblock %}
