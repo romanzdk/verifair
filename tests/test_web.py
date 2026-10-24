@@ -823,7 +823,9 @@ def test_shared_mode_non_members_are_403_and_deactivation_takes_effect(
 
 
 def test_shared_mode_header_is_matched_case_insensitively(shared_client, as_user):
-    page = shared_client.get("/access", headers={"X-Forwarded-Email": " Admin@Example.COM "})
+    page = shared_client.get(
+        "/access/members", headers={"X-Forwarded-Email": " Admin@Example.COM "}
+    )
     assert page.status_code == 200 and "Add member" in page.text
     as_user("bob@example.com")
     bob = shared_client.get("/", headers={"X-Forwarded-Email": "BOB@example.com"})
@@ -1764,7 +1766,9 @@ def test_shell_wraps_every_page(client):
 
 def test_pages_have_no_inline_script(client, shared_client):
     push(client)
-    responses = [client.get(path) for path in SHELL_PAGES] + [shared_client.get("/access")]
+    responses = [client.get(path) for path in SHELL_PAGES] + [
+        shared_client.get(path) for path in ("/access/tokens", "/access/members")
+    ]
     for r in responses:
         assert r.status_code == 200, r.url
         assert re.search(r"<script(?![^>]*\ssrc=)", r.text) is None, r.url

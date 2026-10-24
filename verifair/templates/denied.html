@@ -6,17 +6,12 @@
 <title>No access · verifair</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/app.css">
-<link rel="stylesheet" href="/static/landing.css">
 </head>
-<body class="landing-page">
-<main class="landing-wrap">
-  <header class="landing-heading">
-    <div>
-      <h1>No access</h1>
-      <p>{{ message }}</p>
-    </div>
-  </header>
-  {% if back or home %}<p>{% if back %}<a href="{{ back }}">Back to Access</a>{% if home %} · {% endif %}{% endif %}{% if home %}<a href="/">Go to projects</a>{% endif %}</p>{% endif %}
+<body>
+<main class="app-page denied">
+  <h1>No access</h1>
+  <p>{{ message }}</p>
+  {% if back or home %}<p>{% if back %}<a href="{{ back }}">Back to Agent tokens</a>{% if home %} · {% endif %}{% endif %}{% if home %}<a href="/">Go to projects</a>{% endif %}</p>{% endif %}
 </main>
 </body>
 </html>

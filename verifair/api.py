@@ -52,7 +52,7 @@ def require_token(request: Request) -> None:
         if not token.lstrip().startswith("vf_"):
             _refuse_token("shared-token", path, SHARED_TOKEN)
         with closing(db.connect(settings.db_path)) as conn:
-            owner, reason = db.authenticate_token(conn, token)
+            owner, reason = db.authenticate_token(conn, token, touch=True)
         if owner is None:
             _refuse_token(reason, path)
         request.state.token, request.state.token_owner = token, owner

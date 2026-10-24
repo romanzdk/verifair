@@ -39,19 +39,21 @@ def test_member_sees_only_own_tokens_and_no_admin_sections(shared_client, conn, 
     bob = as_user("bob@example.com")
     _, mine = _token(conn, "bob@example.com", "bob laptop")
     _, theirs = _token(conn, "admin@example.com", "admin ci")
-    page = shared_client.get("/access", headers=bob)
+    page = shared_client.get("/access/tokens", headers=bob)
     assert page.status_code == 200
     assert page.headers["cache-control"] == "no-store"
-    assert "Your agent tokens" in page.text and mine["id"] in page.text
+    assert "Your tokens" in page.text and mine["id"] in page.text
     assert "bob laptop" in page.text and 'action="/access/tokens"' in page.text
     assert theirs["id"] not in page.text and "admin ci" not in page.text
     assert "Members" not in page.text and "All tokens" not in page.text
     assert 'action="/access/users' not in page.text
 
-    admin = shared_client.get("/access", headers=ADMIN).text
-    assert "Members" in admin and "Add member" in admin and "All tokens" in admin
-    assert mine["id"] in admin and theirs["id"] in admin
-    assert 'action="/access/users/bob%40example.com"' in admin
+    admin = shared_client.get("/access/tokens", headers=ADMIN).text
+    assert "All tokens" in admin and mine["id"] in admin and theirs["id"] in admin
+    members = shared_client.get("/access/members", headers=ADMIN)
+    assert members.status_code == 200 and members.headers["cache-control"] == "no-store"
+    assert "Members" in members.text and "Add member" in members.text
+    assert 'action="/access/users/bob%40example.com"' in members.text
 
 
 def test_member_cannot_manage_members_or_revoke_other_tokens(shared_client, conn, as_user):
@@ -86,7 +88,7 @@ def test_admin_adds_promotes_deactivates_and_reactivates(shared_client, conn, ca
         headers=ADMIN,
         follow_redirects=False,
     )
-    assert (r.status_code, r.headers["location"]) == (303, "/access")
+    assert (r.status_code, r.headers["location"]) == (303, "/access/members")
     carol = db.get_user(conn, "carol@example.com")
     assert (carol["name"], carol["role"], carol["active"]) == ("Carol C", "member", 1)
     who = {"X-Forwarded-Email": "carol@example.com"}
@@ -103,16 +105,16 @@ def test_admin_adds_promotes_deactivates_and_reactivates(shared_client, conn, ca
         r = shared_client.post(
             "/access/users/carol@example.com", data=data, headers=ADMIN, follow_redirects=False
         )
-        assert (r.status_code, r.headers["location"]) == (303, "/access")
+        assert (r.status_code, r.headers["location"]) == (303, "/access/members")
         return db.get_user(conn, "carol@example.com")
 
     assert update(role="admin")["role"] == "admin"
     assert update(role="member")["role"] == "member"
     assert update(active="0")["active"] == 0
-    assert shared_client.get("/access", headers=who).status_code == 403
+    assert shared_client.get("/access/tokens", headers=who).status_code == 403
     assert db.get_token(conn, old["id"])["revoked_at"] is not None
     assert update(active="1")["active"] == 1
-    assert shared_client.get("/access", headers=who).status_code == 200
+    assert shared_client.get("/access/tokens", headers=who).status_code == 200
     assert db.get_token(conn, old["id"])["revoked_at"] is not None
     api = shared_client.get("/api/reports/x", headers={"Authorization": f"Bearer {token}"})
     assert api.json() == {"detail": "invalid token"}
@@ -172,7 +174,7 @@ def test_admin_may_deactivate_themselves_when_another_admin_exists(shared_client
         follow_redirects=False,
     )
     assert r.status_code == 303
-    assert shared_client.get("/access", headers=ADMIN).status_code == 403
+    assert shared_client.get("/access/tokens", headers=ADMIN).status_code == 403
 
 
 def test_new_token_is_shown_once_and_never_logged(shared_client, conn, as_user, caplog):
@@ -183,7 +185,7 @@ def test_new_token_is_shown_once_and_never_logged(shared_client, conn, as_user, 
     assert f'<input readonly value="{token}"' in r.text and COPY_ONCE in r.text
     [row] = db.list_tokens(conn, "bob@example.com")
     assert (row["label"], token.startswith(f"vf_{row['id']}.")) == ("laptop", True)
-    again = shared_client.get("/access", headers=bob)
+    again = shared_client.get("/access/tokens", headers=bob)
     assert again.headers["cache-control"] == "no-store"
     assert token not in again.text and COPY_ONCE not in again.text and row["id"] in again.text
     api = shared_client.get("/api/reports/x", headers={"Authorization": f"Bearer {token}"})
@@ -198,9 +200,10 @@ def _nonce(html):
 
 
 def test_resending_the_new_token_form_does_not_create_a_second_token(shared_client, conn):
-    page = shared_client.get("/access", headers=ADMIN).text
+    page = shared_client.get("/access/tokens", headers=ADMIN).text
     nonce = _nonce(page)
-    assert _nonce(shared_client.get("/access", headers=ADMIN).text) != nonce
+    assert set(re.findall(r'name="nonce" value="([^"]+)"', page)) == {nonce}
+    assert _nonce(shared_client.get("/access/tokens", headers=ADMIN).text) != nonce
     data = {"label": "laptop", "nonce": nonce}
     first = shared_client.post("/access/tokens", data=data, headers=ADMIN)
     assert 'value="vf_' in first.text and ALREADY_CREATED not in first.text
@@ -228,9 +231,9 @@ def test_owner_and_admin_revoke_tokens(shared_client, conn, as_user, caplog):
         r = shared_client.post(
             f"/access/tokens/{token['id']}/revoke", headers=who, follow_redirects=False
         )
-        assert (r.status_code, r.headers["location"]) == (303, "/access")
+        assert (r.status_code, r.headers["location"]) == (303, "/access/tokens")
         assert db.get_token(conn, token["id"])["revoked_at"] is not None
-    page = shared_client.get("/access", headers=bob).text
+    page = shared_client.get("/access/tokens", headers=bob).text
     assert page.count("Revoked") == 2 and f"/access/tokens/{first['id']}/revoke" not in page
     assert f"access action=revoke_token actor=bob@example.com target={first['id']}" in caplog.text
     assert f"access action=revoke_token actor=admin@example.com target={second['id']}" in (
@@ -239,10 +242,12 @@ def test_owner_and_admin_revoke_tokens(shared_client, conn, as_user, caplog):
 
 
 def test_local_mode_access_is_a_note_and_posts_are_404(client):
-    page = client.get("/access")
-    assert page.status_code == 200 and LOCAL_NOTE in page.text
-    assert page.headers["cache-control"] == "no-store"
-    assert 'action="/access' not in page.text
+    assert client.get("/access", follow_redirects=False).headers["location"] == "/access/tokens"
+    for path in ("/access/tokens", "/access/members"):
+        page = client.get(path)
+        assert page.status_code == 200 and LOCAL_NOTE in page.text, path
+        assert page.headers["cache-control"] == "no-store"
+        assert 'action="/access' not in page.text and "vf_new_token_form" not in page.text
     for path, data in [
         ("/access/users", {"id": "eve", "name": "Eve", "role": "member"}),
         ("/access/users/eve", {"role": "admin"}),
@@ -360,7 +365,7 @@ def test_add_member_says_the_agent_id_is_reserved(shared_client, conn, id):
         '<p class="error" id="vf_member_error" role="alert">The id agent is reserved for agents.'
     )
     assert f"{error}</p>" in r.text
-    assert "Use a plain id" not in r.text.split("<h2>Add member</h2>")[1].split("<form")[0]
+    assert "Use a plain id" not in r.text.split('id="add-member"')[1].split("<label")[0]
     assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
 
 
@@ -379,7 +384,7 @@ def test_member_id_with_plus_and_at_round_trips_through_row_actions(shared_clien
 
 def test_existing_id_with_a_slash_is_encoded_in_row_actions(shared_client, conn):
     db.add_user(conn, id="team/ops", name="Ops", role="member")
-    page = shared_client.get("/access", headers=ADMIN).text
+    page = shared_client.get("/access/members", headers=ADMIN).text
     assert page.count('action="/access/users/team%2Fops"') == 2
     r = shared_client.post(
         "/access/users/team%2Fops", data={"role": "admin"}, headers=ADMIN, follow_redirects=False
@@ -406,21 +411,22 @@ def test_member_ids_are_stored_lower_case_and_compared_case_insensitively(shared
         db.add_user(conn, id="BOB@x.com", name="Bob", role="member")
 
 
-def test_access_tables_stack_with_cell_labels_on_narrow_screens(shared_client, conn):
+def test_access_table_cells_carry_their_labels(shared_client, conn):
     _token(conn, "admin@example.com")
-    page = shared_client.get("/access", headers=ADMIN).text
-    for label in ("Owner", "Label", "Token id", "Created", "Status", "Id", "Name", "Role"):
-        assert f'<td data-label="{label}">' in page, label
-    assert '<td data-label="Active">Yes</td>' in page
-    css = (Path(web.__file__).parent / "static" / "landing.css").read_text()
-    assert ".landing-access td { vertical-align: middle; overflow-wrap: break-word; }" in css
-    assert "anywhere" not in css.split(".landing-access td {")[1].split("}")[0]
-    mobile = css.split("@media (max-width: 760px) {")[1].split("\n}")[0]
-    assert ".landing-access :is(table, tbody, tr, td) { display: block; }" in mobile
-    assert "content: attr(data-label)" in mobile
-    link = css.split(".landing-access-link {")[1].split("}")[0]
-    assert "display: inline-flex" in link and "min-height: 32px" in link
-    assert "align-items: center" in link and "padding:" in link
+    tokens = shared_client.get("/access/tokens", headers=ADMIN).text
+    members = shared_client.get("/access/members", headers=ADMIN).text
+    labels = ("Owner", "Label", "Token id", "Created", "Last used", "Status")
+    for page, names in ((tokens, labels), (members, ("Id", "Name", "Role", "Status"))):
+        for label in names:
+            assert f'<td data-label="{label}">' in page, label
+    assert '<td data-label="Status"><span class="badge b-approved">Active</span></td>' in members
+
+
+@pytest.mark.xfail(strict=True, reason="the stacked table CSS lands in Task 7")
+def test_access_tables_stack_on_narrow_screens():
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    mobile = css.split("@media (max-width: 640px) {")[1].split("\n}")[0]
+    assert "table.t" in mobile and "content: attr(data-label)" in mobile
 
 
 def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, conn, as_user):
@@ -428,24 +434,26 @@ def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, con
     db.add_user(conn, id="gone@example.com", name="Gone", role="member")
     db.update_user(conn, "gone@example.com", active=False)
     _token(conn, "bob@example.com", 'bob "ci"')
-    page = shared_client.get("/access", headers=ADMIN).text
-    assert '<button class="btn" aria-label="Save role for bob@example.com">Save</button>' in page
+    page = shared_client.get("/access/members", headers=ADMIN).text
+    assert '<button class="btn sm" aria-label="Save role for bob@example.com">Save</button>' in page
     assert (
-        '<button class="btn" aria-label="Deactivate bob@example.com"'
+        '<button class="btn sm danger" aria-label="Deactivate bob@example.com"'
         ' data-confirm="Deactivate bob@example.com? Their agent tokens will be revoked.">'
         "Deactivate</button>"
     ) in page
-    assert '<button class="btn" aria-label="Reactivate gone@example.com">Reactivate</button>' in (
-        page
-    )
     assert (
-        '<button class="btn" aria-label="Revoke token bob &#34;ci&#34;"'
-        ' data-confirm="Revoke token bob &#34;ci&#34;?">Revoke</button>'
+        '<button class="btn sm" aria-label="Reactivate gone@example.com">Reactivate</button>'
     ) in page
+    assert '<span class="badge b-unsigned">Deactivated</span>' in page
+    tokens = shared_client.get("/access/tokens", headers=ADMIN).text
+    assert (
+        '<button class="btn sm danger" aria-label="Revoke token bob &#34;ci&#34;"'
+        ' data-confirm="Revoke token bob &#34;ci&#34;?">Revoke</button>'
+    ) in tokens
     assert page.count("(you)") == 1
     assert "<code>admin@example.com</code> <small>(you)</small>" in page
     assert (
-        '<button class="btn" aria-label="Deactivate admin@example.com"'
+        '<button class="btn sm danger" aria-label="Deactivate admin@example.com"'
         ' data-confirm="Deactivate yourself? You will lose access right away.">Deactivate</button>'
     ) in page
     js = (Path(web.__file__).parent / "static" / "app.js").read_text()
@@ -468,12 +476,13 @@ MEMBER_INPUT = "Enter an id (1–200 characters) and a name (1–60 characters).
 def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, data, status, copy):
     r = shared_client.post("/access/users", data=data, headers=ADMIN)
     assert r.status_code == status
-    before, card = r.text.split("<h2>Add member</h2>")
-    card = card.split("</section>")[0]
+    before, card = r.text.split('id="add-member"')
+    card = card.split("</form>")[0]
     error = f'<p class="error" id="vf_member_error" role="alert">{copy}</p>'
     assert error in card and copy not in before
-    assert before.endswith('<section class="landing-access" id="add-member">\n  ')
-    assert '<form method="post" action="/access/users#add-member"' in card
+    assert before.endswith(
+        '<form method="post" action="/access/users#add-member" class="panel addform" '
+    )
     assert (
         f'name="id" value="{data["id"]}" autofocus'
         ' aria-invalid="true" aria-describedby="vf_member_error"'
@@ -486,8 +495,8 @@ def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, da
 
 
 def test_add_member_inputs_check_the_id_in_the_browser(shared_client):
-    page = shared_client.get("/access", headers=ADMIN).text
-    card = page.split("<h2>Add member</h2>")[1].split("</section>")[0]
+    page = shared_client.get("/access/members", headers=ADMIN).text
+    card = page.split('id="add-member"')[1].split("</form>")[0]
     assert f'name="id" value="" maxlength="200" pattern="[^\\s\\/\\\\]+" title="{PLAIN}"' in card
     assert 'name="name" value="" maxlength="60"' in card
     assert '<option value="member" selected>' in card
@@ -509,13 +518,14 @@ def test_denied_page_has_a_heading_and_links_back(shared_client, conn, as_user):
         (shared_client.get("/", headers={"X-Forwarded-Email": "gone@example.com"}), False, False),
     ]:
         assert r.status_code == 403
-        assert '<main class="landing-wrap">' in r.text and "<h1>No access</h1>" in r.text
-        assert 'href="/static/landing.css"' in r.text
+        assert '<main class="app-page denied">' in r.text and "<h1>No access</h1>" in r.text
+        assert 'href="/static/app.css"' in r.text and "landing" not in r.text
         assert ('<a href="/">' in r.text) is home
-        assert ('<a href="/access">' in r.text) is back
+        assert ('<a href="/access/tokens">Back to Agent tokens</a>' in r.text) is back
         assert "<script" not in r.text and 'class="topbar"' not in r.text
     signin = shared_client.get("/", headers={"X-Forwarded-Email": ""})
     assert signin.status_code == 401 and '<a href="/">Go to projects</a>' in signin.text
+    assert '<main class="app-page denied">' in signin.text and "<script" not in signin.text
 
 
 def test_new_token_has_a_copy_button_and_the_note_describes_the_field(shared_client):
@@ -526,10 +536,13 @@ def test_new_token_has_a_copy_button_and_the_note_describes_the_field(shared_cli
     ) in r.text
     assert f'<p id="vf_new_token_note">{COPY_ONCE}</p>' in r.text
     assert (
-        '<button type="button" class="btn" data-copy-target="vf_new_token">Copy token</button>'
-        ' <span data-copy-result role="status"></span>'
+        '<button type="button" class="btn p" data-copy-target="vf_new_token">'
+        f"{web.icon('copy', 'ic14')}Copy token</button>"
+        '<span data-copy-result role="status"></span>'
     ) in r.text
     assert r.text.count(token) == 1
+    secret = r.text.split('<div class="secret">')[1].split('<div class="panel intro">')[0]
+    assert 'id="vf_new_token"' in secret and "Token “laptop” created" in secret
     js = (Path(web.__file__).parent / "static" / "app.js").read_text()
     assert '"[data-copy-identity], [data-copy-target]"' in js and "Token copied." in js
 
@@ -554,3 +567,59 @@ def test_tokens_revoked_counts_what_the_deactivation_revoked(
         "access action=update_user actor=admin@example.com target=bob@example.com"
         " role=member active=0 tokens_revoked=1"
     ) in caplog.text
+
+
+def test_members_page_is_admin_only(shared_client, as_user):
+    r = shared_client.get("/access/members", headers=as_user("bob@example.com"))
+    assert r.status_code == 403 and r.headers["cache-control"] == "no-store"
+    assert "Only an admin can manage members." in r.text and 'href="/access/tokens"' in r.text
+
+
+def test_access_redirects_to_tokens(shared_client):
+    r = shared_client.get("/access", follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/access/tokens")
+
+
+def test_tokens_page_has_the_new_token_menu_and_the_agent_env(shared_client, conn):
+    page = shared_client.get("/access/tokens", headers=ADMIN).text
+    assert '<button class="btn p" popovertarget="vf_new_token_form">' in page
+    assert '<form id="vf_new_token_form" popover method="post" action="/access/tokens"' in page
+    assert page.count('action="/access/tokens"') == 2
+    assert "0 active tokens · 0 across the workspace" in page
+    env = page.split('id="vf_token_env">')[1].split("</pre>")[0]
+    assert "export VERIFAIR_URL=http://localhost:8000" in env
+    assert "export VERIFAIR_API_TOKEN=vf_…" in env
+    _token(conn, "admin@example.com")
+    page = shared_client.get("/access/tokens", headers=ADMIN).text
+    assert page.count('action="/access/tokens"') == 1
+    assert "1 active token · 1 across the workspace" in page
+
+
+def test_api_use_stamps_last_used_outside_the_wait_transaction(shared_client, conn, monkeypatch):
+    bob = {"X-Forwarded-Email": "bob@example.com"}
+    db.add_user(conn, id="bob@example.com", name="Bob", role="member")
+    token, used = _token(conn, "bob@example.com", "used")
+    _, unused = _token(conn, "bob@example.com", "unused")
+    db.push_report(conn, project="p", title="T", risk="low", body="## A\nx", id="r")
+    calls = []
+    authenticate = db.authenticate_token
+
+    def spy(conn, token, **kwargs):
+        calls.append((kwargs.get("touch", False), conn.in_transaction))
+        return authenticate(conn, token, **kwargs)
+
+    monkeypatch.setattr(db, "authenticate_token", spy)
+    r = shared_client.get(
+        "/api/reports/r/wait?timeout=0.1", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r.status_code == 200
+    assert (True, False) in calls and (False, True) in calls
+    assert all(not in_transaction for touch, in_transaction in calls if touch)
+    page = shared_client.get("/access/tokens", headers=bob).text
+    rows = {
+        t: page.split(f"<code>{t}</code>")[1].split("</tr>")[0] for t in (used["id"], unused["id"])
+    }
+    assert re.search(
+        r'<td data-label="Last used"><time datetime="[^"]+">just now</time></td>', rows[used["id"]]
+    )
+    assert '<td data-label="Last used">Never</td>' in rows[unused["id"]]

@@ -210,7 +210,7 @@ function showRequestError(event, message) {
 function showNavForNameError() {
   const nav = document.getElementById("vf_nav");
   if (nav?.querySelector("details.me[open]") && getComputedStyle(nav).display === "none") {
-    nav.showPopover();
+    nav.showPopover?.();
   }
 }
 

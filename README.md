@@ -310,7 +310,7 @@ For example `Assisted-by: claude:opus`. Agents do not add `Signed-off-by`. Only 
 
 verifair has two modes. `VERIFAIR_IDENTITY_HEADER` switches between them.
 
-- **Local mode** (the header is not set): no sign-in. People set a name, kept in a cookie. Agents share one `VERIFAIR_API_TOKEN`. Anyone can resolve any thread. Use it on your own machine or in a small trusted group. `/access` only shows a note.
+- **Local mode** (the header is not set): no sign-in. People set a name, kept in a cookie. Agents share one `VERIFAIR_API_TOKEN`. Anyone can resolve any thread. Use it on your own machine or in a small trusted group. The settings pages (`/access/tokens` and `/access/members`) only show a note.
 - **Shared mode** (the header is set): an auth proxy signs people in and verifair checks that they are members. Each agent uses a token owned by one member. This is the mode for a team.
 
 ### Set up shared mode
@@ -349,7 +349,7 @@ A request without the header, or with the header sent more than once, gets 401. 
 
 ### Members and roles
 
-Admins manage members on the **Access** page (`/access`, linked next to **Your identity** on the landing pages). To add a member, enter their id as the proxy sends it, a display name, and a role: `admin` or `member`. Ids are matched without regard to case: verifair stores them in lower case and turns the header value into lower case too, so `Jane@Example.com` and `jane@example.com` are the same member. The members table changes roles and deactivates or reactivates people. Members are never deleted, so their history stays.
+Admins manage members on the **Members** page (`/access/members`, under **Settings** in the sidebar). Other members cannot open it. To add a member, enter their id as the proxy sends it, a display name, and a role: `admin` or `member`. Ids are matched without regard to case: verifair stores them in lower case and turns the header value into lower case too, so `Jane@Example.com` and `jane@example.com` are the same member. The members table changes roles and deactivates or reactivates people. Members are never deleted, so their history stays.
 
 A deactivated member is refused on their next request, and all their tokens are revoked. Reactivating them does not bring old tokens back.
 
@@ -359,9 +359,9 @@ Admin and token actions are written to the app log as `access action=... actor=.
 
 ### Agent tokens
 
-Every member creates their own agent tokens on `/access`. A token looks like `vf_<id>.<secret>`. It is shown once, right after you create it. Copy it then; verifair keeps only a hash. Send it as `Authorization: Bearer vf_...`.
+Every member creates their own agent tokens on the **Agent tokens** page (`/access/tokens`, under **Settings** in the sidebar). `/access` takes you there. A token looks like `vf_<id>.<secret>`. It is shown once, right after you create it. Copy it then; verifair keeps only a hash. Send it as `Authorization: Bearer vf_...`.
 
-- The `/access` page lists your tokens. Revoke a token there when you no longer need it. Admins can revoke anyone's token.
+- The **Agent tokens** page lists your tokens with when each was created and last used (**Last used** shows `Never` until an agent uses it, and is updated at most once a minute). Revoke a token there when you no longer need it. Admins also see every member's tokens and can revoke any of them.
 - Deactivating a member revokes their tokens.
 - A token acts for its owner, but never with admin power, even when the owner is an admin. It cannot push to or comment on another member's report, and it cannot resolve threads that a person started.
 - The shared `VERIFAIR_API_TOKEN` is refused in shared mode with 401 `The shared token is not accepted in shared mode. Use a member agent token.`
@@ -402,7 +402,7 @@ Before you upgrade:
 
 After the upgrade:
 
-- Add the members on `/access` and give each agent a member token. The old shared token stops working.
+- Add the members on `/access/members` and give each agent a member token. The old shared token stops working.
 - Existing reports keep their `author_id`. Signed reports get it from their latest signature. A member can push new versions only to reports whose `author_id` is their id.
 - Every shared-mode startup turns the ids already stored on reports, signatures, verdicts, comments and review requests into lower case, so they match the members. It skips `agent`. When it changes anything it logs `lowercased ids values=N`, where N counts each changed id, so a comment whose author and resolver both changed counts 2. It runs only after the other startup checks pass, so a start that fails changes nothing. Local mode leaves ids as they are.
 - Reports with no owner are frozen. Push them again with an agent token under a new id.

@@ -3,6 +3,7 @@ import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -719,7 +720,7 @@ def test_init_schema_adds_the_token_nonce_to_an_older_database(tmp_path):
     )
     init_schema(c)
     init_schema(c)
-    assert "nonce" in _columns(c, "api_tokens")
+    assert {"nonce", "last_used_at"} <= set(_columns(c, "api_tokens"))
     add_user(c, id="m", name="M", role="member")
     create_token(c, owner_id="m", label="a", nonce="x1")
     with pytest.raises(db.AlreadyCreated):
@@ -795,6 +796,46 @@ def test_list_tokens_filters_by_owner_and_never_returns_digest(conn):
     assert {t["label"] for t in list_tokens(conn)} == {"ci", "laptop"}
     assert [t["label"] for t in list_tokens(conn, "m")] == ["laptop"]
     assert all("digest" not in t.keys() for t in list_tokens(conn))
+
+
+def test_token_last_used_is_throttled(conn):
+    add_user(conn, id="m", name="M", role="member")
+    token, row = create_token(conn, owner_id="m", label="a")
+
+    def last_used():
+        return conn.execute(
+            "SELECT last_used_at FROM api_tokens WHERE id=?", (row["id"],)
+        ).fetchone()[0]
+
+    def seconds_ago(n):
+        return (datetime.now(UTC) - timedelta(seconds=n)).isoformat(timespec="seconds")
+
+    assert authenticate_token(conn, token)[0]["id"] == "m"
+    assert last_used() is None
+    assert authenticate_token(conn, token, touch=True)[0]["id"] == "m"
+    assert last_used() is not None
+    recent = seconds_ago(30)
+    conn.execute("UPDATE api_tokens SET last_used_at=?", (recent,))
+    authenticate_token(conn, token, touch=True)
+    assert last_used() == recent
+    old = seconds_ago(61)
+    conn.execute("UPDATE api_tokens SET last_used_at=?", (old,))
+    authenticate_token(conn, token, touch=True)
+    assert last_used() > old
+    assert list_tokens(conn)[0]["last_used_at"] == last_used()
+    assert authenticate_token(conn, token + "x", touch=True) == (None, "unknown")
+
+
+def test_token_auth_survives_a_failed_last_used_write(conn, monkeypatch, caplog):
+    add_user(conn, id="m", name="M", role="member")
+    token, row = create_token(conn, owner_id="m", label="a")
+
+    def locked(*args):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(db, "_touch_token", locked)
+    assert authenticate_token(conn, token, touch=True)[0]["id"] == "m"
+    assert f"token last_used not saved id={row['id']}" in caplog.text
 
 
 def test_create_token_refuses_unknown_or_inactive_owner(conn):

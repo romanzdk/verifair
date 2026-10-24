@@ -6,7 +6,7 @@ import secrets
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from verifair.render import slugify
 
@@ -91,7 +91,8 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     label TEXT NOT NULL,
     created_at TEXT NOT NULL,
     revoked_at TEXT,
-    nonce TEXT
+    nonce TEXT,
+    last_used_at TEXT
 );
 CREATE INDEX IF NOT EXISTS comments_report_parent ON comments(report_id, parent_id);
 CREATE INDEX IF NOT EXISTS verdicts_report ON verdicts(report_id);
@@ -183,6 +184,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "comments", "suffix", "TEXT")
     _ensure_column(conn, "comments", "resolved_by", "TEXT")
     _ensure_column(conn, "api_tokens", "nonce", "TEXT")
+    _ensure_column(conn, "api_tokens", "last_used_at", "TEXT")
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS api_tokens_owner_nonce ON api_tokens(owner_id, nonce)"
         " WHERE nonce IS NOT NULL"
@@ -597,7 +599,8 @@ def get_signature(conn: sqlite3.Connection, report_id: str, version: int) -> sql
 
 
 ROLES = ("admin", "member")
-TOKEN_COLUMNS = "id, owner_id, label, created_at, revoked_at"
+TOKEN_COLUMNS = "id, owner_id, label, created_at, revoked_at, last_used_at"
+TOKEN_TOUCH_SECONDS = 60
 
 
 def _check_role(role: str) -> None:
@@ -701,14 +704,23 @@ def get_token(conn: sqlite3.Connection, token_id: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
+def _touch_token(conn: sqlite3.Connection, token_id: str, cutoff: str) -> None:
+    conn.execute(
+        "UPDATE api_tokens SET last_used_at=?"
+        " WHERE id=? AND (last_used_at IS NULL OR last_used_at < ?)",
+        (_now(), token_id, cutoff),
+    )
+
+
 def authenticate_token(
-    conn: sqlite3.Connection, token: str
+    conn: sqlite3.Connection, token: str, *, touch: bool = False
 ) -> tuple[sqlite3.Row | None, str | None]:
     if not token.startswith("vf_") or token.count(".") != 1:
         return None, "malformed"
     public_id, secret = token[3:].split(".")
     row = conn.execute(
-        "SELECT digest, owner_id, revoked_at FROM api_tokens WHERE id=?", (public_id,)
+        "SELECT digest, owner_id, revoked_at, last_used_at FROM api_tokens WHERE id=?",
+        (public_id,),
     ).fetchone()
     if row is None or not hmac.compare_digest(row["digest"], _digest(secret)):
         return None, "unknown"
@@ -717,6 +729,14 @@ def authenticate_token(
     owner = get_user(conn, row["owner_id"])
     if owner is None or not owner["active"]:
         return None, "inactive"
+    cutoff = (datetime.now(UTC) - timedelta(seconds=TOKEN_TOUCH_SECONDS)).isoformat(
+        timespec="seconds"
+    )
+    if touch and (row["last_used_at"] is None or row["last_used_at"] < cutoff):
+        try:
+            _touch_token(conn, public_id, cutoff)
+        except sqlite3.OperationalError:
+            log.warning("token last_used not saved id=%s", public_id)
     return owner, None
 
 

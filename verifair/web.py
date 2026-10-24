@@ -188,14 +188,21 @@ def _inbox(request: Request, conn: sqlite3.Connection, user_id: str) -> tuple[li
     return rows, groups
 
 
+def _need_count(groups: dict) -> int:
+    return sum(len(groups[key]) for key in ("review", "sign", "returned"))
+
+
 def _nav(conn: sqlite3.Connection, request: Request, user_id: str) -> dict:
     rows, groups = _inbox(request, conn, user_id)
     awaiting = Counter(r["report"]["project"] for r in rows if r["status"] == "awaiting_review")
-    projects = sorted(db.list_projects(conn), key=str.casefold)
+    projects = [
+        {"name": p, "awaiting": awaiting[p]}
+        for p in sorted(db.list_projects(conn), key=str.casefold)
+    ]
     return {
-        "nav_projects": [{"name": p, "awaiting": awaiting[p]} for p in projects],
-        "nav_more": max(0, len(projects) - NAV_PROJECTS_SHOWN),
-        "inbox_count": sum(len(groups[key]) for key in ("review", "sign", "returned")),
+        "nav_projects": projects[:NAV_PROJECTS_SHOWN],
+        "nav_rest": projects[NAV_PROJECTS_SHOWN:],
+        "inbox_count": _need_count(groups),
     }
 
 
@@ -412,10 +419,7 @@ def index(request: Request, conn: Conn, user: User, scope: str | None = None):
     ctx = {"active": "inbox", "first_run": not db.list_projects(conn)}
     if not ctx["first_run"]:
         groups = _inbox(request, conn, user[0])[1]
-        ctx |= {
-            "groups": groups,
-            "need_count": sum(len(groups[key]) for key in ("review", "sign", "returned")),
-        }
+        ctx |= {"groups": groups, "need_count": _need_count(groups)}
     return _page(request, conn, user, "inbox.html", ctx)
 
 
@@ -817,6 +821,7 @@ def _access(
     request: Request,
     conn: sqlite3.Connection,
     user,
+    page: Literal["tokens", "members"],
     *,
     error=None,
     token=None,
@@ -826,29 +831,28 @@ def _access(
     status=200,
 ):
     member = request.state.member
-    ctx = {
-        "active": "tokens",
-        "shared": _shared(request),
-        "error": error,
-        "new_token": token,
-        "token_note": token_note,
-        "member_error": member_error,
-        "member_form": member_form or {"id": "", "name": "", "role": "member"},
-        "roles": db.ROLES,
-        "nonce": secrets.token_urlsafe(16),
-    }
-    if member is not None:
+    ctx = {"active": page, "error": error}
+    if member is not None and page == "tokens":
+        ctx |= {
+            "new_token": token,
+            "token_note": token_note,
+            "nonce": secrets.token_urlsafe(16),
+            "tokens": db.list_tokens(conn, member["id"]),
+        }
+        if member["role"] == "admin":
+            ctx["all_tokens"] = db.list_tokens(conn)
+    elif member is not None:
         ctx |= {
             "me": member["id"],
-            "tokens": db.list_tokens(conn, member["id"]),
-            "is_admin": member["role"] == "admin",
+            "users": db.list_users(conn),
+            "roles": db.ROLES,
+            "member_error": member_error,
+            "member_form": member_form or {"id": "", "name": "", "role": "member"},
         }
-        if ctx["is_admin"]:
-            ctx |= {"users": db.list_users(conn), "all_tokens": db.list_tokens(conn)}
-    return _page(request, conn, user, "access.html", ctx, status)
+    return _page(request, conn, user, f"{page}.html", ctx, status)
 
 
-def _denied(request: Request, message: str, back: str | None = "/access", home: bool = True):
+def _denied(request: Request, message: str, back: str | None = "/access/tokens", home: bool = True):
     ctx = {"message": message, "back": back, "home": home}
     return templates.TemplateResponse(request, "denied.html", ctx, status_code=403)
 
@@ -863,8 +867,21 @@ Member = Annotated[sqlite3.Row, Depends(access_member)]
 
 
 @router.get("/access")
-def access_page(request: Request, conn: Conn, user: User):
-    return _access(request, conn, user)
+def access_page():
+    return RedirectResponse("/access/tokens", 303)
+
+
+@router.get("/access/tokens")
+def tokens_page(request: Request, conn: Conn, user: User):
+    return _access(request, conn, user, "tokens")
+
+
+@router.get("/access/members")
+def members_page(request: Request, conn: Conn, user: User):
+    member = request.state.member
+    if member is not None and member["role"] != "admin":
+        return _denied(request, ADMIN_ONLY)
+    return _access(request, conn, user, "members")
 
 
 @router.post("/access/users")
@@ -882,7 +899,9 @@ def add_member(
 
     def refuse(error: str, status: int):
         form = {"id": id, "name": name, "role": role}
-        return _access(request, conn, user, member_error=error, member_form=form, status=status)
+        return _access(
+            request, conn, user, "members", member_error=error, member_form=form, status=status
+        )
 
     clean_id, clean_name = id.strip().lower(), name.strip()
     if not (1 <= len(clean_id) <= 200 and 1 <= len(clean_name) <= 60):
@@ -896,7 +915,7 @@ def add_member(
     except ValueError:
         return refuse(MEMBER_EXISTS, 409)
     log.info("access action=add_user actor=%s target=%s role=%s", user[0], clean_id, role)
-    return RedirectResponse("/access", 303)
+    return RedirectResponse("/access/members", 303)
 
 
 @router.post("/access/users/{id:path}")
@@ -916,7 +935,7 @@ def update_member(
             conn, id, role=role, active=None if active is None else active == "1"
         )
     except db.LastAdmin:
-        return _access(request, conn, user, error=LAST_ADMIN, status=409)
+        return _access(request, conn, user, "members", error=LAST_ADMIN, status=409)
     except ValueError:
         raise HTTPException(404, "member not found") from None
     log.info(
@@ -927,7 +946,7 @@ def update_member(
         row["active"],
         revoked,
     )
-    return RedirectResponse("/access", 303)
+    return RedirectResponse("/access/members", 303)
 
 
 @router.post("/access/tokens")
@@ -941,15 +960,15 @@ def new_token(
 ):
     label = label.strip()
     if not 1 <= len(label) <= 60:
-        return _access(request, conn, user, error=LABEL_INPUT, status=422)
+        return _access(request, conn, user, "tokens", error=LABEL_INPUT, status=422)
     try:
         token, row = db.create_token(conn, owner_id=member["id"], label=label, nonce=nonce or None)
     except db.AlreadyCreated:
-        return _access(request, conn, user, token_note=ALREADY_CREATED)
+        return _access(request, conn, user, "tokens", token_note=ALREADY_CREATED)
     except ValueError:
         return _denied(request, DEACTIVATED.format(id=member["id"]), back=None, home=False)
     log.info("access action=create_token actor=%s target=%s", user[0], row["id"])
-    return _access(request, conn, user, token=token)
+    return _access(request, conn, user, "tokens", token=token)
 
 
 @router.post("/access/tokens/{token_id}/revoke")
@@ -961,4 +980,4 @@ def revoke_token(token_id: str, request: Request, conn: Conn, user: User, member
         return _denied(request, OWNER_ONLY)
     if db.revoke_token(conn, token_id):
         log.info("access action=revoke_token actor=%s target=%s", user[0], token_id)
-    return RedirectResponse("/access", 303)
+    return RedirectResponse("/access/tokens", 303)

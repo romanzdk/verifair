@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Agent tokens · verifair{% endblock %}
+{% block crumbs %}<span>Settings</span>{{ icon("chevron-right", "ic14") }}<span class="cur">Agent tokens</span>{% endblock %}
+{% macro new_token_fields() %}
+<input type="hidden" name="nonce" value="{{ nonce }}">
+<input name="label" maxlength="60" required placeholder="Label, for example laptop" aria-label="Token label" class="inp">
+<button class="btn p">Create token</button>
+{% endmacro %}
+{% macro token_rows(tokens, owner=False) %}
+<div class="panel"><table class="t">
+  <thead><tr>{% if owner %}<th>Owner</th>{% endif %}<th>Label</th><th>Token id</th><th>Created</th><th>Last used</th><th>Status</th><th class="r"><span class="sr-only">Actions</span></th></tr></thead>
+  <tbody>
+    {% for t in tokens %}
+    <tr>
+      {% if owner %}<td data-label="Owner"><span class="who"><span class="av sm {{ t.owner_id|avatar }}">{{ t.owner_id[:1]|upper }}</span>{{ t.owner_id }}</span></td>{% endif %}
+      <td data-label="Label">{{ t.label }}</td>
+      <td data-label="Token id"><code>{{ t.id }}</code></td>
+      <td data-label="Created"><time datetime="{{ t.created_at }}">{{ t.created_at|date }}</time></td>
+      <td data-label="Last used">{% if t.last_used_at %}<time datetime="{{ t.last_used_at }}">{{ t.last_used_at|ago }}</time>{% else %}Never{% endif %}</td>
+      {% if t.revoked_at %}
+      <td data-label="Status"><span class="badge b-unsigned">Revoked <time datetime="{{ t.revoked_at }}">{{ t.revoked_at|date }}</time></span></td>
+      <td></td>
+      {% else %}
+      <td data-label="Status"><span class="badge b-approved">Active</span></td>
+      <td class="r"><form method="post" action="/access/tokens/{{ t.id|segment }}/revoke"><button class="btn sm danger" aria-label="Revoke token {{ t.label }}" data-confirm="Revoke token {{ t.label }}?">Revoke</button></form></td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table></div>
+{% endmacro %}
+{% block actions %}{% if member %}
+<button class="btn p" popovertarget="vf_new_token_form">{{ icon("plus", "ic14") }}<span class="lbl">New token</span></button>
+<form id="vf_new_token_form" popover method="post" action="/access/tokens" class="menu">{{ new_token_fields() }}</form>
+{% endif %}{% endblock %}
+{% block content %}
+<main class="app-page">
+{% if not shared %}
+  <div class="ph"><div><h1>Agent tokens</h1></div></div>
+  <p>Access management needs a sign-in proxy. See the README.</p>
+{% else %}
+  {% set active_count = tokens|rejectattr("revoked_at")|list|length %}
+  <div class="ph"><div><h1>Agent tokens</h1><div class="meta">{{ active_count }} active token{{ "s" if active_count != 1 }}{% if all_tokens is defined %} · {{ all_tokens|rejectattr("revoked_at")|list|length }} across the workspace{% endif %}</div></div></div>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if new_token %}
+  {% set created = tokens|selectattr("id", "eq", new_token[3:].partition(".")[0])|first %}
+  <div class="secret">
+    <h3>{{ icon("key-round") }}Token “{{ created.label }}” created</h3>
+    <p id="vf_new_token_note">Copy it now. It will not be shown again.</p>
+    <div class="secret-row"><input readonly value="{{ new_token }}" id="vf_new_token" aria-label="New token" aria-describedby="vf_new_token_note" autocomplete="off" spellcheck="false" class="codebox"><button type="button" class="btn p" data-copy-target="vf_new_token">{{ icon("copy", "ic14") }}Copy token</button><span data-copy-result role="status"></span></div>
+  </div>
+  {% elif token_note %}
+  <div class="secret"><p role="status">{{ token_note }}</p></div>
+  {% endif %}
+  <div class="panel intro">
+    <div>
+      <h3>{{ icon("bot") }}What is an agent token?</h3>
+      <p>Your coding agent uses a token to push change reports and reply to comments. Reports it pushes are owned by you, and you sign them.</p>
+      <p>Make one token per machine or CI job, so you can revoke one without breaking the others. <a href="/docs">Read the API docs</a></p>
+    </div>
+    <div class="pre-wrap"><pre class="pre" id="vf_token_env">export VERIFAIR_URL={{ base_url }}
+export VERIFAIR_API_TOKEN=vf_…</pre><button type="button" class="icon-btn" data-copy-target="vf_token_env" aria-label="Copy environment variables">{{ icon("copy", "ic14") }}</button><span data-copy-result role="status"></span></div>
+  </div>
+  <section class="sec">
+    <h2>Your tokens</h2>
+    <p class="sub">Tokens you created. Revoking stops the agent at once.</p>
+    {% if tokens %}
+    {{ token_rows(tokens) }}
+    {% else %}
+    <form method="post" action="/access/tokens" class="panel inline-form">{{ new_token_fields() }}</form>
+    {% endif %}
+  </section>
+  {% if all_tokens is defined %}
+  <section class="sec">
+    <h2>All tokens</h2>
+    <p class="sub">Every member's tokens. Only admins see this.</p>
+    {% if all_tokens %}{{ token_rows(all_tokens, owner=True) }}{% else %}<p class="sub">No tokens yet.</p>{% endif %}
+  </section>
+  {% endif %}
+{% endif %}
+</main>
+{% endblock %}

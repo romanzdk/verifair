@@ -8,16 +8,15 @@
     {{ item("/changes?scope=author", icon("git-pull-request"), "My changes", active == "author") }}
     {{ item("/changes", icon("layers"), "All changes", active == "all") }}
     <h6>Projects</h6>
-    {% for p in nav_projects[:8] %}
+    {% for p in nav_projects %}
     {{ item("/p/" ~ p.name|urlencode, icon("folder"), p.name, p.name == active_project, p.awaiting) }}
     {% else %}
     <p class="none">No projects yet</p>
     {% endfor %}
-    {% if nav_more %}
-    {% set rest = nav_projects[8:]|map(attribute="name")|list %}
-    <details class="nav-more"{% if active_project in rest %} open{% endif %}>
-      <summary>Show {{ nav_more }} more</summary>
-      {% for p in nav_projects[8:] %}
+    {% if nav_rest %}
+    <details class="nav-more"{% if active_project in nav_rest|map(attribute="name") %} open{% endif %}>
+      <summary>Show {{ nav_rest|length }} more</summary>
+      {% for p in nav_rest %}
       {{ item("/p/" ~ p.name|urlencode, icon("folder"), p.name, p.name == active_project, p.awaiting) }}
       {% endfor %}
     </details>
