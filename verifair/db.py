@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS review_requests (
     reviewer_id TEXT NOT NULL,
     PRIMARY KEY (report_id, reviewer_id)
 );
+ALTER TABLE review_requests ADD COLUMN IF NOT EXISTS requested_by TEXT;
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -323,11 +324,12 @@ def push_report(
                     id,
                 ),
             )
+        owner = author_id if author_id is not None else (existing or {}).get("author_id")
         if reviewers:
             conn.cursor().executemany(
-                "INSERT INTO review_requests (report_id, reviewer_id) VALUES (%s, %s)"
-                " ON CONFLICT DO NOTHING",
-                [(id, reviewer) for reviewer in set(reviewers)],
+                "INSERT INTO review_requests (report_id, reviewer_id, requested_by)"
+                " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                [(id, reviewer, owner_id) for reviewer in set(reviewers) - {owner}],
             )
         conn.execute(
             'INSERT INTO versions (report_id, version, body, created_at, "commit")'
@@ -417,12 +419,21 @@ def requested_reviewers(conn: Connection, report_id: str) -> list[str]:
     ]
 
 
-def add_review_request(conn: Connection, report_id: str, reviewer_id: str) -> bool:
+def review_requesters(conn: Connection, report_id: str) -> dict[str, str | None]:
+    rows = conn.execute(
+        "SELECT reviewer_id, requested_by FROM review_requests WHERE report_id=%s", (report_id,)
+    )
+    return {row["reviewer_id"]: row["requested_by"] for row in rows}
+
+
+def add_review_request(
+    conn: Connection, report_id: str, reviewer_id: str, requested_by: str | None = None
+) -> bool:
     return (
         conn.execute(
-            "INSERT INTO review_requests (report_id, reviewer_id) VALUES (%s, %s)"
-            " ON CONFLICT DO NOTHING",
-            (report_id, reviewer_id),
+            "INSERT INTO review_requests (report_id, reviewer_id, requested_by)"
+            " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            (report_id, reviewer_id, requested_by),
         ).rowcount
         > 0
     )
@@ -727,8 +738,8 @@ def lowercase_human_ids(conn: Connection) -> int:
             params = (old, [id.lower() for id in old])
             if table == "review_requests":
                 conn.execute(
-                    "INSERT INTO review_requests (report_id, reviewer_id)"
-                    f" SELECT r.report_id, m.new FROM review_requests r, {mapping}"
+                    "INSERT INTO review_requests (report_id, reviewer_id, requested_by)"
+                    f" SELECT r.report_id, m.new, r.requested_by FROM review_requests r, {mapping}"
                     " WHERE r.reviewer_id = m.old ON CONFLICT DO NOTHING",
                     params,
                 )

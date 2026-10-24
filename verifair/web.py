@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import secrets
+import threading
 import zlib
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -23,12 +24,14 @@ from verifair.render import (
     build_threads,
     normalize,
     quote_found,
+    section_plain_text,
     split_sections,
     threads_by_section,
 )
 
 log = logging.getLogger("verifair")
 router = APIRouter()
+_MAIL_LOCK = threading.Lock()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 
@@ -854,25 +857,48 @@ def sign(
         text = notify.ready_for_review_text(report, version, name, settings.base_url)
         background.add_task(notify.send, settings, text)
         others = [p for p in db.requested_reviewers(conn, id) if p != user_id]
-        _email_reviewers(request, background, conn, report, others, name)
+        _email_reviewers(request, background, conn, report, version, others)
     ctx = report_context(conn, report, version, user_id, request.state.member, _shared(request))
     ctx |= {"oob": True, "verdict_oob": True}
     nav = _nav_oob(request, conn, user, ctx)
     return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html"], ctx, tail=nav)
 
 
-def _email_reviewers(request: Request, background, conn, report, recipients, asker: str):
+def _claim_mail(request: Request, keys: list[tuple[str, str, int]]) -> list[str]:
+    mailed = request.app.state.mailed
+    with _MAIL_LOCK:
+        new = [key for key in dict.fromkeys(keys) if key not in mailed]
+        mailed.update(new)
+    return [reviewer for _, reviewer, _ in new]
+
+
+def _email_reviewers(request, background, conn, report, version, recipients, added_by=None):
     settings = request.app.state.settings
     if not (settings.smtp_url and _shared(request)):
         return
-    active = {u["id"] for u in db.list_users(conn) if u["active"]}
-    recipients = [p for p in recipients if p in active and "@" in p]
+    users = {u["id"]: u for u in db.list_users(conn)}
+    recipients = [p for p in recipients if p in users and users[p]["active"]]
+    recipients = _claim_mail(request, [(report["id"], p, version) for p in recipients])
     if not recipients:
         return
-    body = db.get_version(conn, report["id"], db.latest_version(conn, report["id"]))["body"]
-    judge = next((s.text for s in split_sections(body) if s.heading == "Judge this"), "")
-    subject, text = notify.review_email(report, asker, judge, settings.base_url)
-    background.add_task(notify.email, settings, recipients, subject, text)
+    signature = db.get_signature(conn, report["id"], version)
+    judge = section_plain_text(db.get_version(conn, report["id"], version)["body"], "Judge this")
+    requesters = db.review_requesters(conn, report["id"])
+    letters = {}
+    for person in recipients:
+        by = requesters.get(person)
+        named = by in users and by not in (signature["signer_id"], person)
+        asker = added_by or (users[by]["name"] if named else None)
+        subject, letters[person] = notify.review_email(
+            report,
+            version,
+            judge,
+            settings.base_url,
+            signer=signature["signer_name"],
+            asker=asker,
+            added=added_by is not None,
+        )
+    background.add_task(notify.email, settings, report["id"], subject, letters)
 
 
 def _reviewers_response(request: Request, conn: db.Connection, report, user, error=None):
@@ -898,12 +924,13 @@ def request_review(
         if not request.headers.get("HX-Request"):
             raise HTTPException(422, REVIEWER_REFUSED)
         return _reviewers_response(request, conn, report, user, REVIEWER_REFUSED)
-    if db.add_review_request(conn, id, target["id"]):
+    if db.add_review_request(conn, id, target["id"], requested_by=user[0]):
         log.info(
             "access action=add_reviewer actor=%s target=%s report=%s", user[0], target["id"], id
         )
-        if target["id"] != user[0] and db.get_signature(conn, id, db.latest_version(conn, id)):
-            _email_reviewers(request, background, conn, report, [target["id"]], user[1])
+        latest = db.latest_version(conn, id)
+        if target["id"] != user[0] and db.get_signature(conn, id, latest):
+            _email_reviewers(request, background, conn, report, latest, [target["id"]], user[1])
     return _reviewers_response(request, conn, report, user)
 
 

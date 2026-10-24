@@ -59,6 +59,8 @@ SMTP_ERROR = (
     " or smtps://user:password@host:465"
 )
 
+FROM_ERROR = "VERIFAIR_EMAIL_FROM must be one plain address such as verifair@example.com."
+
 
 @pytest.mark.parametrize(
     ("url", "sender", "message"),
@@ -67,6 +69,9 @@ SMTP_ERROR = (
         ("https://u:secret@mail", "v@x.com", SMTP_ERROR),
         ("smtp://", "v@x.com", SMTP_ERROR),
         ("smtp://u:secret@mail:port", "v@x.com", SMTP_ERROR),
+        ("smtp://mail:1025", "Verifair <v@x.com>", FROM_ERROR),
+        ("smtp://mail:1025", "v@x.com, w@x.com", FROM_ERROR),
+        ("smtp://mail:1025", "verifair", FROM_ERROR),
     ],
 )
 def test_bad_email_settings_are_a_clear_error(monkeypatch, url, sender, message):
@@ -85,6 +90,13 @@ def test_email_settings_come_from_the_environment(monkeypatch):
     monkeypatch.setenv("VERIFAIR_EMAIL_FROM", " verifair@example.com ")
     s = load_settings()
     assert (s.smtp_url, s.email_from) == ("smtps://u:p@mail:465", "verifair@example.com")
+
+
+def test_smtp_in_local_mode_logs_that_no_mail_is_sent(settings, make_app, caplog):
+    make_app(replace(settings, smtp_url="smtp://mail:1025", email_from="v@x.com"))
+    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
+        ("WARNING", "VERIFAIR_SMTP_URL is ignored in local mode. Emails need shared mode.")
+    ]
 
 
 def _record_pools(monkeypatch):

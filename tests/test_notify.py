@@ -1,7 +1,10 @@
 import smtplib
 import ssl
+import threading
+import time
 from dataclasses import replace
 
+import anyio
 import httpx
 import pytest
 
@@ -137,6 +140,10 @@ class FakeSMTP:
     sessions = []
     offers_tls = True
     fail = None
+    refuse = ()
+    delay = 0
+    active = peak = 0
+    lock = threading.Lock()
 
     def __init__(self, host, port, timeout, context=None):
         self.host, self.port, self.timeout, self.context = host, port, timeout, context
@@ -163,8 +170,16 @@ class FakeSMTP:
         if FakeSMTP.fail:
             raise FakeSMTP.fail
 
-    def send_message(self, message):
-        self.sent.append(message)
+    def send_message(self, message, to_addrs=None):
+        if to_addrs[0] in self.refuse:
+            raise smtplib.SMTPRecipientsRefused({to_addrs[0]: (550, b"no")})
+        with FakeSMTP.lock:
+            FakeSMTP.active += 1
+            FakeSMTP.peak = max(FakeSMTP.peak, FakeSMTP.active)
+        time.sleep(self.delay)
+        with FakeSMTP.lock:
+            FakeSMTP.active -= 1
+        self.sent.append((message, to_addrs))
 
 
 class FakeSMTPSSL(FakeSMTP):
@@ -183,9 +198,13 @@ def mail_settings(url):
     return replace(make_settings(None), smtp_url=url, email_from="verifair@example.com")
 
 
+def send(url, letters, subject="S"):
+    notify.send_email(mail_settings(url), "r", subject, letters)
+
+
 def test_email_over_starttls_logs_in_with_decoded_credentials(smtp):
     url = "smtp://me%40example.com:p%40ss%3Aword@mail.example.com:587"
-    notify.email(mail_settings(url), ["bob@example.com", "carol@example.com"], "Subj", "Text")
+    send(url, {"bob@example.com": "Text", "carol@example.com": "Other"}, "Subj")
     [session] = smtp.sessions
     assert type(session) is FakeSMTP
     assert (session.host, session.port, session.timeout) == ("mail.example.com", 587, 10)
@@ -195,71 +214,140 @@ def test_email_over_starttls_logs_in_with_decoded_credentials(smtp):
         ("login", "me@example.com", "p@ss:word"),
         "quit",
     ]
-    assert [(m["From"], m["To"], m["Subject"]) for m in session.sent] == [
-        ("verifair@example.com", "bob@example.com", "Subj"),
-        ("verifair@example.com", "carol@example.com", "Subj"),
+    assert [(m["From"], m["To"], m["Subject"], to) for m, to in session.sent] == [
+        ("verifair@example.com", "bob@example.com", "Subj", ["bob@example.com"]),
+        ("verifair@example.com", "carol@example.com", "Subj", ["carol@example.com"]),
     ]
-    assert session.sent[0].get_content() == "Text\n"
+    assert [m.get_content() for m, _ in session.sent] == ["Text\n", "Other\n"]
 
 
 def test_email_without_starttls_or_credentials_sends_plain(smtp, monkeypatch):
     monkeypatch.setattr(smtp, "offers_tls", False)
-    notify.email(mail_settings("smtp://localhost:1025"), ["bob@example.com"], "S", "T")
+    send("smtp://localhost:1025", {"bob@example.com": "T"})
     [session] = smtp.sessions
     assert session.calls == ["ehlo", "quit"] and len(session.sent) == 1
 
 
+def test_credentials_are_never_sent_without_tls(smtp, monkeypatch, caplog):
+    monkeypatch.setattr(smtp, "offers_tls", False)
+    send("smtp://user:hunter2@mail.example.com:587", {"b@x.com": "T", "c@x.com": "T"})
+    [session] = smtp.sessions
+    assert session.calls == ["ehlo", "quit"] and session.sent == []
+    [record] = caplog.records
+    assert (record.levelname, record.getMessage()) == (
+        "WARNING",
+        "email not sent report=r recipients=2: the server offers no TLS,"
+        " so verifair does not send the SMTP password",
+    )
+    assert "hunter2" not in caplog.text
+
+
 def test_smtps_uses_implicit_tls_with_a_verifying_context(smtp):
-    notify.email(mail_settings("smtps://u:p@mail.example.com"), ["bob@example.com"], "S", "T")
+    send("smtps://u:p@mail.example.com", {"bob@example.com": "T"})
     [session] = smtp.sessions
     assert type(session) is FakeSMTPSSL and session.port == 0
     assert (session.context.verify_mode, session.context.check_hostname) == (
         ssl.CERT_REQUIRED,
         True,
     )
-    assert "ehlo" in session.calls and not any(c[0] == "starttls" for c in session.calls)
+    assert session.calls == ["ehlo", ("login", "u", "p"), "quit"] and len(session.sent) == 1
 
 
 def test_email_is_skipped_without_smtp_or_recipients(smtp):
-    notify.email(make_settings(None), ["bob@example.com"], "S", "T")
-    notify.email(mail_settings("smtp://localhost:1025"), [], "S", "T")
+    notify.send_email(make_settings(None), "r", "S", {"bob@example.com": "T"})
+    send("smtp://localhost:1025", {})
     assert smtp.sessions == []
 
 
-def test_email_failure_logs_one_warning_without_secrets(smtp, monkeypatch, caplog):
+def test_only_single_plain_addresses_get_mail(smtp):
+    bad = ["a@x.com,b@y.com", "Bob <b@x.com>", "ops", "b@x.com\r\nBcc: e@evil.com", "a@x.com b@y"]
+    send("smtp://localhost:1025", dict.fromkeys([*bad, "bob@example.com"], "T"))
+    [session] = smtp.sessions
+    assert [to for _, to in session.sent] == [["bob@example.com"]]
+    send("smtp://localhost:1025", dict.fromkeys(bad, "T"))
+    assert len(smtp.sessions) == 1
+
+
+def test_a_refused_recipient_does_not_stop_the_others(smtp, monkeypatch, caplog):
+    monkeypatch.setattr(smtp, "refuse", ("bad@x.com",))
+    send("smtp://localhost:1025", {"bad@x.com": "T", "bob@example.com": "T"})
+    assert [to for _, to in smtp.sessions[0].sent] == [["bob@example.com"]]
+    assert [r.getMessage() for r in caplog.records] == [
+        "email failed report=r recipients=1 error=SMTPRecipientsRefused code=-"
+    ]
+
+
+def test_email_failure_logs_one_warning_without_secrets_and_closes(smtp, monkeypatch, caplog):
     monkeypatch.setattr(smtp, "fail", smtplib.SMTPAuthenticationError(535, b"bad"))
-    notify.email(mail_settings("smtp://user:hunter2@mail.example.com"), ["b@x.com"], "S", "T")
+    send("smtps://user:hunter2@mail.example.com", {"b@x.com": "T", "c@x.com": "T"})
     [record] = caplog.records
     assert (record.levelname, record.getMessage()) == (
         "WARNING",
-        "email failed: SMTPAuthenticationError 535",
+        "email failed report=r recipients=2 error=SMTPAuthenticationError code=535",
     )
     assert "hunter2" not in caplog.text and "mail.example.com" not in caplog.text
+    assert "b@x.com" not in caplog.text
+    assert smtp.sessions[0].calls[-1] == "quit"
 
 
-def test_review_email_text():
+def test_emails_use_their_own_limit_of_two_threads(smtp, monkeypatch):
+    monkeypatch.setattr(smtp, "delay", 0.1)
+    monkeypatch.setattr(smtp, "peak", 0)
+    settings = mail_settings("smtp://localhost:1025")
+
+    async def main():
+        async with anyio.create_task_group() as tg:
+            for n in range(5):
+                tg.start_soon(notify.email, settings, "r", "S", {f"b{n}@x.com": "T"})
+
+    anyio.run(main)
+    assert smtp.peak == 2 and len(smtp.sessions) == 5
+
+
+TITLE = REPORT | {"title": "Pro\r\n  Bcc: x@evil.com"}
+
+
+def test_review_email_after_signing_names_signer_and_asker():
     subject, text = notify.review_email(
-        REPORT | {"title": "Pro\r\nBcc: x@evil.com"}, "Ann", "Is a day right?", "http://x"
+        TITLE, 3, "Is a day right?", "http://x", signer="Alice", asker="Bob"
     )
-    assert subject == "Review requested: Pro Bcc: x@evil.com"
+    assert subject == 'Review requested: "Pro Bcc: x@evil.com"'
     assert text == (
-        "Ann asked you to review Pro\r\nBcc: x@evil.com.\n"
-        "Project: billing-service\n"
-        "Risk: high\n\n"
+        'Alice signed v3 of "Pro Bcc: x@evil.com". You were asked to review it by Bob.\n\n'
+        "Project: billing-service · Risk: high\n\n"
         "Judge this:\n"
         "Is a day right?\n\n"
-        "http://x/r/prorate"
+        "Open it to comment, approve or request changes:\n"
+        "http://x/r/prorate\n\n"
+        "— Sent by verifair. Replies to this mail are not read."
     )
-
-
-def test_review_email_trims_judge_this_and_omits_it_when_empty(smtp):
-    _, text = notify.review_email(REPORT, "Ann", "a" * 2000, "http://x")
-    assert f"\n{'a' * 1500}…\n" in text
-    _, text = notify.review_email(REPORT, "Ann", "", "http://x")
+    _, text = notify.review_email(REPORT, 3, "", "http://x", signer="Alice")
+    assert text.startswith('Alice signed v3 of "Prorate". You were asked to review it.\n\n')
     assert "Judge this" not in text
 
 
+def test_review_email_when_added_after_signing():
+    _, text = notify.review_email(
+        REPORT, 3, "", "http://x", signer="Alice", asker="Bob", added=True
+    )
+    assert text.startswith('Bob asked you to review "Prorate" (v3, signed by Alice).\n\n')
+
+
+def test_review_email_cuts_judge_this_at_a_word_or_line():
+    words = " ".join(["word"] * 400)
+    _, text = notify.review_email(REPORT, 1, words, "http://x", signer="A")
+    judge = text.split("Judge this:\n")[1].split("\n\nOpen it")[0]
+    assert judge.endswith("word\nRead the rest on the page.")
+    assert len(judge) <= 1500 + len("\nRead the rest on the page.")
+    lines = "\n".join(["a" * 99] * 20)
+    _, text = notify.review_email(REPORT, 1, lines, "http://x", signer="A")
+    judge = text.split("Judge this:\n")[1].split("\n\nOpen it")[0]
+    assert judge == "\n".join(["a" * 99] * 15) + "\nRead the rest on the page."
+    _, text = notify.review_email(REPORT, 1, "x" * 1600, "http://x", signer="A")
+    assert "x" * 1500 + "\nRead the rest on the page." in text
+
+
 def test_title_with_newlines_still_sends(smtp):
-    subject, text = notify.review_email(REPORT | {"title": "A\nB"}, "Ann", "", "http://x")
-    notify.email(mail_settings("smtp://localhost:1025"), ["bob@example.com"], subject, text)
-    assert smtp.sessions[0].sent[0]["Subject"] == "Review requested: A B"
+    subject, text = notify.review_email(REPORT | {"title": "A\nB"}, 1, "", "http://x", signer="Ann")
+    send("smtp://localhost:1025", {"bob@example.com": text}, subject)
+    assert smtp.sessions[0].sent[0][0]["Subject"] == 'Review requested: "A B"'

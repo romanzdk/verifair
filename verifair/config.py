@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from email.utils import getaddresses
 from urllib.parse import urlsplit
 
 
@@ -22,6 +23,10 @@ DEFAULT_REQUIRED_SECTIONS = "Verification,Rollback,Security impact"
 
 def _split(raw: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def one_address(value: str) -> bool:
+    return "@" in value and getaddresses([value]) == [("", value)]
 
 
 def _valid_smtp_url(url: str) -> bool:
@@ -58,6 +63,10 @@ def load_settings() -> Settings:
         )
     if smtp_url and not email_from:
         raise RuntimeError("VERIFAIR_EMAIL_FROM is required when VERIFAIR_SMTP_URL is set.")
+    if email_from and not one_address(email_from):
+        raise RuntimeError(
+            "VERIFAIR_EMAIL_FROM must be one plain address such as verifair@example.com."
+        )
     return Settings(
         api_token=api_token,
         database_url=database_url,

@@ -108,6 +108,8 @@ def create_app(settings: Settings) -> FastAPI:
         )
     if settings.identity_header and settings.api_token:
         log.warning("VERIFAIR_API_TOKEN is ignored in shared mode. Agents need member tokens.")
+    if settings.smtp_url and not settings.identity_header:
+        log.warning("VERIFAIR_SMTP_URL is ignored in local mode. Emails need shared mode.")
     pool = db.open_pool(settings.database_url, settings.db_pool_size)
     try:
         # init_schema's advisory lock lasts until this commit, so replicas starting
@@ -144,6 +146,7 @@ def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="verifair", lifespan=lifespan)
     app.state.settings = settings
     app.state.pool = pool
+    app.state.mailed = set()
     app.state.pool_slots = asyncio.Semaphore(settings.db_pool_size)
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.include_router(api.router)

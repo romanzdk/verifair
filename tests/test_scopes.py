@@ -1,4 +1,5 @@
 import re
+from contextlib import closing
 from dataclasses import replace
 
 import pytest
@@ -85,6 +86,13 @@ def test_local_publish_preserves_ownership_and_only_adds_requests(client):
     for reviewers in ([], None):
         publish(client, reviewers=reviewers)
         assert report(client)["reviewers"] == ["alice@example.com", "bob@example.com"]
+
+
+def test_local_publish_drops_the_owner_from_reviewers(client, settings):
+    publish(client, author_id="alice", reviewers=["alice", "bob"])
+    assert report(client)["reviewers"] == ["bob"]
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.review_requesters(conn, "owned") == {"bob": None}
 
 
 def test_shared_publish_only_adds_review_requests(team):

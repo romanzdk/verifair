@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from verifair import db
 
-BODY = "## Intent\nCharge by day.\n\n## Judge this\nIs a day the right unit?"
+BODY = "## Intent\nCharge by day.\n\n## Judge this\nIs a **day** the right [unit](https://e.com)?"
 ALICE = {"X-Forwarded-Email": "alice@example.com"}
 BOB = {"X-Forwarded-Email": "bob@example.com"}
 HX = {"HX-Request": "true"}
@@ -145,7 +145,8 @@ class Outbox:
             def has_extn(self, name):
                 return False
 
-            def send_message(self, message):
+            def send_message(self, message, to_addrs):
+                assert to_addrs == [message["To"]]
                 outbox.sent.append(message)
 
         return Session()
@@ -172,22 +173,39 @@ def sent(outbox):
 def test_signing_emails_every_requested_reviewer_except_the_signer(mail, team, outbox):
     db.add_user(team, id="gone@example.com", name="gone", role="member")
     db.add_user(team, id="ops", name="ops", role="member")
-    for who in ("bob@example.com", "carol@example.com", "gone@example.com", "ops"):
+    db.add_user(team, id="a@x.com,b@y.com", name="two", role="member")
+    for who in ("bob@example.com", "gone@example.com", "ops", "a@x.com,b@y.com"):
         add(mail, who)
+    add(mail, "carol@example.com", headers=ALICE)
     db.add_review_request(team, "r", "alice@example.com")
     db.update_user(team, "gone@example.com", active=False)
     assert outbox.sent == []
     assert mail.post("/r/r/sign", data={"version": 1}, headers=ALICE).status_code == 200
     assert sent(outbox) == [
-        ("bob@example.com", "Review requested: T"),
-        ("carol@example.com", "Review requested: T"),
+        ("bob@example.com", 'Review requested: "T"'),
+        ("carol@example.com", 'Review requested: "T"'),
     ]
-    text = outbox.sent[0].get_content()
-    assert text.startswith("alice asked you to review T.\nProject: p\nRisk: high\n")
-    assert "Judge this:\nIs a day the right unit?\n" in text
-    assert text.endswith("http://localhost:8000/r/r\n")
+    bob, carol = (m.get_content() for m in outbox.sent)
+    assert bob == (
+        'alice signed v1 of "T". You were asked to review it.\n\n'
+        "Project: p · Risk: high\n\n"
+        "Judge this:\nIs a day the right unit?\n\n"
+        "Open it to comment, approve or request changes:\nhttp://localhost:8000/r/r\n\n"
+        "— Sent by verifair. Replies to this mail are not read.\n"
+    )
+    assert carol.startswith('alice signed v1 of "T". You were asked to review it.\n')
     mail.post("/r/r/sign", data={"version": 1}, headers=ALICE)
     assert len(outbox.sent) == 2
+
+
+def test_signing_names_who_asked_when_it_was_not_the_signer(mail, team, outbox):
+    add(mail, "carol@example.com", headers=BOB)
+    mail.post("/r/r/sign", data={"version": 1}, headers=ALICE)
+    assert (
+        outbox.sent[0]
+        .get_content()
+        .startswith('alice signed v1 of "T". You were asked to review it by bob.\n')
+    )
 
 
 def test_adding_a_reviewer_to_a_signed_version_emails_only_them(mail, team, outbox):
@@ -198,8 +216,46 @@ def test_adding_a_reviewer_to_a_signed_version_emails_only_them(mail, team, outb
     add(mail, "carol@example.com")
     add(mail, "carol@example.com")
     add(mail, "bob@example.com", headers=BOB)
-    assert sent(outbox) == [("carol@example.com", "Review requested: T")]
-    assert outbox.sent[0].get_content().startswith("bob asked you to review T.")
+    assert sent(outbox) == [("carol@example.com", 'Review requested: "T"')]
+    assert (
+        outbox.sent[0]
+        .get_content()
+        .startswith('bob asked you to review "T" (v1, signed by alice).\n')
+    )
+
+
+def test_one_email_per_reviewer_and_version(mail, team, outbox):
+    add(mail, "carol@example.com")
+    mail.post("/r/r/sign", data={"version": 1}, headers=ALICE)
+    for _ in range(2):
+        mail.post("/r/r/reviewers/carol%40example.com/remove", headers=BOB | HX)
+        add(mail, "carol@example.com")
+    assert sent(outbox) == [("carol@example.com", 'Review requested: "T"')]
+    db.push_report(team, project="p", title="T", risk="high", body=BODY, id="r")
+    mail.post("/r/r/sign", data={"version": 2}, headers=ALICE)
+    assert len(outbox.sent) == 2 and "signed v2" in outbox.sent[1].get_content()
+
+
+def test_requests_remember_who_asked(shared_client, team):
+    add(shared_client, "carol@example.com")
+    token, _ = db.create_token(team, owner_id="alice@example.com", label="agent")
+    pushed = shared_client.post(
+        "/api/reports",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "id": "r",
+            "project": "p",
+            "title": "T",
+            "risk": "high",
+            "body": BODY,
+            "reviewers": ["carol@example.com", "admin@example.com", "alice@example.com"],
+        },
+    )
+    assert pushed.status_code == 201
+    assert db.review_requesters(team, "r") == {
+        "carol@example.com": "bob@example.com",
+        "admin@example.com": "alice@example.com",
+    }
 
 
 def test_a_push_makes_an_unsigned_version_so_it_sends_no_email(mail, team, outbox):
@@ -225,7 +281,7 @@ def test_smtp_failure_logs_one_warning_and_the_request_succeeds(mail, team, outb
     outbox.fail = True
     assert mail.post("/r/r/sign", data={"version": 1}, headers=ALICE).status_code == 200
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-    assert warnings == ["email failed: ConnectionRefusedError"]
+    assert warnings == ["email failed report=r recipients=1 error=ConnectionRefusedError code=-"]
     assert db.get_signature(team, "r", 1) is not None
 
 
