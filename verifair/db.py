@@ -89,7 +89,6 @@ CREATE TABLE IF NOT EXISTS review_requests (
     reviewer_id TEXT NOT NULL,
     PRIMARY KEY (report_id, reviewer_id)
 );
-ALTER TABLE review_requests ADD COLUMN IF NOT EXISTS requested_by TEXT;
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -235,6 +234,12 @@ def init_schema(conn: Connection) -> None:
         conn.execute("SET LOCAL lock_timeout = '5s'")
         conn.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK,))
         conn.execute(SCHEMA)
+        # ALTER takes an ACCESS EXCLUSIVE lock even when the column exists, so only run it once
+        if not conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()"
+            " AND table_name = 'review_requests' AND column_name = 'requested_by'"
+        ).fetchone():
+            conn.execute("ALTER TABLE review_requests ADD COLUMN IF NOT EXISTS requested_by TEXT")
 
 
 def push_report(
