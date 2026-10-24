@@ -88,12 +88,12 @@ verifair only accepts an email that the provider marks as verified (the `email_v
 
 - Opening any page without a session sends you to `/login`, which sends you to the provider. After sign-in you come back to the page you opened.
 - Your member id is your email in lower case.
-- Only members get a session. Someone who signs in but was never added sees a 403 page with the email to add.
+- Only active members get a session. Someone who signs in but was never added sees a 403 page with the email to add. A deactivated member sees the 403 "turned off" page and is never linked to an account.
 - A member's first sign-in links them to their account at the provider (the `sub` claim). Later sign-ins with the same email from a different account are refused with `This email is linked to a different account. Ask an admin to reset your sign-in.` An admin fixes that with **Reset sign-in** on the Members page.
 - verifair keeps you signed in for 7 days with a cookie signed by `VERIFAIR_SESSION_SECRET`. After that you sign in again. Changing the secret signs everyone out. Every replica must use the same secret, or people are signed out when a request reaches another replica. On HTTPS the cookies are named `__Host-vf_session` and `__Host-vf_signin`, so other subdomains cannot set them.
 - **Sign out** is at the bottom of the sidebar. It ends the session in that browser only, not in other browsers and not your session at the provider. **Reset sign-in** and deactivation end all of a member's sessions.
 - verifair checks membership on every request. A deactivated member is refused on their next request, even with a valid session cookie.
-- If the provider cannot be reached, verifair waits 30 seconds before it tries again, so sign-in pages fail fast meanwhile. People who are already signed in keep working.
+- verifair reads the provider's configuration at the first sign-in after a start and keeps it. If the provider cannot be reached for that first read, verifair waits 30 seconds before it tries again, so sign-in pages fail fast meanwhile. After the configuration is read, a provider that is down shows the "could not reach" page after a 10 second timeout. People who are already signed in keep working.
 - If you move to a different provider (a new `VERIFAIR_OIDC_ISSUER`), the old links no longer match, so clear them once: `psql "$VERIFAIR_DATABASE_URL" -c "UPDATE users SET oidc_sub=NULL"`. Each member's next sign-in links them again.
 - verifair checks the ID token it gets straight from the provider over HTTPS: issuer, audience, expiry, nonce, verified email and allowed domains. The sign-in uses `state` and PKCE, so a sign-in started on one browser cannot be finished on another.
 
@@ -118,7 +118,7 @@ Once a database has members, it stays in shared mode. Starting it without `VERIF
 - A page opened without a valid session goes to sign-in. An htmx request or a form post without one gets 401 `Sign in to use verifair.`, with a **Sign in** link that comes back to the page.
 - Someone who signs in but was never added gets 403 with a note to ask an admin to add their email, and no session. A deactivated member gets 403 `Your access to this workspace was turned off. Ask an admin to reactivate {id}.`
 - Each refusal is logged at INFO as `membership denied reason=... path=...`. The reason is `no-session`, `bad-session` (a changed, expired or foreign cookie), `signed-out` (the session was ended by **Reset sign-in** or deactivation), `not-member` or `inactive`.
-- A failed sign-in shows **Sign-in failed** with a link to try again, and logs `sign-in failed reason=...`. The reason is `no-flow` (the sign-in took longer than 10 minutes or the cookie is missing), `state`, `provider-error` (with the provider's `error` value), `no-code`, `discovery`, `token-endpoint` (with the HTTP status and the provider's `error` value), `id-token`, `iss`, `aud`, `exp`, `iat`, `nonce`, `email` (missing, not verified or not ASCII), `domain`, `account` (the email is linked to a different account) or `not-member`. When the provider cannot be reached the page says so and answers 502. When the email, domain or linked account is the problem, the page says that trying again will not help.
+- A failed sign-in shows **Sign-in failed** with a link to try again, and logs `sign-in failed reason=...`. The reason is `no-flow` (the sign-in took longer than 10 minutes or the cookie is missing), `state`, `provider-error` (with the provider's `error` value), `no-code`, `discovery`, `token-endpoint` (with the HTTP status and the provider's `error` value), `id-token`, `iss`, `aud`, `exp`, `iat`, `nonce`, `email` (missing, not verified or not ASCII), `domain`, `account` (the email is linked to a different account), `not-member` or `inactive` (a deactivated member, who gets the 403 "turned off" page and no session). When the provider cannot be reached the page says so and answers 502. When the email, domain or linked account is the problem, the page says that trying again will not help.
 - If a sign-in fails in one tab while the browser already has a valid session (for example from another tab), verifair goes back to the page instead of showing the error.
 - `/healthz`, `/readyz`, `/static/`, `/login`, `/auth/callback`, `/logout` and `/signed-out` stay public. `/api/` uses tokens. Every other page, including `/docs` and `/openapi.json`, needs membership.
 
@@ -143,6 +143,13 @@ Admins manage members on the **Members** page (`/access/members`, under **Settin
 A deactivated member is refused on their next request, is signed out in every browser, and all their tokens are revoked. Reactivating them does not bring old tokens or sessions back.
 
 **Reset sign-in** forgets which provider account a member is linked to and signs them out in every browser. Use it when someone's account at the provider changed, or when you think someone else signed in as them. Their next sign-in links them again.
+
+A reset alone lets whoever signs in next with that email claim the member, so if you think someone else signed in as them, use this order:
+
+1. Deactivate the member. verifair never links or signs in a deactivated member.
+2. Fix or remove the wrong account at the provider.
+3. **Reset sign-in**.
+4. Reactivate the member. Their next sign-in links them again.
 
 There must always be at least one active admin. verifair refuses to demote or deactivate the last one: `There must be at least one active admin.`
 
