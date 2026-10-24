@@ -2157,3 +2157,27 @@ def test_comment_with_quote_missing_from_section_is_refused(client):
     r = client.post("/r/prorate/comments", data=data, headers={"HX-Request": "true"})
     assert (r.status_code, r.json()) == (422, {"detail": "quote not found"})
     assert api_threads(client) == []
+
+
+def _rail_reviewers(page):
+    return page.split("<h4>Reviewers</h4>")[1].split("<h4>Versions</h4>")[0]
+
+
+def test_sidebar_lists_requested_reviewers_next_to_verdicts(client):
+    push(client, reviewers=["bob00000", "carol000"])
+    sign(client)
+    rail = _rail_reviewers(client.get("/r/prorate").text)
+    assert "Nobody yet." not in rail
+    assert re.findall(r'<span class="rn">([^<]*)</span> · ([^<]*)</div>', rail) == [
+        ("bob00000", "review requested"),
+        ("carol000", "review requested"),
+    ]
+    client.cookies.set("vf_id", "bob00000")
+    client.cookies.set("vf_name", "Bob")
+    client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
+    rail = _rail_reviewers(client.get("/r/prorate").text)
+    assert rail.count('class="rev"') == 2
+    assert ">approved v1</span>" in rail and "Bob" in rail
+    assert re.findall(r'<span class="rn">([^<]*)</span> · ([^<]*)</div>', rail) == [
+        ("carol000", "review requested")
+    ]

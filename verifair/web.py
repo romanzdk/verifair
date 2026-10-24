@@ -375,7 +375,7 @@ def report_context(
         "open_count": len(open_threads),
         "blocking_count": sum(t.blocking for t in open_threads),
         "open_by_section": Counter(t.section_slug for t in open_threads),
-        "reviewers": rules.reviewers(comments, verdicts),
+        "reviewers": rules.reviewers(comments, verdicts, _requested(conn, id)),
         "versions": db.list_versions(conn, id)[::-1],
         "links": _links(report),
         "my_verdict": rules.latest_verdicts(verdicts, current).get(user_id),
@@ -390,6 +390,12 @@ def report_context(
         },
         "resolvers": {cid: names.get(by, by) for cid, by in resolved_by.items()},
     }
+
+
+def _requested(conn: db.Connection, id: str) -> dict[str, str]:
+    requested = db.requested_reviewers(conn, id)
+    names = {u["id"]: u["name"] for u in db.list_users(conn)} if requested else {}
+    return {person: names.get(person, person) for person in requested}
 
 
 def _thread_response(

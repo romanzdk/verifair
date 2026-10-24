@@ -58,7 +58,9 @@ def compute_status(
     return "awaiting_review"
 
 
-def reviewers(comments: list[Row], verdicts: list[Row]) -> list[Reviewer]:
+def reviewers(
+    comments: list[Row], verdicts: list[Row], requested: dict[str, str] | None = None
+) -> list[Reviewer]:
     names: dict[str, str] = {}
     latest: dict[str, Row] = {}
     rows = [(r, r["author_id"], r["author_name"]) for r in comments]
@@ -79,6 +81,9 @@ def reviewers(comments: list[Row], verdicts: list[Row]) -> list[Reviewer]:
             result.append(
                 Reviewer(person_id, name, row["verdict"], row["version"], label, row["summary"])
             )
+    for person_id, name in (requested or {}).items():
+        if person_id not in names:
+            result.append(Reviewer(person_id, name, None, None, "review requested"))
     return sorted(result, key=lambda r: r.name)
 
 
