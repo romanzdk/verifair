@@ -17,14 +17,33 @@ verifair is a small web service where agents push markdown change-review reports
 ## Run it
 
 ```bash
+docker compose up --build
+```
+
+Open http://localhost:8000. The agent token is `change-me`. Set `VERIFAIR_API_TOKEN` before you start to use another one. Users set a display name (kept in a cookie). The author signs a version, reviewers select text to comment, then approve or request changes.
+
+This is local mode. For a team, use shared mode. See [Roles and access](#roles-and-access).
+
+To run from source, start only the database and point verifair at it:
+
+```bash
+docker compose up -d db
 uv sync
 export VERIFAIR_API_TOKEN=change-me
+export VERIFAIR_DATABASE_URL=postgresql://verifair:verifair@localhost:5432/verifair
 uv run uvicorn verifair.asgi:app
 ```
 
-Open http://localhost:8000. Users set a display name (kept in a cookie). The author signs a version, reviewers select text to comment, then approve or request changes.
+Every start runs the schema SQL, which is safe to repeat. It runs under an advisory lock, so several copies can start at once. `CREATE INDEX IF NOT EXISTS` takes a lock that waits behind writes in progress, so a start can wait up to 5 seconds. After that it stops with `Startup waited too long for a database lock held by another transaction. Restart to try again.`
 
-This is local mode. For a team, use shared mode. See [Roles and access](#roles-and-access).
+## Run the tests
+
+```bash
+docker compose up -d db
+uv run pytest
+```
+
+Each test gets its own schema in that database and drops it at the end. Set `VERIFAIR_TEST_DATABASE_URL` to use another Postgres. To reset everything, including the data, run `docker compose down -v`.
 
 ## Personal views
 
@@ -47,7 +66,7 @@ Below 1024px wide the sidebar becomes a menu that opens from the top bar. On the
 
 Your id is at the bottom of the sidebar, with a button to copy it. Give it to your agent. Set `author_id` to the owner's id and `reviewers` to the requested reviewers' ids when publishing. In shared mode the agent token sets the owner, so `author_id` can be left out. Display names do not decide ownership. Review requests help people find work. Anyone with access can still read and review a report, and the normal signing and approval rules apply.
 
-Local identities belong to a browser. With the auth proxy described under Deploying, the trusted identity header supplies the same ID across devices. Existing signed reports get their owner from their latest recorded signature when the database is upgraded. In local mode, signing a report without an owner records the signer as the owner, and **My changes** also lists unowned reports whose `author` equals your identity. In shared mode only `author_id` counts, and a report without an owner is frozen (see [Report ownership](#report-ownership)).
+Local identities belong to a browser. With the auth proxy described under Deploying, the trusted identity header supplies the same ID across devices. In local mode, signing a report without an owner records the signer as the owner, and **My changes** also lists unowned reports whose `author` equals your identity. In shared mode only `author_id` counts, and a report without an owner is frozen (see [Report ownership](#report-ownership)).
 
 ## Push a report
 
@@ -90,7 +109,7 @@ The commands below use the report `id` as `$ID`. In shared mode, use your own ag
 - On later versions, omitted `author`, `author_id` and `reviewers` retain their previous values. In local mode a supplied `author_id` transfers ownership; a supplied reviewer list replaces the requests, and `reviewers: []` clears them. `null` for `author_id` or `reviewers` also leaves the existing value unchanged. Requests belong to the change and survive signing, verdicts and new versions.
 - Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
 - The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as a top-level H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
-- Unknown JSON keys are rejected with 422.
+- Unknown JSON keys are rejected with 422. So is text that holds a NUL character (`\u0000`), because Postgres cannot store it.
 - In shared mode the token owner owns the report. `author_id` can be left out; if sent, it must be the token owner, or the push gets 403 `"author_id must be the token owner."`. A push to an `id` that belongs to another member's report gets 403 `"This report belongs to another member."`, also when the token owner is an admin. A push to an `id` whose report has no owner gets 403 `"This report has no owner. Push it again with an agent token under a new id."`. Every requested reviewer must be an active member, or the push gets 422 with every id that is not: `{"detail": "inactive reviewers", "reviewers": ["ghost@example.com"]}`.
 
 A push sends a "draft" message to Slack (if configured). The "ready for review" message is sent when the version is signed.
@@ -255,7 +274,8 @@ An unknown section also lists the valid headings: `{"detail": "unknown section",
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `VERIFAIR_API_TOKEN` | required in local mode | Bearer token agents use for `/api` in local mode. Not accepted in shared mode (startup logs a warning if it is set) |
-| `VERIFAIR_DB_PATH` | `./verifair.db` | SQLite file |
+| `VERIFAIR_DATABASE_URL` | required | Postgres connection URL (libpq format), for example `postgresql://verifair:verifair@localhost:5432/verifair` |
+| `VERIFAIR_DB_POOL_SIZE` | `10` | Most database connections one verifair process opens. A request waits up to 10 seconds for a free one, then fails with 500 |
 | `VERIFAIR_BASE_URL` | `http://localhost:8000` | Used for links in API responses and notifications |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | Comma-separated H2 headings every pushed body must have; empty turns the check off |
 | `VERIFAIR_IDENTITY_HEADER` | unset | Name of a request header that carries the user identity. Setting it turns on shared mode (see Roles and access) |
@@ -332,6 +352,19 @@ export VERIFAIR_BOOTSTRAP_ADMIN_ID=jane@example.com
 uv run uvicorn verifair.asgi:app
 ```
 
+With compose, put the same settings in a `docker-compose.override.yml` next to `docker-compose.yml`. Compose reads it on its own. `!reset null` removes the API token the main file sets:
+
+```yaml
+services:
+  app:
+    environment:
+      VERIFAIR_IDENTITY_HEADER: X-Forwarded-Email
+      VERIFAIR_BOOTSTRAP_ADMIN_ID: jane@example.com
+      VERIFAIR_API_TOKEN: !reset null
+```
+
+The proxy rules above still apply. Compose only starts verifair on `127.0.0.1:8000`, so you still need to put an auth proxy in front of it.
+
 Startup fails when the database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set. It also fails when `VERIFAIR_BOOTSTRAP_ADMIN_ID` is set without `VERIFAIR_IDENTITY_HEADER`, so a missing header does not quietly start local mode. It also fails when the id is not a plain id (no spaces, `/` or `\`, and not `agent`). Startup logs `bootstrap admin created id=...` or `bootstrap skipped: members exist`.
 
 Once a database has members, it stays in shared mode. Starting it without `VERIFAIR_IDENTITY_HEADER` fails with `This database has members. Set VERIFAIR_IDENTITY_HEADER to run in shared mode.` This stops a config mistake from opening the workspace to everyone.
@@ -375,7 +408,7 @@ Every member creates their own agent tokens on the **Agent tokens** page (`/acce
 
 The token owner owns every report the token pushes. Report ids are chosen by the client. If an id is already used by another member's report, the push gets 403 `This report belongs to another member.` Pick a different id, or leave `id` out and verifair makes a new one. Ownership cannot be transferred.
 
-A report with no owner (an old report pushed with the shared token and never signed) is frozen in shared mode. Nobody can sign it, push a new version to it, or comment on it with an agent token. People can still read it and comment in the browser. To go on, push it again with an agent token under a new id.
+A report with no owner (a report pushed in local mode and never signed) is frozen in shared mode. Nobody can sign it, push a new version to it, or comment on it with an agent token. People can still read it and comment in the browser. To go on, push it again with an agent token under a new id.
 
 ### Moderation
 
@@ -391,29 +424,27 @@ The buttons are hidden for everyone else. If someone else tries anyway, a reques
 
 In local mode, anyone can resolve any thread.
 
-### Moving an existing deployment to shared mode
+### Switching from local to shared mode
 
-A deployment that already sets `VERIFAIR_IDENTITY_HEADER` runs in shared mode after the upgrade.
+A deployment that starts with `VERIFAIR_IDENTITY_HEADER` set runs in shared mode.
 
-Before you upgrade:
+Before you switch:
 
-1. Back up the database with `sqlite3 /data/verifair.db ".backup /backup/verifair.db"`. Shared mode turns the stored ids into lower case, so going back to the old version means restoring this backup.
-2. Stop the old instance before you start the new one, so the old version cannot write mixed-case ids after the new one has changed them. On Kubernetes, use `strategy: Recreate` on the Deployment.
-3. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID`, or startup fails.
-4. Let `/api/` through the proxy without sign-in. Agents use tokens, not the browser login. Keep the proxy stripping the identity header on those routes too. With oauth2-proxy: `--skip-auth-route=^/api/`. Leave `--pass-authorization-header` and `--basic-auth-password` off: with either one set, oauth2-proxy removes the client's `Authorization` header even on skipped routes, so agent tokens never reach verifair.
-5. Point liveness and readiness probes at `/healthz`. verifair needs no sign-in there, but oauth2-proxy asks for one on every route it does not skip. Add `--skip-auth-route=GET=^/healthz$`, use an exec probe, or probe the proxy's own `/ping` instead.
-6. Plan who to add first. After the switch, everyone except the bootstrap admin gets 403 until an admin adds them. The 403 page shows the exact id to add, so ask people to open verifair and send you that id. Ids are matched without regard to case.
+1. Back up the database with `pg_dump -Fc "$VERIFAIR_DATABASE_URL" > verifair.dump`.
+2. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID`, or startup fails.
+3. Let `/api/` through the proxy without sign-in. Agents use tokens, not the browser login. Keep the proxy stripping the identity header on those routes too. With oauth2-proxy: `--skip-auth-route=^/api/`. Leave `--pass-authorization-header` and `--basic-auth-password` off: with either one set, oauth2-proxy removes the client's `Authorization` header even on skipped routes, so agent tokens never reach verifair.
+4. Point liveness and readiness probes at `/healthz`. verifair needs no sign-in there, but oauth2-proxy asks for one on every route it does not skip. Add `--skip-auth-route=GET=^/healthz$`, use an exec probe, or probe the proxy's own `/ping` instead.
+5. Plan who to add first. After the switch, everyone except the bootstrap admin gets 403 until an admin adds them. The 403 page shows the exact id to add, so ask people to open verifair and send you that id. Ids are matched without regard to case.
 
-After the upgrade:
+After the switch:
 
 - Add the members on `/access/members` and give each agent a member token. The old shared token stops working.
-- Existing reports keep their `author_id`. Signed reports get it from their latest signature. A member can push new versions only to reports whose `author_id` is their id.
-- Every shared-mode startup turns the ids already stored on reports, signatures, verdicts, comments and review requests into lower case, so they match the members. It skips `agent`. When it changes anything it logs `lowercased ids values=N`, where N counts each changed id, so a comment whose author and resolver both changed counts 2. It runs only after the other startup checks pass, so a start that fails changes nothing. Local mode leaves ids as they are.
+- Existing reports keep their `author_id`. A member can push new versions only to reports whose `author_id` is their id.
 - Reports with no owner are frozen. Push them again with an agent token under a new id.
 - If no admin can sign in any more, make someone admin again in the database. Use the id in lower case:
 
   ```bash
-  sqlite3 /data/verifair.db "UPDATE users SET role='admin', active=1 WHERE id='jane@example.com'"
+  psql "$VERIFAIR_DATABASE_URL" -c "UPDATE users SET role='admin', active=1 WHERE id='jane@example.com'"
   ```
 
 ### Not built yet
@@ -423,17 +454,20 @@ After the upgrade:
 - Ownership transfer.
 - Admin overrides, such as resolving with a recorded reason.
 - Moving local-mode identities to member ids.
+- Moving data from an old SQLite deployment.
 
 ## Docker
 
 ```bash
 docker build -t verifair .
-docker run --rm -e VERIFAIR_API_TOKEN=change-me -p 127.0.0.1:8000:8000 -v verifair-data:/data verifair
+docker run --rm -e VERIFAIR_API_TOKEN=change-me \
+  -e VERIFAIR_DATABASE_URL=postgresql://verifair:verifair@host.docker.internal:5432/verifair \
+  -p 127.0.0.1:8000:8000 verifair
 ```
 
-The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When the auth proxy runs next to verifair in the same pod, set `UVICORN_HOST=127.0.0.1` so only the proxy can reach it. The image `HEALTHCHECK` still works then, because it runs inside the container.
+This needs a running Postgres. Replace `<db-host>` with its address.
 
-The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind mounts or Kubernetes PVCs, `/data` must be writable by uid 10001 (`chown 10001 <dir>` or `fsGroup: 10001`).
+The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When the auth proxy runs next to verifair in the same pod, set `UVICORN_HOST=127.0.0.1` so only the proxy can reach it. The image `HEALTHCHECK` still works then, because it runs inside the container.
 
 ## Deploying
 
@@ -442,16 +476,17 @@ The database lives in `/data/verifair.db`, so keep `/data` on a volume. For bind
 - To identify users from an auth proxy, set `VERIFAIR_IDENTITY_HEADER` to the header the proxy adds, for example `X-Forwarded-Email` with oauth2-proxy. This turns on shared mode. The header value becomes the user id; the display name comes from the member list. The name prompt goes away, and signing and approvals are tied to that identity. The proxy must strip this header from client requests, or anyone can pose as anyone. Requests without the header get 401, but keep the app reachable only through the proxy.
 - Set `VERIFAIR_BASE_URL` to the public HTTPS URL, for example `https://verifair.example.com`. It is used in notification links and in the push response, and enables secure cookies. Keep the browser on this origin and have the reverse proxy preserve `Sec-Fetch-Site`.
 - Serve it at the root of a domain. Sub-paths (like `/verifair/`) are not supported.
-- `/data` must be a volume on local disk. SQLite runs in WAL mode and does not work well on network file systems.
-- Back up with `sqlite3 /data/verifair.db ".backup /backup/verifair.db"`, not `cp`, which can copy a half-written file.
-- Run one replica only.
+- verifair needs a Postgres 17 database where it can create tables. Where Postgres runs in production is not decided here.
+- Startup creates and updates the schema under an advisory lock, so several replicas can start at once.
+- You can run several replicas, because all state is in Postgres. Keep `replicas × VERIFAIR_DB_POOL_SIZE` below the server's `max_connections`.
+- Back up with `pg_dump -Fc "$VERIFAIR_DATABASE_URL" > verifair.dump`. Restore with `pg_restore -d <empty database> verifair.dump`.
 - The image trusts `X-Forwarded-*` headers from any address. Set `FORWARDED_ALLOW_IPS` to your proxy's IP.
 - `FORWARDED_ALLOW_IPS` does not protect the identity header. It only decides whose `X-Forwarded-For` and `X-Forwarded-Proto` uvicorn believes. verifair reads the identity header from every request, so anyone who can reach verifair directly, not through the proxy, can claim any identity. Make sure only the proxy can reach it: run the proxy as a sidecar and set `UVICORN_HOST=127.0.0.1`, or use a network policy that only lets the proxy in.
 - With `UVICORN_HOST=127.0.0.1`, an HTTP probe from outside the container cannot reach `/healthz`. Use an exec probe with the same command as the image `HEALTHCHECK`, or probe `/healthz` through the proxy. oauth2-proxy then needs `--skip-auth-route=GET=^/healthz$`, or it asks the probe to sign in.
 
 ### Upgrading an existing HTTP deployment
 
-Before upgrading a shared deployment, configure a trusted TLS certificate and an HTTPS reverse proxy for its hostname. Redirect the old HTTP URL to HTTPS, set `VERIFAIR_BASE_URL` to that HTTPS origin, and restart verifair behind the proxy with its existing database volume. Update agent URLs and bookmarked report links to HTTPS. A healthy `/healthz` response or a readable page on HTTP does not confirm that browser writes work.
+Before upgrading a shared deployment, configure a trusted TLS certificate and an HTTPS reverse proxy for its hostname. Redirect the old HTTP URL to HTTPS, set `VERIFAIR_BASE_URL` to that HTTPS origin, and restart verifair behind the proxy with its existing database. Update agent URLs and bookmarked report links to HTTPS. A healthy `/healthz` response or a readable page on HTTP does not confirm that browser writes work.
 
 After restarting, open the HTTPS URL in a browser. In local mode, set your name if needed; in shared mode, sign in as a member first. Then submit a comment on a draft report to check that writes pass through the proxy. Existing non-loopback HTTP deployments need this change before the upgrade; private-network placement alone does not enable browser writes. The API continues to use bearer tokens, and `/healthz` can still be checked over the internal loopback HTTP listener.
 

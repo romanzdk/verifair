@@ -15,5 +15,16 @@ services:
       timeout: 3s
       retries: 30
 
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      VERIFAIR_DATABASE_URL: postgresql://verifair:verifair@db:5432/verifair
+      VERIFAIR_API_TOKEN: ${VERIFAIR_API_TOKEN:-change-me}
+
 volumes:
   pgdata:
