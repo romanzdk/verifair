@@ -323,10 +323,10 @@ def push_report(
                     id,
                 ),
             )
-        if reviewers is not None:
-            conn.execute("DELETE FROM review_requests WHERE report_id=%s", (id,))
+        if reviewers:
             conn.cursor().executemany(
-                "INSERT INTO review_requests (report_id, reviewer_id) VALUES (%s, %s)",
+                "INSERT INTO review_requests (report_id, reviewer_id) VALUES (%s, %s)"
+                " ON CONFLICT DO NOTHING",
                 [(id, reviewer) for reviewer in set(reviewers)],
             )
         conn.execute(
