@@ -13,15 +13,16 @@ from verifair import db
 
 
 @asynccontextmanager
-async def borrow(app: FastAPI) -> AsyncIterator[db.Connection]:
+async def borrow(app: FastAPI, timeout: float | None = None) -> AsyncIterator[db.Connection]:
     # Wait for a free connection here on the event loop, never in pool.getconn() on a worker
     # thread: threads parked there can take every worker thread while the requests holding
     # the connections wait for one to run their handler, and nothing moves until PoolTimeout.
     pool, slots = app.state.pool, app.state.pool_slots
-    timed_out = PoolTimeout(f"couldn't get a connection after {pool.timeout:.2f} sec")
-    deadline = time.monotonic() + pool.timeout
+    timeout = pool.timeout if timeout is None else timeout
+    timed_out = PoolTimeout(f"couldn't get a connection after {timeout:.2f} sec")
+    deadline = time.monotonic() + timeout
     try:
-        await asyncio.wait_for(slots.acquire(), pool.timeout)
+        await asyncio.wait_for(slots.acquire(), timeout)
     except TimeoutError:
         raise timed_out from None
     try:

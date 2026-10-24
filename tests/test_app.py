@@ -1,3 +1,4 @@
+import time
 from contextlib import closing
 from dataclasses import replace
 
@@ -6,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
+from verifair import app as app_module
 from verifair import db
 from verifair.app import create_app
 from verifair.config import Settings, load_settings
@@ -438,3 +440,77 @@ def test_other_database_errors_stay_500(client, monkeypatch):
     monkeypatch.setattr(db, "get_report", cancel)
     with pytest.raises(psycopg.errors.QueryCanceled):
         client.get("/api/reports/r1", headers={"Authorization": "Bearer t"})
+
+
+def test_readyz_is_200_when_the_database_answers(client):
+    response = client.get("/readyz")
+    assert (response.status_code, response.json()) == (200, {"ok": True})
+
+
+def test_readyz_is_public_in_shared_mode(shared_client):
+    response = shared_client.get("/readyz", headers={"X-Forwarded-Email": ""})
+    assert (response.status_code, response.json()) == (200, {"ok": True})
+
+
+def test_readyz_answers_503_within_seconds_when_the_database_is_unreachable(client, unreachable):
+    unreachable(client.app)
+    started = time.monotonic()
+    response = client.get("/readyz")
+    assert (response.status_code, response.json()) == (503, {"ok": False})
+    assert response.headers["Retry-After"] == "5"
+    assert time.monotonic() - started < 3
+
+
+def test_readyz_answers_503_when_no_connection_is_free(client, monkeypatch):
+    monkeypatch.setattr(app_module, "READYZ_TIMEOUT", 0.3)
+    held = client.app.state.pool.getconn()
+    try:
+        response = client.get("/readyz")
+    finally:
+        client.app.state.pool.putconn(held)
+    assert (response.status_code, response.json()) == (503, {"ok": False})
+    assert response.headers["Retry-After"] == "5"
+
+
+LIMIT = 1024 * 1024
+TOO_LARGE = {"detail": "request body too large"}
+
+
+def _chunks(total):
+    yield b"x" * total
+
+
+@pytest.mark.parametrize("path", ["/api/reports", "/r/x/comments"])
+def test_a_body_over_the_limit_is_413_with_content_length(client, path):
+    response = client.post(path, content=b"x" * (LIMIT + 1), headers={"Authorization": "Bearer t"})
+    assert (response.status_code, response.json()) == (413, TOO_LARGE)
+
+
+@pytest.mark.parametrize(
+    ("path", "content_type"),
+    [("/api/reports", "application/json"), ("/r/x/comments", "application/x-www-form-urlencoded")],
+)
+def test_a_chunked_body_over_the_limit_is_413(client, path, content_type):
+    headers = {"Authorization": "Bearer t", "Content-Type": content_type}
+    response = client.post(path, content=_chunks(LIMIT + 1), headers=headers)
+    assert "content-length" not in response.request.headers
+    assert (response.status_code, response.json()) == (413, TOO_LARGE)
+
+
+def test_a_body_of_exactly_the_limit_is_not_413(client):
+    response = client.post(
+        "/api/reports", content=b"x" * LIMIT, headers={"Authorization": "Bearer t"}
+    )
+    assert response.status_code == 422
+    chunked = client.post(
+        "/api/reports", content=_chunks(LIMIT), headers={"Authorization": "Bearer t"}
+    )
+    assert chunked.status_code == 422
+
+
+def test_a_normal_push_still_works(client):
+    payload = {"project": "p", "title": "T", "risk": "low", "body": "## Intent\nx"}
+    assert (
+        client.post("/api/reports", json=payload, headers={"Authorization": "Bearer t"}).status_code
+        == 201
+    )

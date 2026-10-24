@@ -10,15 +10,20 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import Headers
 
 from verifair import api, db, web
 from verifair.config import Settings
-from verifair.deps import run_with_conn
+from verifair.deps import borrow, run_with_conn
 
+TOO_LARGE = {"detail": "request body too large"}
 CSP = (
     "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
     " frame-ancestors 'none'"
 )
+MAX_BODY = 1024 * 1024
+READYZ_TIMEOUT = 2
 log = logging.getLogger("verifair")
 SIGN_IN = "Sign in through your company login to use verifair."
 DB_UNAVAILABLE = "The database is not available. Try again in a moment."
@@ -49,6 +54,45 @@ async def _membership_denial(request: Request, settings: Settings):
     return web.templates.TemplateResponse(
         request, "denied.html", {"message": message, "home": status == 401}, status_code=status
     )
+
+
+class BodyLimit:
+    def __init__(self, app, limit: int):
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        declared = Headers(scope=scope).get("content-length", "")
+        if declared.isdigit() and int(declared) > self.limit:
+            return await JSONResponse(TOO_LARGE, 413)(scope, receive, send)
+        received = 0
+        refused = False
+
+        # Answering here, not raising from receive: BaseHTTPMiddleware turns an exception
+        # raised in receive into an exception group, which FastAPI reports as a 400.
+        async def counting_receive():
+            nonlocal received, refused
+            if refused:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            received += len(message.get("body", b""))
+            if received > self.limit:
+                refused = True
+                await JSONResponse(TOO_LARGE, 413)(scope, receive, send)
+                return {"type": "http.disconnect"}
+            return message
+
+        async def guarded_send(message):
+            if not refused:
+                await send(message)
+
+        try:
+            await self.app(scope, counting_receive, guarded_send)
+        except Exception:
+            if not refused:
+                raise
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -116,7 +160,7 @@ def create_app(settings: Settings) -> FastAPI:
             if (
                 response is None
                 and settings.identity_header
-                and not (is_api or path == "/healthz" or path.startswith("/static/"))
+                and not (is_api or path in ("/healthz", "/readyz") or path.startswith("/static/"))
             ):
                 response = await _membership_denial(request, settings)
             if response is None and request.method == "POST" and not is_api:
@@ -158,4 +202,15 @@ def create_app(settings: Settings) -> FastAPI:
     async def healthz():
         return {"ok": True}
 
+    @app.get("/readyz")
+    async def readyz():
+        try:
+            async with borrow(app, READYZ_TIMEOUT) as conn:
+                await run_in_threadpool(conn.execute, "SELECT 1")
+        except psycopg.Error as error:
+            log.error("not ready: %s: %s", type(error).__name__, error)
+            return JSONResponse({"ok": False}, 503, headers={"Retry-After": "5"})
+        return {"ok": True}
+
+    app.add_middleware(BodyLimit, limit=MAX_BODY)
     return app
