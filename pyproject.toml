@@ -3,7 +3,7 @@ name = "verifair"
 version = "0.1.0"
 description = "Self-hosted review tool where coding agents publish change reports with evidence and people sign, comment on and approve them"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.15"
 dependencies = [
     "fastapi>=0.157.0",
     "httpx>=0.28.1",
@@ -30,7 +30,7 @@ module-root = ""
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py315"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

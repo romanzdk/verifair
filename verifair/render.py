@@ -3,7 +3,6 @@ import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from os.path import commonprefix
 from typing import Any
 
 from markdown_it import MarkdownIt
@@ -94,10 +93,16 @@ def split_sections(body: str) -> list[Section]:
     return sections
 
 
+def _common_len(a: str, b: str) -> int:
+    return next(
+        (i for i, (x, y) in enumerate(zip(a, b, strict=False)) if x != y), min(len(a), len(b))
+    )
+
+
 def _score(text: str, start: int, quote: str, prefix: str, suffix: str) -> int:
-    before = len(commonprefix([text[max(0, start - len(prefix)) : start][::-1], prefix[::-1]]))
+    before = _common_len(text[max(0, start - len(prefix)) : start][::-1], prefix[::-1])
     end = start + len(quote)
-    return before + len(commonprefix([text[end : end + len(suffix)], suffix]))
+    return before + _common_len(text[end : end + len(suffix)], suffix)
 
 
 def iter_occurrences(text: str, quote: str) -> Iterator[int]:

@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.15-slim
 COPY --from=ghcr.io/astral-sh/uv:0.9.16 /uv /bin/uv
 RUN useradd -r -u 10001 app
 WORKDIR /app

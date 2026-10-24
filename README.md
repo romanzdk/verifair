@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/romanzdk/verifair/actions/workflows/ci.yml/badge.svg)](https://github.com/romanzdk/verifair/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
+![Python 3.15](https://img.shields.io/badge/python-3.15-blue.svg)
 ![Postgres 18](https://img.shields.io/badge/postgres-18-336791.svg)
 
 [Quickstart](#quickstart) · [How it works](#how-it-works) · [Screenshots](#screenshots) · [API](docs/api.md) · [Configuration](docs/configuration.md) · [Deployment](docs/deployment.md)
