@@ -2,6 +2,7 @@
 {% set drawer = true %}
 {% set inline_name_prompt = is_current and not user_name and not user_from_header %}
 {% block title %}{{ report.title }} · verifair{% endblock %}
+{% block body_class %}{% if is_current %} class="has-verdict"{% endif %}{% endblock %}
 {% block crumbs %}<a href="/p/{{ report.project|urlencode }}">{{ report.project }}</a>{{ icon("chevron-right", "ic14") }}<span class="cur">{{ report.title }}</span>{% endblock %}
 {% block content %}
 {% if not is_current %}
@@ -13,7 +14,7 @@
     {% if inline_name_prompt %}{% with next=here %}{% include "_name_prompt.html" %}{% endwith %}{% endif %}
     {% for s in sections %}
     <section id="{{ s.slug }}" data-section="{{ s.heading }}">
-      <h2><span class="num">{{ loop.index }}</span>{{ s.heading }}{% if is_current %} <button type="button" class="cc" data-comment-section aria-label="Comment on {{ s.heading }}">💬 comment</button>{% endif %}</h2>
+      <h2><span class="num">{{ loop.index }}</span>{{ s.heading }}{% if is_current %} <button type="button" class="cc" data-comment-section aria-label="Comment on {{ s.heading }}">{{ icon("message-square", "ic12") }} comment</button>{% endif %}</h2>
       <div class="content">{{ s.html|safe }}</div>
       <div class="threads" id="vf_threads_{{ s.slug }}">
         {% for thread in threads_by_section.get(s.slug, []) %}{% include "_thread.html" %}{% endfor %}
@@ -48,6 +49,6 @@
 </div>
 {% if is_current %}
 {% include "_verdict.html" %}
-<div id="vf_popover" class="pop" hidden><button type="button">💬 Comment on selection</button></div>
+<div id="vf_popover" class="pop" hidden><button type="button">{{ icon("message-square", "ic12") }} Comment on selection</button></div>
 {% endif %}
 {% endblock %}

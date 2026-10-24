@@ -187,8 +187,60 @@ def test_report_page_renders_sections_nav_links_and_sets_id_cookie(client):
     )
     assert r.text.index("BILL-412") < r.text.index("https://x/mr/1")
     assert 'href="#edge-cases"' in r.text
-    assert 'class="badge b-unsigned"' in r.text and "Risk: high" in r.text
+    assert 'class="badge b-unsigned"' in r.text and "High risk" in r.text
     assert client.get("/r/nope").status_code == 404
+
+
+def test_review_page_sits_in_the_drawer_shell(client):
+    push(client)
+    sign(client)
+    page = client.get("/r/prorate").text
+    assert 'class="app drawer"' in page and 'popovertarget="vf_nav"' in page
+    crumbs = page.split('class="crumbs"')[1].split("</nav>")[0]
+    assert 'href="/p/billing-service"' in crumbs and '<span class="cur">Prorate</span>' in crumbs
+    nav_link = re.search(r'<a [^>]*href="/p/billing-service"[^>]*>', page.split("</nav>")[0])
+    assert 'aria-current="page"' in nav_link.group(0)
+    assert page.index('<main class="main">') < page.index('id="vf_verdict"')
+    assert page.count("<main") == 1
+    assert '<body class="has-verdict">' in page
+    push(client, id="prorate")
+    assert "has-verdict" not in client.get("/r/prorate/v/1").text
+
+
+def test_review_page_uses_icons_not_emoji(client):
+    push(client)
+    client.post(
+        "/api/reports/prorate/comments",
+        json={"body": "Agent note", "section": "Intent"},
+        headers=H,
+    )
+    [thread] = api_threads(client)
+    client.cookies.set("vf_name", "Alice")
+    page = client.get("/r/prorate").text
+    comment = client.post(
+        "/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"}
+    )
+    reply = client.post(
+        f"/r/prorate/comments/{thread['id']}/reply", data={"version": 1, "body": "Thanks"}
+    )
+    resolved = client.post(f"/r/prorate/comments/{thread['id']}/resolve")
+    assert comment.status_code == reply.status_code == resolved.status_code == 200
+    assert 'class="thread resolved"' in resolved.text
+    for text in (page, comment.text, reply.text, resolved.text):
+        assert not {"💬", "🤖", "✓", "↗"} & set(text)
+    assert "/static/icons.svg#message-square" in page and "/static/icons.svg#bot" in page
+    assert "/static/icons.svg#bot" in reply.text
+    assert (
+        '<span class="ok"><svg class="ic14" aria-hidden="true"><use href="/static/icons.svg#check"'
+        in (resolved.text)
+    )
+
+
+def test_css_has_no_old_alias_tokens():
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    assert "--foreground" not in css and "--card:" not in css
+    assert "--warning" not in css and "--muted-foreground" not in css
+    assert "body.has-verdict" in css and ".app-main > .name-prompt { position: fixed;" in css
 
 
 def test_comment_without_name_returns_prompt_and_stores_nothing(client):
@@ -1011,7 +1063,8 @@ def test_header_shows_provenance_and_versions_show_commit(client):
     )
     page = client.get("/r/prorate").text
     assert "Written by <b>claude-code</b> (opus)" in page
-    assert '<a class="ext" href="https://s/1">session</a>' in page
+    assert '<a class="ext" href="https://s/1">session<svg class="ic12"' in page
+    assert "/static/icons.svg#external-link" in page
     assert "<code>0123456</code>" in page and "0123456789" not in page
     push(client, id="prorate", agent="claude-code")
     page = client.get("/r/prorate").text

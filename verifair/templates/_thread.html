@@ -2,7 +2,7 @@
 {% macro messages() %}
   {% for c in [root] + thread.replies %}
   <div class="msg{% if c.author_id == 'agent' %} agent{% endif %}" id="vf_c{{ c.id }}">
-    <span class="av">{{ "🤖" if c.author_id == "agent" else c.author_name[:1]|upper }}</span>
+    <span class="av {{ (c.author_id or c.author_name)|avatar }}">{{ icon("bot", "ic14") if c.author_id == "agent" else c.author_name[:1]|upper }}</span>
     <div><span class="who">{{ c.author_name }}</span><span class="when">{{ c.created_at|date }} {{ c.created_at[11:16] }} UTC</span>
       <div class="text">{{ c.body }}</div></div>
   </div>
@@ -11,7 +11,7 @@
 {% set tag %}<span class="badge tag-{{ 'blocking' if thread.blocking else 'suggestion' }}">{{ "Blocking" if thread.blocking else "Suggestion" }}</span>{% endset %}
 {% if root.resolved_at %}
 <details class="thread resolved" id="vf_t{{ root.id }}" data-section-slug="{{ thread.section_slug or '' }}"{% if thread_error %} open{% endif %}>
-  <summary><span class="ok">✓</span> Resolved · {{ tag }} <b>{{ root.author_name }}</b>: {{ root.body|truncate(80) }}{% if thread.replies %} · {{ thread.replies|length }} repl{{ "ies" if thread.replies|length != 1 else "y" }}{% endif %}{% if root.id in resolvers %} · resolved by <b>{{ resolvers[root.id] }}</b>{% endif %}</summary>
+  <summary><span class="ok">{{ icon("check", "ic14") }}</span> Resolved · {{ tag }} <b>{{ root.author_name }}</b>: {{ root.body|truncate(80) }}{% if thread.replies %} · {{ thread.replies|length }} repl{{ "ies" if thread.replies|length != 1 else "y" }}{% endif %}{% if root.id in resolvers %} · resolved by <b>{{ resolvers[root.id] }}</b>{% endif %}</summary>
   {{ messages() }}
   {% if is_current %}
   <div class="tact">
