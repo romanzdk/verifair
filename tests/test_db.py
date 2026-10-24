@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import time
 from datetime import UTC, datetime, timedelta
@@ -278,6 +279,7 @@ def test_get_conn_route_write_is_visible_to_other_connection(new_database_url):
     init.close()
     app = FastAPI()
     app.state.pool = db.open_pool(url, 2)
+    app.state.pool_slots = asyncio.Semaphore(2)
 
     @app.post("/push")
     def push(conn: Annotated[db.Connection, Depends(get_conn)]):

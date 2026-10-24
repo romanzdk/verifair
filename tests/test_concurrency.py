@@ -3,10 +3,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 
+import anyio.to_thread
 import pytest
 from psycopg.pq import TransactionStatus
+from psycopg_pool import PoolTimeout
 
-from verifair import db
+from verifair import db, notify
 from verifair.app import create_app
 from verifair.db import (
     AlreadyCreated,
@@ -251,3 +253,68 @@ def test_pool_connection_is_idle_when_a_request_releases_it(client, monkeypatch)
     assert response.status_code == 200
     assert len(released) >= 4
     assert set(released) == {TransactionStatus.IDLE}
+
+
+def _set_worker_threads(client, n):
+    async def set_tokens():
+        anyio.to_thread.current_default_thread_limiter().total_tokens = n
+
+    client.portal.call(set_tokens)
+
+
+# More requests than worker threads on a pool of one: before the fix every worker thread
+# sat in pool.getconn() while the request holding the connection waited for a thread.
+def test_more_requests_than_worker_threads_all_succeed(client):
+    client.app.state.pool.timeout = 2
+    with client:
+        _set_worker_threads(client, 3)
+        with ThreadPoolExecutor(12) as pool:
+            codes = list(pool.map(lambda i: _report(client, f"r{i}").status_code, range(12)))
+    assert codes == [201] * 12
+
+
+def test_pool_exhaustion_is_a_timeout_not_a_hang(client):
+    client.app.state.pool.timeout = 0.5
+    held = client.app.state.pool.getconn()
+    try:
+        with client, pytest.raises(PoolTimeout):
+            _report(client)
+    finally:
+        client.app.state.pool.putconn(held)
+
+
+def test_healthz_needs_no_worker_thread(client):
+    holder = object()
+
+    async def hog():
+        await anyio.to_thread.current_default_thread_limiter().acquire_on_behalf_of(holder)
+
+    async def free():
+        anyio.to_thread.current_default_thread_limiter().release_on_behalf_of(holder)
+
+    answers = []
+    with client:
+        _set_worker_threads(client, 1)
+        client.portal.call(hog)
+        probe = threading.Thread(target=lambda: answers.append(client.get("/healthz").json()))
+        probe.start()
+        probe.join(2)
+        answered = list(answers)
+        client.portal.call(free)
+        probe.join()
+    assert answered == [{"ok": True}]
+
+
+def test_connection_is_back_in_the_pool_before_background_tasks_run(client, monkeypatch):
+    borrowed = []
+
+    def send(settings, text):
+        try:
+            with client.app.state.pool.connection(timeout=0.5):
+                borrowed.append(True)
+        except PoolTimeout:
+            borrowed.append(False)
+
+    monkeypatch.setattr(notify, "send", send)
+    assert _report(client).status_code == 201
+    assert borrowed == [True]

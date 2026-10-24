@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -6,11 +7,10 @@ import psycopg
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from psycopg_pool import ConnectionPool
-from starlette.concurrency import run_in_threadpool
 
 from verifair import api, db, web
 from verifair.config import Settings
+from verifair.deps import run_with_conn
 
 CSP = (
     "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
@@ -23,11 +23,6 @@ STARTUP_LOCKED = (
 )
 
 
-def _get_user(pool: ConnectionPool, user_id: str):
-    with pool.connection() as conn:
-        return db.get_user(conn, user_id)
-
-
 async def _membership_denial(request: Request, settings: Settings):
     values = request.headers.getlist(settings.identity_header)
     user_id = values[0].strip().lower() if len(values) == 1 else ""
@@ -37,7 +32,7 @@ async def _membership_denial(request: Request, settings: Settings):
     elif user_id in ("", "agent"):
         reason = "missing-header"
     else:
-        user = await run_in_threadpool(_get_user, request.app.state.pool, user_id)
+        user = await run_with_conn(request.app, db.get_user, user_id)
         if user is not None and user["active"]:
             request.state.member = user
             return None
@@ -97,6 +92,7 @@ def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="verifair", lifespan=lifespan)
     app.state.settings = settings
     app.state.pool = pool
+    app.state.pool_slots = asyncio.Semaphore(settings.db_pool_size)
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.include_router(api.router)
     app.include_router(web.router)
@@ -130,7 +126,7 @@ def create_app(settings: Settings) -> FastAPI:
         return response
 
     @app.get("/healthz")
-    def healthz():
+    async def healthz():
         return {"ok": True}
 
     return app

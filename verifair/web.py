@@ -89,7 +89,7 @@ templates.env.globals |= {
     "icon": icon,
 }
 
-Conn = Annotated[db.Connection, Depends(get_conn)]
+Conn = Annotated[db.Connection, Depends(get_conn, scope="function")]
 YEAR = 365 * 24 * 3600
 USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
 PLAIN_ID = re.compile(r"[^/\\\x00-\x1f\x7f\s]+")

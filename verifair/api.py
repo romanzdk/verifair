@@ -10,7 +10,6 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from psycopg_pool import ConnectionPool
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -19,10 +18,9 @@ from pydantic import (
     StringConstraints,
     field_validator,
 )
-from starlette.concurrency import run_in_threadpool
 
 from verifair import db, notify
-from verifair.deps import get_conn
+from verifair.deps import get_conn, run_with_conn
 from verifair.render import (
     Section,
     build_threads,
@@ -44,7 +42,7 @@ def _refuse_token(reason: str, path: str, detail: str = "invalid token") -> NoRe
     raise HTTPException(401, detail)
 
 
-def require_token(request: Request) -> None:
+async def require_token(request: Request) -> None:
     settings = request.app.state.settings
     given = request.headers.get("Authorization", "")
     request.state.token_owner = request.state.token = None
@@ -57,8 +55,7 @@ def require_token(request: Request) -> None:
             _refuse_token("malformed", path)
         if not token.lstrip().startswith("vf_"):
             _refuse_token("shared-token", path, SHARED_TOKEN)
-        with request.app.state.pool.connection() as conn:
-            owner, reason = db.authenticate_token(conn, token, touch=True)
+        owner, reason = await run_with_conn(request.app, db.authenticate_token, token, touch=True)
         if owner is None:
             _refuse_token(reason, path)
         request.state.token, request.state.token_owner = token, owner
@@ -70,7 +67,9 @@ def require_token(request: Request) -> None:
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
-Conn = Annotated[db.Connection, Depends(get_conn)]
+# "function" returns the connection when the handler ends, not after the response and its
+# background tasks (Slack notify) are done
+Conn = Annotated[db.Connection, Depends(get_conn, scope="function")]
 
 
 def _http_url(url: str) -> str:
@@ -296,7 +295,7 @@ def get_report(id: str, conn: Conn):
 
 
 def _poll_wait(
-    pool: ConnectionPool,
+    conn: db.Connection,
     url_path: str,
     id: str,
     kind: str,
@@ -304,43 +303,40 @@ def _poll_wait(
     after: dict[str, int] | None,
     token: str | None,
 ) -> tuple[dict | None, dict[str, int]]:
-    with pool.connection() as conn:
-        if token is not None and (reason := db.authenticate_token(conn, token)[1]):
-            _refuse_token(reason, url_path)
-        with conn.transaction():
-            # one snapshot for the version and the event lists of this tick
-            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-            _require_report(conn, id)
-            current = db.latest_version(conn, id)
-            rows = {}
-            if kind in ("any", "verdict"):
-                rows["verdict"] = db.list_verdicts(conn, id)
-            if kind in ("any", "comment"):
-                rows["comment"] = db.list_comments(conn, id)
-            if since is None and after is None:
-                return None, {
-                    event: max((r["id"] for r in items), default=0) for event, items in rows.items()
-                }
-            events = []
-            for event, items in rows.items():
-                for row in items:
-                    if row["version"] != current or (
-                        event == "comment" and row["parent_id"] is not None
-                    ):
+    if token is not None and (reason := db.authenticate_token(conn, token)[1]):
+        _refuse_token(reason, url_path)
+    with conn.transaction():
+        # one snapshot for the version and the event lists of this tick
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        _require_report(conn, id)
+        current = db.latest_version(conn, id)
+        rows = {}
+        if kind in ("any", "verdict"):
+            rows["verdict"] = db.list_verdicts(conn, id)
+        if kind in ("any", "comment"):
+            rows["comment"] = db.list_comments(conn, id)
+        if since is None and after is None:
+            return None, {
+                event: max((r["id"] for r in items), default=0) for event, items in rows.items()
+            }
+        events = []
+        for event, items in rows.items():
+            for row in items:
+                if row["version"] != current or (
+                    event == "comment" and row["parent_id"] is not None
+                ):
+                    continue
+                created = datetime.fromisoformat(row["created_at"])
+                if since is not None:
+                    if created <= since:
                         continue
-                    created = datetime.fromisoformat(row["created_at"])
-                    if since is not None:
-                        if created <= since:
-                            continue
-                    elif row["id"] <= after[event]:
-                        continue
-                    value = (
-                        _verdict_json(row, current) if event == "verdict" else _comment_json(row)
-                    )
-                    events.append(
-                        (created, {"event": event, event: value, "next_since": row["created_at"]})
-                    )
-            return min(events, key=lambda e: e[0])[1] if events else None, after or {}
+                elif row["id"] <= after[event]:
+                    continue
+                value = _verdict_json(row, current) if event == "verdict" else _comment_json(row)
+                events.append(
+                    (created, {"event": event, event: value, "next_since": row["created_at"]})
+                )
+        return min(events, key=lambda e: e[0])[1] if events else None, after or {}
 
 
 @router.get("/reports/{id}/wait")
@@ -357,9 +353,9 @@ async def wait_for_event(
     deadline = monotonic() + timeout
     after = None
     while True:
-        event, after = await run_in_threadpool(
+        event, after = await run_with_conn(
+            request.app,
             _poll_wait,
-            request.app.state.pool,
             request.url.path,
             id,
             kind,
