@@ -1420,7 +1420,7 @@ def proxied(settings, make_app, monkeypatch):
     return SessionClient(app, headers={"Sec-Fetch-Site": "same-origin"})
 
 
-def test_identity_header_is_the_user(proxied):
+def test_shared_mode_is_the_user(proxied):
     push(proxied)
     who = signed_in("alice@example.com")
     page = proxied.get("/r/prorate", headers=who)
@@ -1439,7 +1439,7 @@ def test_identity_header_is_the_user(proxied):
     assert (thread["author_id"], thread["author"]) == ("alice@example.com", "alice")
 
 
-def test_identity_header_blocks_set_name(proxied):
+def test_shared_mode_blocks_set_name(proxied):
     r = proxied.post(
         "/me",
         data={"name": "Mallory"},
@@ -1758,7 +1758,7 @@ def test_changes_counts_unsigned(client):
 AUTHOR_COPY = "Only alice can sign this report."
 
 
-def test_identity_header_only_author_can_sign(proxied):
+def test_shared_mode_only_author_can_sign(proxied):
     push(proxied)
     bob = signed_in("bob@example.com")
     page = proxied.get("/r/prorate", headers=bob).text
@@ -1780,7 +1780,7 @@ def test_identity_header_only_author_can_sign(proxied):
     assert api_report(proxied)["status"] == "approved"
 
 
-def test_identity_header_cookie_user_may_not_sign(proxied):
+def test_shared_mode_cookie_user_may_not_sign(proxied):
     push(proxied)
     proxied.cookies.set("vf_name", "Bob")
     r = proxied.post("/r/prorate/sign", data={"version": 1})
@@ -1791,7 +1791,7 @@ NO_OWNER_COPY = "This report has no owner. Push it again with an agent token und
 
 
 @pytest.mark.parametrize("author", [None, "alice@example.com"])
-def test_identity_header_nobody_may_sign_a_report_without_owner(proxied, author):
+def test_shared_mode_nobody_may_sign_a_report_without_owner(proxied, author):
     from verifair import db
 
     conn = db.connect(proxied.app.state.settings.database_url)
