@@ -97,6 +97,24 @@ def test_picker_sorts_by_name_and_tells_same_names_apart(shared_client, team):
     ]
 
 
+def test_same_names_use_the_id_label_in_rows_status_and_picker(shared_client, team):
+    db.add_user(team, id="c2@example.com", name="carol", role="member")
+    r = add(shared_client, "c2@example.com")
+    label = "carol (c2@example.com)"
+    assert f'<p class="dismiss" data-rev-status>Requested {label}.</p>' in r.text
+    assert ROW.findall(r.text) == [(label, "review requested")]
+    assert f'aria-label="Remove review request for {label}"' in r.text
+    picker = rail(r.text).split('<form class="addrev"')[1]
+    assert ">carol (carol@example.com)</option>" in picker
+    r = shared_client.post("/r/r/reviewers/c2%40example.com/remove", headers=BOB | HX)
+    assert f"data-rev-status>Removed the request for {label}.</p>" in r.text
+
+
+def test_removing_a_request_that_is_gone_says_so(shared_client, team):
+    r = shared_client.post("/r/r/reviewers/carol%40example.com/remove", headers=BOB | HX)
+    assert '<p class="dismiss" data-rev-status>carol had no review request.</p>' in r.text
+
+
 def test_old_versions_say_where_to_change_requests(shared_client, team):
     db.push_report(team, project="p", title="T", risk="high", body=BODY, id="r")
     old = rail(shared_client.get("/r/r/v/1", headers=BOB).text)

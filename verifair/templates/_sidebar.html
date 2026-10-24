@@ -8,8 +8,9 @@
   </ul>
   <h4>Reviewers</h4>
   {% for r in reviewers %}
+  {% set label = labels.get(r.id, r.name) %}
   <div class="rev-item">
-  <div class="rev"><span class="av {{ r.id|avatar }}" aria-hidden="true">{{ r.name[:1]|upper }}</span><span class="rn" title="{{ r.name }}">{{ r.name }}</span>{% if r.id in removable %}<button type="button" class="btn sm" hx-post="{{ url }}/reviewers/{{ r.id|segment }}/remove" hx-target="#vf_sidebar" hx-swap="outerHTML" aria-label="Remove review request for {{ r.name }}">Remove</button>{% endif %}</div>
+  <div class="rev"><span class="av {{ r.id|avatar }}" aria-hidden="true">{{ r.name[:1]|upper }}</span><span class="rn" title="{{ label }}">{{ r.name }}</span>{% if r.id in removable %}<button type="button" class="btn sm" hx-post="{{ url }}/reviewers/{{ r.id|segment }}/remove" hx-target="#vf_sidebar" hx-swap="outerHTML" aria-label="Remove review request for {{ label }}">Remove</button>{% endif %}</div>
   <p class="rev-state">{% if r.verdict %}<span class="badge {{ 'b-approved' if r.verdict == 'approve' else 'b-changes_requested' }}{% if r.verdict_version != current_version %} b-stale{% endif %}">{{ r.label }}</span>{% else %}{{ r.label }}{% endif %}</p>
   {% if r.summary %}<p class="dismiss rev-summary">{{ r.summary }}</p>{% endif %}
   {% if reviewer_error and error_row == r.id %}<p class="error" role="alert">{{ reviewer_error }}</p>{% endif %}

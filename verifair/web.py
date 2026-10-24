@@ -411,6 +411,7 @@ def report_context(
             t.root["id"] for t in threads if _can_moderate(shared, member, user_id, t.root, report)
         },
         "resolvers": {cid: names.get(by, by) for cid, by in resolved_by.items()},
+        "labels": _labels(users),
         "removable": {p for p in requested if p not in judged} if can_change else set(),
         "request_options": _request_options(users, report, all_requested)
         if shared and can_change
@@ -419,14 +420,19 @@ def report_context(
     }
 
 
+def _labels(users: list[db.Row]) -> dict[str, str]:
+    names = Counter(u["name"].lower() for u in users)
+    return {
+        u["id"]: u["name"] if names[u["name"].lower()] == 1 else f"{u['name']} ({u['id']})"
+        for u in users
+    }
+
+
 def _request_options(users: list[db.Row], report: db.Row, requested: list[str]) -> list[dict]:
     active = sorted((u for u in users if u["active"]), key=lambda u: (u["name"].lower(), u["id"]))
-    names = Counter(u["name"].lower() for u in active)
+    labels = _labels(users)
     return [
-        {
-            "id": u["id"],
-            "label": u["name"] if names[u["name"].lower()] == 1 else f"{u['name']} ({u['id']})",
-        }
+        {"id": u["id"], "label": labels[u["id"]]}
         for u in active
         if u["id"] != report["author_id"] and u["id"] not in requested
     ]
@@ -954,7 +960,7 @@ def request_review(
         latest = db.latest_version(conn, id)
         if target["id"] != user[0] and db.get_signature(conn, id, latest):
             _email_reviewers(request, background, conn, report, latest, [target["id"]], user[1])
-    status = f"Requested {target['name']}."
+    status = f"Requested {_labels(db.list_users(conn))[target['id']]}."
     return _reviewers_response(request, conn, report, user, status=status)
 
 
@@ -963,17 +969,18 @@ def remove_review(id: str, reviewer_id: str, request: Request, conn: Conn, user:
     report = _require_report(conn, id)
     if _shared(request):
         reviewer_id = reviewer_id.lower()
-    judged = rules.latest_verdicts(db.list_verdicts(conn, id), db.latest_version(conn, id))
-    if reviewer_id in judged:
-        name = judged[reviewer_id]["reviewer_name"]
-        error = REVIEWER_KEPT.format(name=name)
+    outcome = db.remove_review_request(conn, id, reviewer_id)
+    label = _labels(db.list_users(conn)).get(reviewer_id, reviewer_id)
+    if outcome == "kept":
+        error = REVIEWER_KEPT.format(name=label)
         return _reviewers_response(request, conn, report, user, error, row=reviewer_id)
-    if db.remove_review_request(conn, id, reviewer_id):
+    if outcome == "removed":
         log.info(
             "access action=remove_reviewer actor=%s target=%s report=%s", user[0], reviewer_id, id
         )
-    member = db.get_user(conn, reviewer_id)
-    status = f"Removed the request for {member['name'] if member else reviewer_id}."
+        status = f"Removed the request for {label}."
+    else:
+        status = f"{label} had no review request."
     return _reviewers_response(request, conn, report, user, status=status)
 
 

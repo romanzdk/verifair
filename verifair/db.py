@@ -439,14 +439,20 @@ def add_review_request(
     )
 
 
-def remove_review_request(conn: Connection, report_id: str, reviewer_id: str) -> bool:
-    return (
-        conn.execute(
+def remove_review_request(conn: Connection, report_id: str, reviewer_id: str) -> str:
+    with _write(conn, report_id):
+        judged = conn.execute(
+            "SELECT 1 FROM verdicts WHERE report_id=%s AND reviewer_id=%s AND version ="
+            " (SELECT MAX(version) FROM versions WHERE report_id=%s)",
+            (report_id, reviewer_id, report_id),
+        ).fetchone()
+        if judged:
+            return "kept"
+        removed = conn.execute(
             "DELETE FROM review_requests WHERE report_id=%s AND reviewer_id=%s",
             (report_id, reviewer_id),
         ).rowcount
-        > 0
-    )
+    return "removed" if removed else "missing"
 
 
 def add_comment(
