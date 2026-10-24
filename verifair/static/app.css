@@ -138,7 +138,7 @@ details.me summary .ic14 { color: var(--text-subtle); }
 .menu-btn:hover { background: var(--bg-hover); color: var(--text); }
 .top-logo { display: none; align-items: center; margin-right: 4px; }
 .crumbs { display: flex; align-items: center; gap: 4px; font: 500 13px/20px var(--font); color: var(--text-muted); min-width: 0; flex: 1; }
-.crumbs a { white-space: nowrap; }
+.crumbs a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crumbs a:hover { color: var(--text); }
 .crumbs .ic14 { color: var(--text-subtle); }
 .crumbs .cur { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -179,7 +179,7 @@ details.me summary .ic14 { color: var(--text-subtle); }
 }
 
 .ph { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
-.ph h1 { margin: 0; font: 600 20px/28px var(--font); letter-spacing: -.01em; }
+.ph h1 { margin: 0; font: 600 20px/28px var(--font); letter-spacing: -.01em; overflow-wrap: anywhere; }
 .ph .meta { display: block; margin-top: 2px; font-size: 13px; color: var(--text-muted); }
 .tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; scrollbar-width: none; }
 .tabs a {
@@ -240,7 +240,7 @@ details.me summary .ic14 { color: var(--text-subtle); }
 .grp-h .sp { flex: 1; }
 details.grp > summary { cursor: pointer; }
 details.grp .show { display: inline-flex; align-items: center; gap: 2px; font: 500 12px/16px var(--font); color: var(--link); }
-details.grp[open] .show .when-closed, details.grp:not([open]) .show .when-open { display: none; }
+details[open] > summary .when-closed, details:not([open]) > summary .when-open { display: none; }
 details.grp[open] .show .ic14 { transform: rotate(180deg); }
 details.grp:not([open]) > summary {
   border: 1px dashed var(--border-strong); border-radius: 8px; padding: 10px 16px; margin: 0; color: var(--text-muted);
@@ -261,10 +261,6 @@ details.grp:not([open]) > summary {
 .step.next .n { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .step h3 { margin: 2px 0; font: 600 14px/20px var(--font); }
 .step p { margin: 0 0 12px; font-size: 13px; color: var(--text-muted); }
-.step .waiting { display: flex; align-items: center; gap: 8px; color: var(--text-subtle); margin: 0; }
-.step .waiting .ic { animation: spin 6s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .step .waiting .ic { animation: none; } }
 .pre-wrap { position: relative; }
 /* The copy button sits on the wide right border, outside the scroll area, so long lines never run under it. */
 .pre {
@@ -351,7 +347,7 @@ table.t form { margin: 0; }
   .addform { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .menu[popover] { inset: 56px 16px auto auto; }
   .chg { grid-template-columns: 16px minmax(0, 1fr) auto; align-items: start; padding: 10px 16px; }
-  .chg-t { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .chg-t { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .chg .si, .chg .when { margin-top: 2px; }
   .chg > :is(.badge, .risk, .av, .stack, .cm) { display: none; }
   .grp-h .hint { display: none; }
@@ -408,6 +404,7 @@ body.has-verdict .side { padding-bottom: 112px; }
 .side li:hover { background: var(--bg-hover); }
 .side li a { flex: 1; min-width: 0; color: var(--text-muted); }
 .side li a:hover { color: var(--text); text-decoration: none; }
+.toc-n { display: inline-block; width: 22px; color: var(--text-subtle); font-variant-numeric: tabular-nums; }
 .side li.on { background: var(--accent-bg); }
 .side li.on a { color: var(--text); font-weight: 600; }
 .side li .n {
@@ -481,7 +478,9 @@ body.has-verdict .side { padding-bottom: 112px; }
 .verdict textarea::placeholder { color: var(--text-subtle); }
 .verdict .vmsg { flex-basis: 100%; }
 .verdict .vmsg:not(:has(p)) { display: none; }
-.verdict .mine, .verdict .error { margin: 0; font-size: 12px; }
+.verdict .mine, .verdict .error, .verdict .note { margin: 0; font-size: 12px; }
+.verdict .note { color: var(--text-muted); }
+.verdict :disabled { cursor: not-allowed; opacity: .6; }
 .verdict .mine { color: var(--s-approved); font-weight: 600; }
 .app-main > .name-prompt { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; margin: 0; border-radius: 0; }
 

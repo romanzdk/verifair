@@ -52,7 +52,7 @@ def test_inbox_links_projects_and_changes_shows_counts(client):
 
 def test_age_and_ago():
     now = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
-    assert web.age("2026-10-24T11:59:30+00:00", now) == "now"
+    assert web.age("2026-10-24T11:59:30+00:00", now) == "<1m"
     assert web.age("2026-10-24T11:35:00+00:00", now) == "25m"
     assert web.age("2026-10-24T09:00:00+00:00", now) == "3h"
     assert web.age("2026-10-22T12:00:00+00:00", now) == "2d"
@@ -158,6 +158,7 @@ def test_first_run_and_caught_up(client, shared_client, settings):
     assert 'data-copy-target="vf_env"' in page and '<pre class="pre" id="vf_env">' in page
     assert 'export VERIFAIR_API_TOKEN="&lt;your token&gt;"' in page
     assert 'aria-label="Copy environment variables"' in page
+    assert "Reload this page after your agent pushes." in page and 'class="waiting"' not in page
     shared = shared_client.get("/").text
     assert "Welcome to verifair" in shared and "Create an agent token" in shared
     assert 'class="btn p" href="/access/tokens"' in shared
@@ -261,7 +262,7 @@ def test_mobile_rules_exist():
     assert ".grp-h .hint { display: none; }" in tablet
     phone = _media(css, "max-width: 640px")
     assert "content: attr(data-label)" in phone and ".top-act .btn .lbl" in phone
-    assert "@media (prefers-reduced-motion: reduce)" in css
+    assert "animation" not in css and "@keyframes" not in css
 
 
 def test_env_block_wraps_clear_of_the_copy_button():
@@ -1889,7 +1890,10 @@ def test_user_block_local_and_shared(client, shared_client, as_user):
     page = r.text
     assert '<details class="me"' in page and 'action="/me"' in page
     assert f'data-copy-identity="{r.cookies["vf_id"]}"' in page
-    assert "Settings need a sign-in proxy. See the README." in page
+    assert (
+        "Settings need a sign-in proxy. Set VERIFAIR_IDENTITY_HEADER to turn them on." in page
+        and "README" not in page
+    )
     assert "/access" not in page
 
     bob = shared_client.get("/", headers=as_user("bob@example.com", name="Bob Builder")).text
@@ -1907,7 +1911,11 @@ def test_sidebar_collapses_after_eight_projects(client):
     home = client.get("/").text
     more = home.index('<details class="nav-more">')
     assert home.index('href="/p/p07"') < more < home.index('href="/p/p08"')
-    assert "Show 2 more" in home
+    more_label = home.split('<details class="nav-more">')[1].split("</summary>")[0]
+    assert (
+        '<span class="when-closed">Show 2 more</span><span class="when-open">Show less</span>'
+        in more_label
+    )
     page = client.get("/p/p09").text
     assert '<details class="nav-more" open>' in page
     assert re.search(r'<a href="/p/p09"[^>]*aria-current="page"', page)
@@ -2062,3 +2070,23 @@ def test_text_colours_pass_contrast_in_both_themes():
     assert ".chg:focus-visible { outline-offset: -2px; background: var(--bg-hover); }" in css
     for rule in (".banner {", ".tag-blocking {", ".side li .n {"):
         assert "color: var(--warn-text)" in css.split(rule)[1].split("}")[0], rule
+
+
+def test_signer_sees_why_they_cannot_review_their_own_report(client):
+    push(client)
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    signed = client.post("/r/prorate/sign", data={"version": 1}).text
+    for html in (signed, client.get("/r/prorate").text):
+        form = html.split('id="vf_verdict"')[1].split("</form>")[0]
+        assert f'<p class="note">{web.SELF_REVIEW}</p>' in form
+        assert form.count(" disabled>") == 3
+    client.cookies.set("vf_id", "review00")
+    form = client.get("/r/prorate").text.split('id="vf_verdict"')[1].split("</form>")[0]
+    assert " disabled>" not in form and web.SELF_REVIEW not in form
+
+
+def test_on_this_page_numbers_sit_in_their_own_column(client):
+    push(client)
+    rail = client.get("/r/prorate").text.split('id="vf_sidebar"')[1]
+    assert '<a href="#intent"><span class="toc-n">1</span>Intent</a>' in rail

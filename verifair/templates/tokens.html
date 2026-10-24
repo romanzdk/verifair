@@ -12,17 +12,18 @@
   <tbody>
     {% for t in tokens %}
     <tr>
-      {% if owner %}<td data-label="Owner"><span class="who"><span class="av sm {{ t.owner_id|avatar }}" aria-hidden="true">{{ t.owner_id[:1]|upper }}</span>{{ t.owner_id }}</span></td>{% endif %}
+      {% set owner_name = names.get(t.owner_id, t.owner_id) if owner else "" %}
+      {% if owner %}<td data-label="Owner"><span class="who"><span class="av sm {{ t.owner_id|avatar }}" aria-hidden="true">{{ owner_name[:1]|upper }}</span>{{ owner_name }}</span></td>{% endif %}
       <td data-label="Label">{{ t.label }}</td>
       <td data-label="Token id"><code>{{ t.id }}</code></td>
-      <td data-label="Created"><time datetime="{{ t.created_at }}">{{ t.created_at|date }}</time></td>
+      <td data-label="Created"><time datetime="{{ t.created_at }}" title="{{ t.created_at|date }} {{ t.created_at[11:16] }} UTC">{{ t.created_at|ago }}</time></td>
       <td data-label="Last used">{% if t.last_used_at %}<time datetime="{{ t.last_used_at }}">{{ t.last_used_at|ago }}</time>{% else %}Never{% endif %}</td>
       {% if t.revoked_at %}
       <td data-label="Status"><span class="badge b-unsigned">Revoked <time datetime="{{ t.revoked_at }}">{{ t.revoked_at|date }}</time></span></td>
       <td></td>
       {% else %}
       <td data-label="Status"><span class="badge b-approved">Active</span></td>
-      <td class="r"><form method="post" action="/access/tokens/{{ t.id|segment }}/revoke"><button class="btn sm danger" aria-label="Revoke token {{ t.label }}" data-confirm="Revoke token {{ t.label }}?">Revoke</button></form></td>
+      <td class="r"><form method="post" action="/access/tokens/{{ t.id|segment }}/revoke"><button class="btn sm danger" aria-label="Revoke token {{ t.label }}{% if owner %} of {{ owner_name }}{% endif %}" data-confirm="Revoke token {{ t.label }}{% if owner %} of {{ owner_name }}{% endif %}?">Revoke</button></form></td>
       {% endif %}
     </tr>
     {% endfor %}
@@ -37,7 +38,7 @@
 <main class="app-page" id="vf_main">
 {% if not shared %}
   <div class="ph"><div><h1>Agent tokens</h1></div></div>
-  <p>Access management needs a sign-in proxy. See the README.</p>
+  <p>Access management needs a sign-in proxy. Start verifair with <code>VERIFAIR_IDENTITY_HEADER</code> set to the header your proxy sends.</p>
 {% else %}
   {% set active_count = tokens|rejectattr("revoked_at")|list|length %}
   <div class="ph"><div><h1>Agent tokens</h1><div class="meta">{{ active_count }} active token{{ "s" if active_count != 1 }}{% if all_tokens is defined %} · {{ all_tokens|rejectattr("revoked_at")|list|length }} across the workspace{% endif %}</div></div></div>

@@ -38,7 +38,7 @@ def _elapsed(iso: str, now: datetime | None) -> timedelta:
 def age(iso: str, now: datetime | None = None) -> str:
     seconds = _elapsed(iso, now).total_seconds()
     if seconds < 60:
-        return "now"
+        return "<1m"
     if seconds < 3600:
         return f"{int(seconds // 60)}m"
     if seconds < 86400:
@@ -47,7 +47,7 @@ def age(iso: str, now: datetime | None = None) -> str:
 
 
 def ago(iso: str, now: datetime | None = None) -> str:
-    if age(iso, now) == "now":
+    if _elapsed(iso, now) < timedelta(minutes=1):
         return "just now"
     if _elapsed(iso, now) < timedelta(days=30):
         return f"{age(iso, now)} ago"
@@ -364,6 +364,7 @@ def report_context(
         "versions": db.list_versions(conn, id)[::-1],
         "links": _links(report),
         "my_verdict": rules.latest_verdicts(verdicts, current).get(user_id),
+        "self_review": SELF_REVIEW if signature and signature["signer_id"] == user_id else None,
         "user_id": user_id,
         "can_moderate": {
             t.root["id"] for t in threads if _can_moderate(shared, member, user_id, t.root, report)
@@ -547,7 +548,7 @@ def _list_page(
         ctx.update(_scope_empty(scope), empty_url="?scope=all&tab=all", empty_action=None)
         if scope != "all":
             ctx.update(
-                empty_description=f"View everyone's changes{where}, or choose another scope.",
+                empty_description=f"View everyone's changes{where}.",
                 empty_action="View everyone's changes",
             )
     return _page(request, conn, user, "changes.html", ctx, work=work)
@@ -854,6 +855,7 @@ def _access(
         }
         if member["role"] == "admin":
             ctx["all_tokens"] = db.list_tokens(conn)
+            ctx["names"] = {u["id"]: u["name"] for u in db.list_users(conn)}
     elif member is not None:
         ctx |= {
             "me": member["id"],

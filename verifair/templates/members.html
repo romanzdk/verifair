@@ -5,7 +5,7 @@
 <main class="app-page" id="vf_main">
 {% if not shared %}
   <div class="ph"><div><h1>Members</h1></div></div>
-  <p>Access management needs a sign-in proxy. See the README.</p>
+  <p>Access management needs a sign-in proxy. Start verifair with <code>VERIFAIR_IDENTITY_HEADER</code> set to the header your proxy sends.</p>
 {% else %}
   {% set active_count = users|selectattr("active")|list|length %}
   {% set admins = users|selectattr("active")|selectattr("role", "eq", "admin")|list|length %}

@@ -26,7 +26,7 @@
       <li class="step"><span class="n">2</span><div><h3>Point your agent at this URL</h3><p>Set these in the agent's environment, then ask it to publish its change report.</p>
         <div class="pre-wrap"><pre class="pre" id="vf_env">export VERIFAIR_URL={{ base_url }}
 export VERIFAIR_API_TOKEN={% if shared %}vf_…{% else %}"&lt;your token&gt;"{% endif %}</pre><button type="button" class="icon-btn" data-copy-target="vf_env" aria-label="Copy environment variables">{{ icon("copy", "ic14") }}</button><span data-copy-result role="status"></span></div></div></li>
-      <li class="step"><span class="n">3</span><div><h3>Your first report appears here</h3><p class="waiting">{{ icon("circle-dashed") }}Waiting for the first report…</p></div></li>
+      <li class="step"><span class="n">3</span><div><h3>Your first report appears here</h3><p>Reload this page after your agent pushes.</p></div></li>
     </ol>
   </div>
 {% else %}

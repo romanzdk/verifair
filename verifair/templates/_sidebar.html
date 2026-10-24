@@ -2,7 +2,7 @@
   {% with s = open_count - blocking_count %}<p class="dismiss" id="vf_blocking">{{ blocking_count }} blocking · {{ s }} suggestion{{ "s" if s != 1 }}</p>{% endwith %}
   <h4>On this page</h4>
   <ul>
-    {% for s in sections %}<li><a href="#{{ s.slug }}">{{ loop.index }} {{ s.heading }}</a>{% if open_by_section[s.slug] %}{% with n = open_by_section[s.slug] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endfor %}
+    {% for s in sections %}<li><a href="#{{ s.slug }}"><span class="toc-n">{{ loop.index }}</span>{{ s.heading }}</a>{% if open_by_section[s.slug] %}{% with n = open_by_section[s.slug] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endfor %}
     {% if threads_by_section.get("vf_general") %}<li><a href="#vf_general">General comments</a>{% if open_by_section["vf_general"] %}{% with n = open_by_section["vf_general"] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endif %}
     {% if threads_by_section.get(None) %}<li><a href="#vf_earlier">Earlier versions</a>{% if open_by_section[None] %}{% with n = open_by_section[None] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endif %}
   </ul>

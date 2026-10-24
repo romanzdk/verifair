@@ -15,7 +15,7 @@
     {% endfor %}
     {% if nav_rest %}
     <details class="nav-more"{% if active_project in nav_rest|map(attribute="name") %} open{% endif %}>
-      <summary>Show {{ nav_rest|length }} more</summary>
+      <summary><span class="when-closed">Show {{ nav_rest|length }} more</span><span class="when-open">Show less</span></summary>
       {% for p in nav_rest %}
       {{ item("/p/" ~ p.name|urlencode, icon("folder"), p.name, p.name == active_project, p.awaiting) }}
       {% endfor %}
@@ -26,7 +26,7 @@
     {{ item("/access/tokens", icon("key-round"), "Agent tokens", active == "tokens") }}
     {% if is_admin %}{{ item("/access/members", icon("users"), "Members", active == "members") }}{% endif %}
     {% else %}
-    <p class="none">Settings need a sign-in proxy. See the README.</p>
+    <p class="none">Settings need a sign-in proxy. Set VERIFAIR_IDENTITY_HEADER to turn them on.</p>
     {% endif %}
   </div>
   <div class="app-user">

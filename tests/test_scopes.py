@@ -176,6 +176,8 @@ def test_no_matches_is_a_useful_empty_state_and_not_a_missing_project(team):
     empty = team.get("/p/other?scope=author", headers=ALICE)
     assert empty.status_code == 200 and "No changes owned by you" in empty.text
     assert 'href="?scope=all&amp;tab=all"' in empty.text
+    assert "View everyone&#39;s changes in this project." in empty.text
+    assert "another scope" not in empty.text
     missing = team.get("/p/missing?scope=author", headers=ALICE)
     assert missing.status_code == 404
     reviews = team.get(

@@ -12,7 +12,10 @@ ADMIN = {"X-Forwarded-Email": "admin@example.com"}
 LAST_ADMIN = "There must be at least one active admin."
 EXISTS = "That member already exists."
 COPY_ONCE = "Copy it now. It will not be shown again."
-LOCAL_NOTE = "Access management needs a sign-in proxy. See the README."
+LOCAL_NOTE = (
+    "Access management needs a sign-in proxy. Start verifair with"
+    " <code>VERIFAIR_IDENTITY_HEADER</code> set to the header your proxy sends."
+)
 ALREADY_CREATED = (
     "This token was already created. Its secret was shown only once."
     " If you did not copy it, revoke it and create a new one."
@@ -446,8 +449,8 @@ def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, con
     assert '<span class="badge b-unsigned">Deactivated</span>' in page
     tokens = shared_client.get("/access/tokens", headers=ADMIN).text
     assert (
-        '<button class="btn sm danger" aria-label="Revoke token bob &#34;ci&#34;"'
-        ' data-confirm="Revoke token bob &#34;ci&#34;?">Revoke</button>'
+        '<button class="btn sm danger" aria-label="Revoke token bob &#34;ci&#34; of bob"'
+        ' data-confirm="Revoke token bob &#34;ci&#34; of bob?">Revoke</button>'
     ) in tokens
     rows = {re.search(r"<code>([^<]+)</code>", row)[1]: row for row in page.split("<tr>")[2:]}
     mine, gone = rows["admin@example.com"], rows["gone@example.com"]
@@ -528,7 +531,7 @@ def test_denied_page_has_a_heading_and_links_back(shared_client, conn, as_user):
         assert ('<a href="/access/tokens">Back to Agent tokens</a>' in r.text) is back
         assert "<script" not in r.text and 'class="topbar"' not in r.text
     signin = shared_client.get("/", headers={"X-Forwarded-Email": ""})
-    assert signin.status_code == 401 and '<a href="/">Go to projects</a>' in signin.text
+    assert signin.status_code == 401 and '<a href="/">Go to Inbox</a>' in signin.text
     assert '<main class="app-page denied">' in signin.text and "<script" not in signin.text
 
 
@@ -627,3 +630,7 @@ def test_api_use_stamps_last_used_outside_the_wait_transaction(shared_client, co
         r'<td data-label="Last used"><time datetime="[^"]+">just now</time></td>', rows[used["id"]]
     )
     assert '<td data-label="Last used">Never</td>' in rows[unused["id"]]
+    assert re.search(
+        r'<td data-label="Created"><time datetime="[^"]+" title="[^"]+">just now</time>',
+        rows[unused["id"]],
+    )
