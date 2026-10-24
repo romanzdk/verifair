@@ -603,6 +603,7 @@ def get_signature(conn: sqlite3.Connection, report_id: str, version: int) -> sql
 ROLES = ("admin", "member")
 TOKEN_COLUMNS = "id, owner_id, label, created_at, revoked_at, last_used_at"
 TOKEN_TOUCH_SECONDS = 60
+TOKEN_TOUCH_WAIT_MS = 100
 
 
 def _check_role(role: str) -> None:
@@ -707,11 +708,17 @@ def get_token(conn: sqlite3.Connection, token_id: str) -> sqlite3.Row | None:
 
 
 def _touch_token(conn: sqlite3.Connection, token_id: str, cutoff: str) -> None:
-    conn.execute(
-        "UPDATE api_tokens SET last_used_at=?"
-        " WHERE id=? AND (last_used_at IS NULL OR last_used_at < ?)",
-        (_now(), token_id, cutoff),
-    )
+    # the stamp is a nice-to-have, so an API call never waits long on another writer for it
+    timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    conn.execute(f"PRAGMA busy_timeout={TOKEN_TOUCH_WAIT_MS}")
+    try:
+        conn.execute(
+            "UPDATE api_tokens SET last_used_at=?"
+            " WHERE id=? AND (last_used_at IS NULL OR last_used_at < ?)",
+            (_now(), token_id, cutoff),
+        )
+    finally:
+        conn.execute(f"PRAGMA busy_timeout={int(timeout)}")
 
 
 def authenticate_token(

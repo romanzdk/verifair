@@ -826,6 +826,24 @@ def test_token_auth_survives_a_failed_last_used_write(conn, monkeypatch, caplog)
     assert f"token last_used not saved id={row['id']}" in caplog.text
 
 
+def test_token_last_used_gives_up_fast_when_the_database_is_busy(tmp_path, caplog):
+    path = str(tmp_path / "busy.db")
+    conn, other = connect(path), connect(path)
+    init_schema(conn)
+    add_user(conn, id="m", name="M", role="member")
+    token, row = create_token(conn, owner_id="m", label="a")
+    timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    other.execute("BEGIN IMMEDIATE")
+    started = time.monotonic()
+    assert authenticate_token(conn, token, touch=True)[0]["id"] == "m"
+    assert time.monotonic() - started < 1
+    assert f"token last_used not saved id={row['id']}" in caplog.text
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == timeout
+    other.rollback()
+    conn.close()
+    other.close()
+
+
 def test_create_token_refuses_unknown_or_inactive_owner(conn):
     add_user(conn, id="m", name="M", role="member")
     conn.execute("UPDATE users SET active=0 WHERE id='m'")
