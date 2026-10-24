@@ -12,6 +12,10 @@ verifair reads its settings from environment variables.
 | `VERIFAIR_IDENTITY_HEADER` | unset | Name of a request header that carries the user identity. Setting it turns on shared mode (see [access.md](access.md)) |
 | `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: id of the first admin, created when the database has no members. Startup fails if it is set without `VERIFAIR_IDENTITY_HEADER` |
 | `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook for draft reports, ready-for-review notifications, comments and verdicts |
+| `VERIFAIR_SMTP_URL` | unset | Optional mail server for review request emails (shared mode only, see [reviewing.md](reviewing.md#emails)). `smtp://user:password@host:587` uses STARTTLS when the server offers it; `smtps://user:password@host:465` uses TLS from the start. Encode special characters in the user and password (`@` is `%40`). Without a port, `smtp://` uses 25 and `smtps://` 465. Startup fails when the URL is not `smtp://` or `smtps://` with a host |
+| `VERIFAIR_EMAIL_FROM` | unset | Sender address of those emails, for example `verifair@example.com`. Required when `VERIFAIR_SMTP_URL` is set |
+
+`smtp://` sends without TLS when the server does not offer STARTTLS, and someone on the network path could remove that offer. Use `smtps://`, or a mail server on a network you trust. verifair checks the server's certificate in both modes. The URL and password are never logged; a failed email logs one warning, `email failed: <error type> [<SMTP code>]`, and the request that sent it still succeeds.
 
 The Docker image also uses these uvicorn settings:
 

@@ -46,6 +46,7 @@ A request without the header, or with the header sent more than once, gets 401. 
 | Read all projects, reports and threads | Yes | Yes | Yes |
 | Push a report or a new version | Through their own agent token | Same as a member | The owner's reports only |
 | Comment, reply, reopen a thread | Yes | Yes | Comment and reply on the owner's reports |
+| Request a review, or remove a request | Yes, on any report, from any active member except the report owner | Same as a member | Add requests on the owner's reports when pushing |
 | Sign a version | Own reports | Own reports | No |
 | Approve or request changes | Reports someone else signed | Same as a member | No |
 | Resolve a thread or change its blocking flag | Threads they started, and agent threads on their own reports | Any thread | Resolve agent threads on the owner's reports |
@@ -60,7 +61,7 @@ A deactivated member is refused on their next request, and all their tokens are 
 
 There must always be at least one active admin. verifair refuses to demote or deactivate the last one: `There must be at least one active admin.`
 
-Admin and token actions are written to the app log as `access action=... actor=... target=...`. A member change also logs `tokens_revoked=N`, the number of tokens a deactivation revoked. The token secret is never logged.
+Admin and token actions, and added or removed review requests (`action=add_reviewer` and `action=remove_reviewer`, with `report=<id>`), are written to the app log as `access action=... actor=... target=...`. A member change also logs `tokens_revoked=N`, the number of tokens a deactivation revoked. The token secret is never logged.
 
 ## Agent tokens
 
@@ -76,7 +77,7 @@ Every member creates their own agent tokens on the **Agent tokens** page (`/acce
 
 The token owner owns every report the token pushes. Report ids are chosen by the client. If an id is already used by another member's report, the push gets 403 `This report belongs to another member.` Pick a different id, or leave `id` out and verifair makes a new one. Ownership cannot be transferred.
 
-A report with no owner (a report pushed in local mode and never signed) is frozen in shared mode. Nobody can sign it, push a new version to it, or comment on it with an agent token. People can still read it and comment in the browser. To go on, push it again with an agent token under a new id.
+A report with no owner (a report pushed in local mode and never signed) is frozen in shared mode. Nobody can sign it, push a new version to it, or comment on it with an agent token. People can still read it, comment and request reviews in the browser. To go on, push it again with an agent token under a new id.
 
 ## Moderation
 

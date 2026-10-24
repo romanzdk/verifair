@@ -23,6 +23,21 @@ Below 1024px wide the sidebar becomes a menu that opens from the top bar. On the
 
 Your id is at the bottom of the sidebar, with a button to copy it. Give it to your agent. Set `author_id` to the owner's id and `reviewers` to the requested reviewers' ids when publishing. In shared mode the agent token sets the owner, so `author_id` can be left out. Display names do not decide ownership. Review requests help people find work. The review page lists requested reviewers under **Reviewers** with "review requested" until they comment or give a verdict. Anyone with access can still read and review a report, and the normal signing and approval rules apply.
 
+## Request a review
+
+In shared mode, any member can ask someone to review a change. Under **Reviewers** on the review page, pick a member and press **Request**. The list shows active members who do not own the report and were not asked yet. A requested reviewer who has not given a verdict on the current version has a **Remove** button. Removing a request does not remove their comments or verdicts. The person sees the change in their Inbox (**Needs your review**) once the author has signed it, and in **My reviews**. Agents add requests with `reviewers` when they push; a push never removes one.
+
+In local mode there is no picker. Agents set `reviewers` when they push.
+
+### Emails
+
+With `VERIFAIR_SMTP_URL` and `VERIFAIR_EMAIL_FROM` set (see [configuration.md](configuration.md)), shared mode also sends a plain-text email:
+
+- when the author signs a version: to every requested reviewer except the signer,
+- when someone adds a reviewer while the current version is signed: to that person. Adding yourself sends nothing.
+
+A push makes a new unsigned version, so it sends no email; the reviewers get one when the author signs it. Emails go only to active members whose id contains `@`. The subject is `Review requested: <title>`. The text says who asked, the project, the risk, the report's **Judge this** section (up to 1,500 characters) and the link. Local mode sends no email.
+
 Local identities belong to a browser. With the auth proxy described in [deployment.md](deployment.md#deploying), the trusted identity header supplies the same ID across devices. In local mode, signing a report without an owner records the signer as the owner, and **My changes** also lists unowned reports whose `author` equals your identity. In shared mode only `author_id` counts, and a report without an owner is frozen (see [Report ownership](access.md#report-ownership)).
 
 ## Signing
