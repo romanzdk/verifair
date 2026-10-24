@@ -60,8 +60,15 @@ def test_sign_in_sets_a_session_and_returns_to_next(anonymous, provider):
     assert form["redirect_uri"] == "http://localhost:8000/auth/callback"
     assert "code_verifier" in form
     page = anonymous.get("/")
-    assert page.status_code == 200 and '<span class="me">admin</span>' in page.text
-    assert 'action="/logout"' in page.text
+    assert page.status_code == 200 and '<span class="me" title="admin">admin</span>' in page.text
+    user = page.text.split('<div class="app-user">')[1]
+    order = (
+        'class="me-row"',
+        'class="me-id"',
+        '<form method="post" action="/logout" class="signout"',
+    )
+    assert [user.index(part) for part in order] == sorted(user.index(part) for part in order)
+    assert 'class="signout" aria-label="Sign out"' in user
 
 
 def test_member_id_is_the_lower_cased_email(anonymous, provider):
@@ -348,6 +355,7 @@ def test_logout_clears_the_session(shared_client, as_user):
     assert "max-age=0" in cleared and "path=/" in cleared
     page = TestClient(shared_client.app).get("/signed-out")
     assert page.status_code == 200 and "You signed out." in page.text
+    assert '<a class="brand" href="/">' in page.text
     assert 'href="/login"' in page.text
     stranger = shared_client.post(
         "/logout", headers=signed_in("stranger@example.com"), follow_redirects=False

@@ -183,6 +183,7 @@ details.me summary .ic14 { color: var(--text-subtle); }
   .app-nav::backdrop { background: var(--backdrop); }
   .app-page { padding: 20px 16px 96px; }
   .app-top { padding: 0 16px; }
+  .signout .btn { height: 32px; }
 }
 
 .ph { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
@@ -361,6 +362,7 @@ table.t form { margin: 0; }
   .grp-h .hint { display: none; }
 }
 @media (max-width: 640px) {
+  .denied { padding: 0 24px; }
   .ph .meta { font-size: 12.5px; }
   .top-act .btn { padding: 0 8px; }
   .top-act .btn .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -377,6 +379,7 @@ table.t form { margin: 0; }
 .denied h1 { margin: 0 0 8px; font: 600 20px/28px var(--font); }
 .denied p { color: var(--text-muted); }
 .denied a { color: var(--link); }
+.denied .brand { padding: 0; margin-bottom: 24px; color: inherit; }
 
 
 .banner { padding: 8px 24px; background: var(--risk-medium-bg); color: var(--warn-text); font-size: 13px; }

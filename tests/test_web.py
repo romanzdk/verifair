@@ -1425,7 +1425,7 @@ def test_identity_header_is_the_user(proxied):
     who = signed_in("alice@example.com")
     page = proxied.get("/r/prorate", headers=who)
     assert "Set your name" not in page.text and 'action="/me"' not in page.text
-    assert '<span class="me">alice</span>' in page.text
+    assert '<span class="me" title="alice">alice</span>' in page.text
     assert "set-cookie" not in page.headers
 
     r = proxied.post(
@@ -1551,7 +1551,7 @@ def test_shared_mode_email_is_matched_case_insensitively(anonymous, as_user, pro
     as_user("bob@example.com")
     provider.sign_in(anonymous, email="BOB@Example.com")
     bob = anonymous.get("/")
-    assert bob.status_code == 200 and '<span class="me">bob</span>' in bob.text
+    assert bob.status_code == 200 and '<span class="me" title="bob">bob</span>' in bob.text
 
 
 def test_shared_mode_denials_are_logged_with_reason_and_path(
@@ -1601,7 +1601,9 @@ def test_shared_mode_member_is_the_users_row_and_gets_no_cookies(
         assert r.status_code == 200, path
         assert "set-cookie" not in r.headers, path
     page = shared_client.get("/r/t", headers=bob).text
-    assert '<span class="me">Bob Builder</span>' in page and "Mallory" not in page
+    assert (
+        '<span class="me" title="Bob Builder">Bob Builder</span>' in page and "Mallory" not in page
+    )
     assert 'action="/me"' not in page
     r = shared_client.post(
         "/r/t/comments", data={"version": 1, "section": "A", "body": "Why?"}, headers=bob
@@ -1612,7 +1614,7 @@ def test_shared_mode_member_is_the_users_row_and_gets_no_cookies(
     conn.close()
     assert (comment["author_id"], comment["author_name"]) == ("bob@example.com", "Bob Builder")
     admin = shared_client.get("/").text
-    assert '<span class="me">admin</span>' in admin
+    assert '<span class="me" title="admin">admin</span>' in admin
 
 
 def test_shared_mode_browser_check_still_applies_to_members(anonymous):
@@ -2538,11 +2540,11 @@ def test_user_block_local_and_shared(client, shared_client, as_user):
     assert "/access" not in page and 'action="/logout"' not in page
 
     bob = shared_client.get("/", headers=as_user("bob@example.com", name="Bob Builder")).text
-    assert '<span class="me">Bob Builder</span>' in bob and ">Member<" in bob
+    assert '<span class="me" title="Bob Builder">Bob Builder</span>' in bob and ">Member<" in bob
     assert 'data-copy-identity="bob@example.com"' in bob
     assert 'href="/access/tokens"' in bob and 'href="/access/members"' not in bob
     assert "Settings need" not in bob
-    assert '<form method="post" action="/logout" class="signout">' in bob
+    assert '<form method="post" action="/logout" class="signout" aria-label="Sign out">' in bob
     admin = shared_client.get("/").text
     assert ">Admin<" in admin and 'href="/access/members"' in admin
 

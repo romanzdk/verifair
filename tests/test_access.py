@@ -540,6 +540,7 @@ def test_denied_page_has_a_heading_and_links_back(shared_client, conn, as_user):
     ]:
         assert r.status_code == 403
         assert '<main class="app-page denied">' in r.text and "<h1>No access</h1>" in r.text
+        assert '<a class="brand" href="/"><img class="mark" src="/static/logo.svg"' in r.text
         assert 'href="/static/app.css"' in r.text and "landing" not in r.text
         assert ('<a href="/">' in r.text) is home
         assert ('<a href="/access/tokens">Back to Agent tokens</a>' in r.text) is back
