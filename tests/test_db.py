@@ -782,3 +782,15 @@ def test_failed_write_leaves_the_connection_usable(conn):
         )
     assert _idle(conn)
     assert latest_version(conn, "r1") == 1
+
+
+def test_token_auth_does_not_hide_a_lost_connection_during_the_touch(conn, monkeypatch):
+    add_user(conn, id="m", name="M", role="member")
+    token, _ = create_token(conn, owner_id="m", label="a")
+
+    def lost(*args):
+        raise psycopg.OperationalError("server closed the connection unexpectedly")
+
+    monkeypatch.setattr(db, "_touch_token", lost)
+    with pytest.raises(psycopg.OperationalError, match="server closed"):
+        authenticate_token(conn, token, touch=True)

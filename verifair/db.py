@@ -485,11 +485,12 @@ def thread_root(conn: Connection, report_id: str, comment_id: int) -> Row | None
 
 
 def reopen_thread(conn: Connection, report_id: str, comment_id: int) -> bool:
-    cur = conn.execute(
-        "UPDATE comments SET resolved_at=NULL, resolved_by=NULL WHERE report_id=%s AND id ="
-        " (SELECT COALESCE(parent_id, id) FROM comments WHERE id=%s AND report_id=%s)",
-        (report_id, comment_id, report_id),
-    )
+    with _write(conn, report_id):
+        cur = conn.execute(
+            "UPDATE comments SET resolved_at=NULL, resolved_by=NULL WHERE report_id=%s AND id ="
+            " (SELECT COALESCE(parent_id, id) FROM comments WHERE id=%s AND report_id=%s)",
+            (report_id, comment_id, report_id),
+        )
     return cur.rowcount > 0
 
 
@@ -721,7 +722,7 @@ def authenticate_token(
     if touch and (row["last_used_at"] is None or row["last_used_at"] < cutoff):
         try:
             _touch_token(conn, public_id, cutoff)
-        except psycopg.OperationalError:
+        except psycopg.errors.LockNotAvailable:
             log.warning("token last_used not saved id=%s", public_id)
     return owner, None
 

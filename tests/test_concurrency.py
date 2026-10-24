@@ -16,6 +16,8 @@ from verifair.db import (
     init_schema,
     list_tokens,
     push_report,
+    reopen_thread,
+    resolve_thread,
     update_user,
 )
 
@@ -115,10 +117,9 @@ def test_double_submit_of_one_nonce_creates_one_token(url, monkeypatch):
     assert len(tokens) == 1
 
 
-def test_blocking_comment_waits_for_an_approval_in_flight(url):
-    c = connect(url)
-    _push(c, id="r1")
-    c.close()
+# A holds the report lock for 0.3 s; without it B finishes at ~0.1 s.
+# The 0.25 s bound leaves room for thread start skew after the barrier.
+def _write_during_approval_took(url, write):
     b_took = []
 
     def work(c, i):
@@ -135,16 +136,31 @@ def test_blocking_comment_waits_for_an_approval_in_flight(url):
             )
         else:
             time.sleep(0.1)
-            add_comment(
-                c,
-                report_id="r1",
-                version=1,
-                author_id="b",
-                author_name="B",
-                body="no",
-                blocking=True,
-            )
+            write(c)
             b_took.append(time.monotonic() - started)
 
     _race(url, work)
-    assert b_took[0] >= 0.3
+    return b_took[0]
+
+
+def test_blocking_comment_waits_for_an_approval_in_flight(url):
+    c = connect(url)
+    _push(c, id="r1")
+    c.close()
+    took = _write_during_approval_took(
+        url,
+        lambda c: add_comment(
+            c, report_id="r1", version=1, author_id="b", author_name="B", body="no", blocking=True
+        ),
+    )
+    assert took >= 0.25
+
+
+def test_reopening_a_blocking_thread_waits_for_an_approval_in_flight(url):
+    c = connect(url)
+    _push(c, id="r1")
+    root = add_comment(c, report_id="r1", version=1, author_id="b", author_name="B", body="no")
+    resolve_thread(c, "r1", root["id"])
+    c.close()
+    took = _write_during_approval_took(url, lambda c: reopen_thread(c, "r1", root["id"]))
+    assert took >= 0.25
