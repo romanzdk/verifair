@@ -26,6 +26,8 @@ The compose passwords and token are for local use. Change them for any shared se
 
 This is local mode. For a team, use shared mode. See [Roles and access](#roles-and-access).
 
+Older versions kept their data in a SQLite file, `verifair.db`. This version does not read that file or move its data. Start with an empty database.
+
 To run from source, start only the database and point verifair at it:
 
 ```bash
@@ -111,7 +113,7 @@ The commands below use the report `id` as `$ID`. In shared mode, use your own ag
 - On later versions, omitted `author`, `author_id` and `reviewers` retain their previous values. In local mode a supplied `author_id` transfers ownership; a supplied reviewer list replaces the requests, and `reviewers: []` clears them. `null` for `author_id` or `reviewers` also leaves the existing value unchanged. Requests belong to the change and survive signing, verdicts and new versions.
 - Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
 - The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as a top-level H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
-- Unknown JSON keys are rejected with 422. So is text that holds a NUL character (`\u0000`), because Postgres cannot store it.
+- Unknown JSON keys are rejected with 422. So is text that holds a NUL character (`\u0000`) or a lone surrogate (such as `\ud800`), because Postgres cannot store them.
 - In shared mode the token owner owns the report. `author_id` can be left out; if sent, it must be the token owner, or the push gets 403 `"author_id must be the token owner."`. A push to an `id` that belongs to another member's report gets 403 `"This report belongs to another member."`, also when the token owner is an admin. A push to an `id` whose report has no owner gets 403 `"This report has no owner. Push it again with an agent token under a new id."`. Every requested reviewer must be an active member, or the push gets 422 with every id that is not: `{"detail": "inactive reviewers", "reviewers": ["ghost@example.com"]}`.
 
 A push sends a "draft" message to Slack (if configured). The "ready for review" message is sent when the version is signed.
@@ -441,6 +443,7 @@ Before you switch:
 After the switch:
 
 - Add the members on `/access/members` and give each agent a member token. The old shared token stops working.
+- The first start in shared mode turns the stored ids into lower case once: report owners (`author_id`), requested reviewers, signers, verdict and comment authors, and `resolved_by`. Local mode stores them as they were sent, and shared mode matches them to the identity header in lower case. Startup logs `lowercased ids rows=N`. Later starts change nothing. An old id that would turn into `agent` stays as it is.
 - Existing reports keep their `author_id`. A member can push new versions only to reports whose `author_id` is their id.
 - Reports with no owner are frozen. Push them again with an agent token under a new id.
 - If no admin can sign in any more, make someone admin again in the database. Use the id in lower case:
@@ -478,10 +481,12 @@ The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When the auth proxy
 - To identify users from an auth proxy, set `VERIFAIR_IDENTITY_HEADER` to the header the proxy adds, for example `X-Forwarded-Email` with oauth2-proxy. This turns on shared mode. The header value becomes the user id; the display name comes from the member list. The name prompt goes away, and signing and approvals are tied to that identity. The proxy must strip this header from client requests, or anyone can pose as anyone. Requests without the header get 401, but keep the app reachable only through the proxy.
 - Set `VERIFAIR_BASE_URL` to the public HTTPS URL, for example `https://verifair.example.com`. It is used in notification links and in the push response, and enables secure cookies. Keep the browser on this origin and have the reverse proxy preserve `Sec-Fetch-Site`.
 - Serve it at the root of a domain. Sub-paths (like `/verifair/`) are not supported.
-- verifair needs a Postgres 17 database where it can create tables. Where Postgres runs in production is not decided here.
+- verifair needs a Postgres 17 database. Its database role must own the schema and the tables, because every start runs the schema SQL, and Postgres 15 and newer does not let every role create tables in `public`. Where Postgres runs in production is not decided here.
+- For a database on another host, add `sslmode=verify-full` (or at least `sslmode=require`) to `VERIFAIR_DATABASE_URL`, for example `postgresql://verifair:secret@db.example.com:5432/verifair?sslmode=verify-full`.
+- Behind PgBouncer, use session mode. Transaction mode breaks the prepared statements psycopg makes, and they cannot be turned off from the URL.
 - Startup creates and updates the schema under an advisory lock, so several replicas can start at once. A start can wait up to 5 seconds behind writes in progress, then stops with a clear message. Restart it to try again.
-- You can run several replicas, because all state is in Postgres. Keep `replicas × VERIFAIR_DB_POOL_SIZE` below the server's `max_connections`.
-- Back up with `pg_dump -Fc "$VERIFAIR_DATABASE_URL" > verifair.dump`. Restore with `pg_restore -d <empty database> verifair.dump`.
+- You can run several replicas, because all state is in Postgres. Keep `(replicas + extra pods during a rolling update) × VERIFAIR_DB_POOL_SIZE`, plus the connections you need for admin work and backups, below the server's `max_connections`.
+- Back up with `pg_dump -Fc "$VERIFAIR_DATABASE_URL" > verifair.dump`. Restore into an empty database as verifair's role with `pg_restore --no-owner -d <empty database> verifair.dump`, so that role owns the restored tables.
 - The image trusts `X-Forwarded-*` headers from any address. Set `FORWARDED_ALLOW_IPS` to your proxy's IP.
 - `FORWARDED_ALLOW_IPS` does not protect the identity header. It only decides whose `X-Forwarded-For` and `X-Forwarded-Proto` uvicorn believes. verifair reads the identity header from every request, so anyone who can reach verifair directly, not through the proxy, can claim any identity. Make sure only the proxy can reach it: run the proxy as a sidecar and set `UVICORN_HOST=127.0.0.1`, or use a network policy that only lets the proxy in.
 - With `UVICORN_HOST=127.0.0.1`, an HTTP probe from outside the container cannot reach `/healthz`. Use an exec probe with the same command as the image `HEALTHCHECK`, or probe `/healthz` through the proxy. oauth2-proxy then needs `--skip-auth-route=GET=^/healthz$`, or it asks the probe to sign in.
