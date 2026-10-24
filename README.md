@@ -443,7 +443,7 @@ Before you switch:
 
 After the switch:
 
-- Add the members on `/access/members` and give each agent a member token. The old shared token stops working.
+- The bootstrap admin is already a member. Add the other members on `/access/members` and give each agent a member token. The old shared token stops working.
 - The first start in shared mode turns the stored ids into lower case once: report owners (`author_id`), requested reviewers, signers, verdict and comment authors, and `resolved_by`. Local mode stores them as they were sent, and shared mode matches them to the identity header in lower case. Startup logs `lowercased ids rows=N`. Later starts change nothing. An old id that would turn into `agent` stays as it is.
 - Existing reports keep their `author_id`. A member can push new versions only to reports whose `author_id` is their id.
 - Reports with no owner are frozen. Push them again with an agent token under a new id.
@@ -484,12 +484,13 @@ The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When the auth proxy
 - Serve it at the root of a domain. Sub-paths (like `/verifair/`) are not supported.
 - verifair needs a Postgres 17 database. Its database role must own the schema and the tables, because every start runs the schema SQL, and Postgres 15 and newer does not let every role create tables in `public`. Where Postgres runs in production is not decided here.
 - For a database on another host, add `sslmode=verify-full` (or at least `sslmode=require`) to `VERIFAIR_DATABASE_URL`, for example `postgresql://verifair:secret@db.example.com:5432/verifair?sslmode=verify-full`.
-- Behind PgBouncer, use session mode. Transaction mode breaks the prepared statements psycopg makes, and they cannot be turned off from the URL.
+- Behind PgBouncer, use session mode. Transaction mode needs PgBouncer 1.21 or newer with `max_prepared_statements` set, because psycopg makes prepared statements and they cannot be turned off from the URL.
 - Startup creates and updates the schema under an advisory lock, so several replicas can start at once. A start can wait up to 5 seconds behind writes in progress, then stops with a clear message. Restart it to try again.
 - You can run several replicas, because all state is in Postgres. Keep `(replicas + extra pods during a rolling update) × VERIFAIR_DB_POOL_SIZE`, plus the connections you need for admin work and backups, below the server's `max_connections`.
 - Back up with `pg_dump -Fc "$VERIFAIR_DATABASE_URL" > verifair.dump`. Restore into an empty database as verifair's role with `pg_restore --no-owner -d <empty database> verifair.dump`, so that role owns the restored tables.
 - The image trusts `X-Forwarded-*` headers from any address. Set `FORWARDED_ALLOW_IPS` to your proxy's IP.
 - `FORWARDED_ALLOW_IPS` does not protect the identity header. It only decides whose `X-Forwarded-For` and `X-Forwarded-Proto` uvicorn believes. verifair reads the identity header from every request, so anyone who can reach verifair directly, not through the proxy, can claim any identity. Make sure only the proxy can reach it: run the proxy as a sidecar and set `UVICORN_HOST=127.0.0.1`, or use a network policy that only lets the proxy in.
+- Give the Kubernetes liveness and readiness probes on `/healthz` a timeout of at least 5 seconds (`timeoutSeconds: 5`). Under heavy load the answer can take a few seconds, and a shorter timeout restarts a pod that is only busy.
 - With `UVICORN_HOST=127.0.0.1`, an HTTP probe from outside the container cannot reach `/healthz`. Use an exec probe with the same command as the image `HEALTHCHECK`, or probe `/healthz` through the proxy. oauth2-proxy then needs `--skip-auth-route=GET=^/healthz$`, or it asks the probe to sign in.
 
 ### Upgrading an existing HTTP deployment
