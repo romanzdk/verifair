@@ -216,10 +216,16 @@ def test_can_moderate_agent_thread_without_report_owner():
 
 
 def row(
-    id, status, risk="low", signed_at=None, updated_at="2026-10-01T00:00:00+00:00", reviewed_by=()
+    id,
+    status,
+    risk="low",
+    signed_at=None,
+    updated_at="2026-10-01T00:00:00+00:00",
+    reviewed_by=(),
+    signer_id="author",
 ):
     return {
-        "report": {"id": id, "risk": risk, "updated_at": updated_at},
+        "report": {"id": id, "risk": risk, "updated_at": updated_at, "signer_id": signer_id},
         "status": status,
         "signed_at": signed_at,
         "reviewed_by": set(reviewed_by),
@@ -234,13 +240,14 @@ def test_inbox_groups_and_order():
         row("seen", "awaiting_review", signed_at="2026-10-01T00:00:00+00:00", reviewed_by=["me"]),
         row("self", "awaiting_review", signed_at="2026-10-01T00:00:00+00:00"),
         row("not-asked", "awaiting_review", signed_at="2026-10-01T00:00:00+00:00"),
+        row("i-signed", "awaiting_review", signed_at="2026-10-01T00:00:00+00:00", signer_id="me"),
         row("returned", "changes_requested"),
         row("draft-old", "unsigned", updated_at="2026-10-01T00:00:00+00:00"),
         row("draft-new", "unsigned", updated_at="2026-10-05T00:00:00+00:00"),
         row("approved", "approved"),
     ]
     mine = {"self", "returned", "draft-old", "draft-new", "approved"}
-    requested = {"low-new", "high-new", "low-old", "seen", "self"}
+    requested = {"low-new", "high-new", "low-old", "seen", "self", "i-signed"}
     groups = inbox(rows, user_id="me", mine=mine, requested=requested)
 
     def ids(key):

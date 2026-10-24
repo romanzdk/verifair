@@ -132,6 +132,7 @@ def inbox(
         and row["report"]["id"] not in mine
         and row["status"] == "awaiting_review"
         and user_id not in row["reviewed_by"]
+        and row["report"]["signer_id"] != user_id
     ]
     return {
         "review": sorted(

@@ -29,8 +29,8 @@ This is local mode. For a team, use shared mode. See [Roles and access](#roles-a
 The sidebar has four views under **Your work**:
 
 - **Inbox** (the home page) shows what needs you, grouped by whose turn it is:
-  - **Needs your review**: changes where your review was requested, the author has signed, and you have not given a verdict on this version yet. High risk comes first, then the ones waiting longest. Your own changes never show here, even if you are on their reviewer list.
-  - **Needs your signature**: your unsigned changes.
+  - **Needs your review**: changes where your review was requested, the author has signed, and you have not given a verdict on this version yet. High risk comes first, then the ones waiting longest. Your own changes, and changes you signed, never show here, even if you are on their reviewer list.
+  - **Needs your signature**: your unsigned changes. In local mode it also shows unsigned changes with no owner, because anyone can sign those.
   - **Returned to you**: your changes where a reviewer requested changes.
   - **Waiting on others**: your signed changes that wait for a review. This group starts closed.
 

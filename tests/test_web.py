@@ -156,6 +156,8 @@ def test_first_run_and_caught_up(client, shared_client, settings):
     assert settings.api_token == "t"
     assert "=t\n" not in page and ">t<" not in page
     assert 'data-copy-target="vf_env"' in page and '<pre class="pre" id="vf_env">' in page
+    assert 'export VERIFAIR_API_TOKEN="&lt;your token&gt;"' in page
+    assert 'aria-label="Copy environment variables"' in page
     shared = shared_client.get("/").text
     assert "Welcome to verifair" in shared and "Create an agent token" in shared
     assert 'class="btn p" href="/access/tokens"' in shared

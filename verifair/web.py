@@ -388,12 +388,16 @@ def index(request: Request, conn: Conn, user: User, scope: str | None = None):
             return {r["id"] for r in reports}
 
         reports = db.list_reports(conn, None, user_id=user[0], legacy_author=legacy)
-        groups = rules.inbox(
-            _change_rows(conn, reports, user[0]),
-            user_id=user[0],
-            mine=ids("author"),
-            requested=ids("reviewer"),
-        )
+        rows = _change_rows(conn, reports, user[0])
+        mine = ids("author")
+        if legacy:
+            # in local mode anyone may sign an unowned draft, and signing makes them its owner
+            mine |= {
+                row["report"]["id"]
+                for row in rows
+                if row["report"]["author_id"] is None and row["status"] == "unsigned"
+            }
+        groups = rules.inbox(rows, user_id=user[0], mine=mine, requested=ids("reviewer"))
         ctx |= {
             "groups": groups,
             "need_count": sum(len(groups[key]) for key in ("review", "sign", "returned")),

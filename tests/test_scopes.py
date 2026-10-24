@@ -263,11 +263,16 @@ def test_shared_my_changes_ignores_a_legacy_author_equal_to_the_user(team):
     assert 'href="/r/legacy"' not in team.get("/changes?scope=author", headers=ALICE).text
 
 
+GROUPS = {"Needs your review", "Needs your signature", "Returned to you", "Waiting on others"}
+
+
 def sections(page):
     body, _, waiting = main(page).partition('<details class="grp"')
     found = {"Waiting on others": waiting} if waiting else {}
     for part in body.split('<h2 class="grp-h"')[1:]:
         found[part.split("</svg>", 1)[1].split("<", 1)[0]] = part
+    assert set(found) <= GROUPS
+    assert len(found) == main(page).count('class="grp"')
     return found
 
 
@@ -330,3 +335,26 @@ def test_inbox_self_requested_author_is_not_asked_to_review(team):
     assert "Needs your review" not in groups
     assert 'href="/r/self"' in groups["Waiting on others"]
     assert "You're all caught up" in page
+
+
+def test_inbox_local_mode_signer_and_unowned_drafts(client):
+    def as_user(id):
+        client.cookies.clear()
+        client.cookies.set("vf_id", id)
+        client.cookies.set("vf_name", id[:3])
+        return sections(client.get("/").text)
+
+    assert publish(client, author_id="alice000", reviewers=["bob00000"]).status_code == 201
+    assert publish(client, "unowned").status_code == 201
+    for user in ("bob00000", "carol000"):
+        assert 'href="/r/unowned"' in as_user(user)["Needs your signature"]
+
+    as_user("bob00000")
+    assert client.post("/r/owned/sign", data={"version": 1}).status_code == 200
+    assert "Needs your review" not in as_user("bob00000")
+    assert 'href="/r/owned"' in as_user("alice000")["Waiting on others"]
+
+    as_user("carol000")
+    assert client.post("/r/unowned/sign", data={"version": 1}).status_code == 200
+    assert 'href="/r/unowned"' in as_user("carol000")["Waiting on others"]
+    assert "Needs your signature" not in as_user("bob00000")
