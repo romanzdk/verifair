@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% set drawer = true %}
 {% set inline_name_prompt = is_current and not user_name and not user_from_header %}
 {% block title %}{{ report.title }} · verifair{% endblock %}
-{% block crumb %}<a href="/"><b>Projects</b></a><i>›</i><a href="/p/{{ report.project|urlencode }}"><b>{{ report.project }}</b></a><i>›</i>{{ report.title }}{% endblock %}
+{% block crumbs %}<a href="/p/{{ report.project|urlencode }}">{{ report.project }}</a>{{ icon("chevron-right", "ic14") }}<span class="cur">{{ report.title }}</span>{% endblock %}
 {% block content %}
 {% if not is_current %}
 <div class="banner">Viewing v{{ version }} · current is v{{ current_version }} · <a href="{{ url }}">open current</a></div>

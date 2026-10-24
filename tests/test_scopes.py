@@ -26,6 +26,10 @@ def team(settings, monkeypatch):
     return TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
 
 
+def main(page):
+    return page.split('<div class="app-main">')[1]
+
+
 def publish(client, id="owned", by=None, **overrides):
     return client.post(
         "/api/reports",
@@ -109,7 +113,7 @@ def test_all_is_shared_and_personal_scopes_filter_projects_counts_and_previews(t
 
     mine = team.get("/?scope=author", headers=ALICE).text
     assert 'href="/p/billing?scope=author"' in mine
-    assert 'href="/p/other' not in mine
+    assert 'href="/p/other' not in main(mine)
     assert 'href="/r/owned"' in mine and 'href="/r/requested"' not in mine
     assert 'aria-label="Unsigned: 1 change"' in mine
     assert 'href="/p/billing?tab=unsigned&amp;scope=author"' in mine
@@ -191,7 +195,7 @@ def test_identity_is_stable_across_browsers_and_not_matched_by_display_name(team
     team.cookies.set("vf_name", "Alice")
     second = team.get("/?scope=author", headers=ALICE).text
     assert 'href="/r/owned"' in first and 'href="/r/owned"' in second
-    assert 'href="/p/other' not in first and 'href="/p/other' not in second
+    assert 'href="/p/other' not in main(first) and 'href="/p/other' not in main(second)
 
 
 def test_canonical_owner_can_sign_with_a_separate_display_name(team):

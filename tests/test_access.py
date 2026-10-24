@@ -207,7 +207,7 @@ def test_resending_the_new_token_form_does_not_create_a_second_token(shared_clie
     assert _nonce(first.text) != nonce
     again = shared_client.post("/access/tokens", data=data, headers=ADMIN)
     assert again.status_code == 200 and again.headers["cache-control"] == "no-store"
-    assert ALREADY_CREATED in again.text and "vf_" not in again.text
+    assert ALREADY_CREATED in again.text and re.search(r"vf_[0-9a-f]{12}\.", again.text) is None
     assert COPY_ONCE not in again.text
     assert len(db.list_tokens(conn)) == 1
 
@@ -258,7 +258,8 @@ def test_access_link_on_landing_pages_in_shared_mode_only(shared_client, conn, c
     db.push_report(conn, project="p", title="T", risk="low", body="## A\nx", id="r")
     for path in ("/", "/p/p"):
         assert 'href="/access"' in shared_client.get(path, headers=ADMIN).text, path
-    assert "/access" not in shared_client.get("/r/r", headers=ADMIN).text
+    review = shared_client.get("/r/r", headers=ADMIN).text
+    assert "/access" not in review.split('<div class="app-main">')[1]
     assert 'href="/access"' not in client.get("/").text
 
 
@@ -440,7 +441,7 @@ def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, con
         '<button class="btn" aria-label="Deactivate admin@example.com"'
         ' data-confirm="Deactivate yourself? You will lose access right away.">Deactivate</button>'
     ) in page
-    js = (Path(web.__file__).parent / "static" / "landing.js").read_text()
+    js = (Path(web.__file__).parent / "static" / "app.js").read_text()
     assert 'addEventListener("submit"' in js and "event.submitter?.dataset.confirm" in js
     assert "!confirm(message)" in js and "event.preventDefault()" in js
 
@@ -473,7 +474,7 @@ def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, da
     assert f'name="name" value="{data["name"]}"' in card
     assert '<option value="admin" selected>' in card
     assert '<option value="member" selected>' not in card
-    js = (Path(web.__file__).parent / "static" / "landing.js").read_text()
+    js = (Path(web.__file__).parent / "static" / "app.js").read_text()
     assert 'addEventListener("load", () => document.querySelector("[autofocus]")?.focus());' in js
 
 
@@ -522,7 +523,7 @@ def test_new_token_has_a_copy_button_and_the_note_describes_the_field(shared_cli
         ' <span data-copy-result role="status"></span>'
     ) in r.text
     assert r.text.count(token) == 1
-    js = (Path(web.__file__).parent / "static" / "landing.js").read_text()
+    js = (Path(web.__file__).parent / "static" / "app.js").read_text()
     assert '"[data-copy-identity], [data-copy-target]"' in js and "Token copied." in js
 
 

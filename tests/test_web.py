@@ -1,6 +1,11 @@
+import importlib.metadata
 import re
+from pathlib import Path
 
 import pytest
+
+from verifair import web
+from verifair.app import CSP as APP_CSP
 
 H = {"Authorization": "Bearer t"}
 REFUSED_COPY = "Add a summary, or start a comment thread of your own and leave it open."
@@ -1666,3 +1671,65 @@ def test_shared_mode_reply_reopens_only_when_the_replier_may_moderate(
         assert resolved(cid)
         reply()
         assert resolved(cid) is not reopens, (cid, reopens)
+
+
+SHELL_PAGES = ["/", "/p/billing-service", "/r/prorate"]
+
+
+def test_shell_wraps_every_page(client):
+    push(client)
+    for path in SHELL_PAGES:
+        page = client.get(path).text
+        assert 'id="vf_nav" popover' in page, path
+        assert 'popovertarget="vf_nav"' in page, path
+        assert 'href="/changes?scope=reviewer"' in page, path
+        assert 'href="/docs"' in page, path
+        assert f"v{importlib.metadata.version('verifair')}" in page, path
+        assert ('class="app drawer"' in page) is (path == "/r/prorate"), path
+
+
+def test_pages_have_no_inline_script(client, shared_client):
+    push(client)
+    responses = [client.get(path) for path in SHELL_PAGES] + [shared_client.get("/access")]
+    for r in responses:
+        assert r.status_code == 200, r.url
+        assert re.search(r"<script(?![^>]*\ssrc=)", r.text) is None, r.url
+        assert re.search(r"\son[a-z]+=", r.text) is None, r.url
+        assert r.headers["content-security-policy"] == APP_CSP, r.url
+
+
+def test_icon_sprite_has_every_icon_the_templates_use():
+    root = Path(web.__file__).parent
+    used = {
+        name
+        for template in (root / "templates").glob("*.html")
+        for name in re.findall(r'icon\(\s*"([a-z0-9-]+)"', template.read_text())
+    }
+    sprite = (root / "static" / "icons.svg").read_text()
+    assert {"menu", "inbox", "user-check", "folder", "copy", "book-open"} <= used
+    for name in used | {"risk-low", "risk-medium", "risk-high"}:
+        assert f'id="{name}"' in sprite, name
+    assert "ISC" in sprite
+
+
+def test_icon_escapes_its_values():
+    assert web.icon('a"b', "c<d") == (
+        '<svg class="c&lt;d" aria-hidden="true"><use href="/static/icons.svg#a&#34;b"/></svg>'
+    )
+
+
+def test_user_block_local_and_shared(client, shared_client, as_user):
+    r = client.get("/")
+    page = r.text
+    assert '<details class="me"' in page and 'action="/me"' in page
+    assert f'data-copy-identity="{r.cookies["vf_id"]}"' in page
+    assert "Settings need a sign-in proxy. See the README." in page
+    assert "/access" not in page
+
+    bob = shared_client.get("/", headers=as_user("bob@example.com", name="Bob Builder")).text
+    assert '<span class="me">Bob Builder</span>' in bob and ">Member<" in bob
+    assert 'data-copy-identity="bob@example.com"' in bob
+    assert 'href="/access/tokens"' in bob and 'href="/access/members"' not in bob
+    assert "sign-in proxy" not in bob
+    admin = shared_client.get("/").text
+    assert ">Admin<" in admin and 'href="/access/members"' in admin

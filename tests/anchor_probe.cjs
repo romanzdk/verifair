@@ -18,6 +18,7 @@ function position(node, offset) {
 
 const document = {
   getElementById: () => null,
+  querySelector: () => null,
   querySelectorAll: () => [],
   addEventListener: () => {},
   body: { addEventListener: () => {} },
@@ -41,7 +42,7 @@ const document = {
     };
   },
 };
-const scope = vm.createContext({ document, Node: { ELEMENT_NODE: 1 }, NodeFilter: { SHOW_TEXT: 4 }, window: {} });
+const scope = vm.createContext({ document, Node: { ELEMENT_NODE: 1 }, NodeFilter: { SHOW_TEXT: 4 }, window: {}, addEventListener: () => {} });
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../verifair/static/app.js"), "utf8"), scope);
 
 function find(parts, quote, start) {

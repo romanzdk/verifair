@@ -1,9 +1,4 @@
 .landing-page { padding-bottom: 0; min-height: 100vh; background: var(--background); }
-.landing-page .topbar { min-height: 60px; padding: 12px max(32px, calc((100% - 1180px) / 2)); gap: 24px; background: var(--card); }
-.landing-page .logo { font-size: 18px; }
-.landing-page .crumb { flex: 1; max-width: none; }
-.landing-page .me summary { padding: 6px 10px; border: 1px solid var(--border); border-radius: 7px; }
-.landing-page .me-form { top: 38px; }
 .landing-page a:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 5px; }
 .landing-wrap { width: min(1180px, calc(100% - 64px)); margin: 0 auto; padding: 44px 0 64px; }
 .landing-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; margin-bottom: 30px; }
@@ -127,7 +122,6 @@ td > .landing-access-form { margin: 0; flex-wrap: nowrap; }
   .landing-change-columns, .landing-change-row { grid-template-columns: minmax(0, 1fr) 110px 70px 130px; gap: 16px; }
 }
 @media (max-width: 760px) {
-  .landing-page .topbar { padding-inline: 20px; gap: 16px; }
   .landing-wrap { width: calc(100% - 40px); padding-top: 30px; }
   .landing-heading { display: block; margin-bottom: 24px; }
   .landing-heading h1 { font-size: 28px; }
@@ -157,9 +151,6 @@ td > .landing-access-form { margin: 0; flex-wrap: nowrap; }
   .landing-access td:not([data-label]) { padding-top: 8px; }
 }
 @media (max-width: 440px) {
-  .landing-page .topbar { padding-inline: 16px; gap: 12px; }
-  .landing-page .logo { font-size: 17px; }
-  .landing-page .me summary { padding-inline: 7px; font-size: 12px; }
   .landing-wrap { width: calc(100% - 32px); padding-top: 28px; }
   .landing-heading h1 { font-size: 27px; }
   .landing-heading > div > p { font-size: 13px; max-width: 280px; }

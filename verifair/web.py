@@ -1,3 +1,4 @@
+import importlib.metadata
 import json
 import logging
 import re
@@ -13,6 +14,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 
 from verifair import db, notify, rules
 from verifair.deps import get_conn
@@ -30,7 +32,17 @@ def _date(iso: str) -> str:
 
 templates.env.filters["date"] = _date
 templates.env.filters["segment"] = lambda value: url_quote(value, safe="")
-templates.env.globals["STATUS_LABELS"] = rules.STATUS_LABELS
+VERSION = importlib.metadata.version("verifair")
+
+
+def icon(name: str, cls: str = "ic") -> Markup:
+    return Markup(
+        f'<svg class="{escape(cls)}" aria-hidden="true">'
+        f'<use href="/static/icons.svg#{escape(name)}"/></svg>'
+    )
+
+
+templates.env.globals |= {"STATUS_LABELS": rules.STATUS_LABELS, "VERSION": VERSION, "icon": icon}
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 YEAR = 365 * 24 * 3600
@@ -104,14 +116,38 @@ def _with_id_cookie(request: Request, response):
     return response
 
 
-def _page(request: Request, user: tuple[str, str | None], name: str, ctx: dict, status=200):
-    url = request.url.remove_query_params("name_error")
-    ctx = ctx | {
-        "user_name": user[1],
-        "user_from_header": request.state.user_from_header,
-        "here": url.path + (f"?{url.query}" if url.query else ""),
-        "name_error": "name_error" in request.query_params,
+def _nav(conn: sqlite3.Connection) -> dict:
+    return {
+        "nav_projects": [{"name": p, "awaiting": 0} for p in db.list_projects(conn)],
+        "inbox_count": 0,
     }
+
+
+def _page(
+    request: Request,
+    conn: sqlite3.Connection,
+    user: tuple[str, str | None],
+    name: str,
+    ctx: dict,
+    status=200,
+):
+    url = request.url.remove_query_params("name_error")
+    member = request.state.member
+    ctx = (
+        ctx
+        | _nav(conn)
+        | {
+            "user_id": user[0],
+            "user_name": user[1],
+            "user_from_header": request.state.user_from_header,
+            "shared": _shared(request),
+            "member": member,
+            "is_admin": member is not None and member["role"] == "admin",
+            "base_url": request.app.state.settings.base_url,
+            "here": url.path + (f"?{url.query}" if url.query else ""),
+            "name_error": "name_error" in request.query_params,
+        }
+    )
     response = templates.TemplateResponse(request, name, ctx, status_code=status)
     return _with_id_cookie(request, response)
 
@@ -341,6 +377,7 @@ def index(request: Request, conn: Conn, user: User, scope: str = "all"):
     )
     return _page(
         request,
+        conn,
         user,
         "index.html",
         scope_context
@@ -411,7 +448,7 @@ def project_page(
             empty_url="?scope=all&tab=all",
             empty_action="View everyone's changes",
         )
-    return _page(request, user, "project.html", ctx)
+    return _page(request, conn, user, "project.html", ctx)
 
 
 @router.get("/r/{id}")
@@ -421,7 +458,7 @@ def report_page(id: str, request: Request, conn: Conn, user: User):
         conn, report, db.latest_version(conn, id), user[0], request.state.member, _shared(request)
     )
     ctx["sign_refusal"] = _sign_refusal(request, report, user[0])
-    return _page(request, user, "report.html", ctx)
+    return _page(request, conn, user, "report.html", ctx)
 
 
 @router.get("/r/{id}/v/{n}")
@@ -430,7 +467,7 @@ def report_version_page(id: str, n: int, request: Request, conn: Conn, user: Use
     if db.get_version(conn, id, n) is None:
         raise HTTPException(404, "version not found")
     ctx = report_context(conn, report, n, user[0], request.state.member, _shared(request))
-    return _page(request, user, "report.html", ctx)
+    return _page(request, conn, user, "report.html", ctx)
 
 
 @router.post("/r/{id}/comments")
@@ -700,7 +737,7 @@ def _access(
         }
         if ctx["is_admin"]:
             ctx |= {"users": db.list_users(conn), "all_tokens": db.list_tokens(conn)}
-    return _page(request, user, "access.html", ctx, status)
+    return _page(request, conn, user, "access.html", ctx, status)
 
 
 def _denied(request: Request, message: str, back: str | None = "/access", home: bool = True):

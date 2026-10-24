@@ -1,6 +1,6 @@
 {% extends "landing_base.html" %}
 {% block title %}Access · verifair{% endblock %}
-{% block crumb %}<a href="/"><b>Projects</b></a><i>›</i>Access{% endblock %}
+{% block crumbs %}<span class="cur">Access</span>{% endblock %}
 {% macro token_rows(tokens, owner=False) %}
 <table>
   <thead><tr>{% if owner %}<th>Owner</th>{% endif %}<th>Label</th><th>Token id</th><th>Created</th><th>Status</th><th><span class="landing-sr-only">Actions</span></th></tr></thead>

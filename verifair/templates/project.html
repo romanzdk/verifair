@@ -1,6 +1,6 @@
 {% extends "landing_base.html" %}
 {% block title %}{{ project }} · verifair{% endblock %}
-{% block crumb %}<a href="/{% if scope != 'all' %}?scope={{ scope }}{% endif %}"><b>Projects</b></a><i>›</i>{{ project }}{% endblock %}
+{% block crumbs %}<a href="/{% if scope != 'all' %}?scope={{ scope }}{% endif %}">Projects</a>{{ icon("chevron-right", "ic14") }}<span class="cur">{{ project }}</span>{% endblock %}
 {% block landing_content %}
 <header class="landing-heading landing-project-heading">
   <div class="landing-project-heading-name">

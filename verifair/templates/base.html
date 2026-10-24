@@ -9,22 +9,18 @@
 <script src="/static/htmx.min.js" defer></script>
 <script src="/static/app.js" defer></script>
 </head>
-<body{% block body_attributes %}{% endblock %}>
-<div class="topbar">
-  <a class="logo" href="/">veri<span>fair</span></a>
-  <div class="crumb">{% block crumb %}<b>Projects</b>{% endblock %}</div>
-  {% if user_from_header %}<span class="me">{{ user_name }}</span>{% else %}
-  <details class="me"{% if name_error and not inline_name_prompt %} open{% endif %}>
-    <summary>{{ user_name or "Set your name" }} ▾</summary>
-    <form method="post" action="/me" class="me-form">
-      {% if name_error and not inline_name_prompt %}<p class="error">Enter a name (1–60 characters).</p>{% endif %}
-      <input name="name" value="{{ user_name or '' }}" maxlength="60" required placeholder="Your name" aria-label="Your name">
-      <input type="hidden" name="next" value="{{ here }}">
-      <button class="btn p">Save</button>
-    </form>
-  </details>
-  {% endif %}
+<body{% block body_class %}{% endblock %}>
+<div class="app{% if drawer %} drawer{% endif %}">
+  {% include "_nav.html" %}
+  <div class="app-main">
+    <header class="app-top">
+      <button class="menu-btn" popovertarget="vf_nav" aria-label="Open menu">{{ icon("menu") }}</button>
+      <a class="top-logo" href="/" aria-label="verifair home"><span class="mark">{{ icon("check", "") }}</span></a>
+      <nav class="crumbs" aria-label="Breadcrumb">{% block crumbs %}{% endblock %}</nav>
+      <div class="top-act">{% block actions %}{% endblock %}</div>
+    </header>
+    {% block content %}{% endblock %}
+  </div>
 </div>
-{% block content %}{% endblock %}
 </body>
 </html>
