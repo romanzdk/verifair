@@ -232,6 +232,18 @@ def test_browser_signing_claims_unowned_changes_and_identity_is_available_to_cop
     assert 'href="/r/owned"' not in client.get("/changes?scope=author").text
 
 
+def test_local_my_changes_matches_the_legacy_author(client):
+    conn = db.connect(client.app.state.settings.db_path)
+    db.push_report(conn, project="p", title="Legacy", risk="low", body="a", author="alice000")
+    db.push_report(conn, project="p", title="Owned", risk="low", body="b", author_id="alice000")
+    db.push_report(conn, project="p", title="Other", risk="low", body="c", author="bob00000")
+    conn.close()
+    client.cookies.set("vf_id", "alice000")
+    mine = main(client.get("/changes?scope=author&tab=all").text)
+    assert 'href="/r/legacy"' in mine and 'href="/r/owned"' in mine
+    assert 'href="/r/other"' not in mine
+
+
 def test_schema_upgrade_recovers_owner_from_latest_signature_only(settings):
     conn = db.connect(settings.db_path)
     db.init_schema(conn)
@@ -347,8 +359,11 @@ def test_inbox_local_mode_signer_and_unowned_drafts(client):
 
     assert publish(client, author_id="alice000", reviewers=["bob00000"]).status_code == 201
     assert publish(client, "unowned").status_code == 201
+    assert publish(client, "asked", reviewers=["bob00000"]).status_code == 201
     for user in ("bob00000", "carol000"):
         assert 'href="/r/unowned"' in as_user(user)["Needs your signature"]
+    assert 'href="/r/asked"' not in as_user("bob00000")["Needs your signature"]
+    assert 'href="/r/asked"' in as_user("carol000")["Needs your signature"]
 
     as_user("bob00000")
     assert client.post("/r/owned/sign", data={"version": 1}).status_code == 200

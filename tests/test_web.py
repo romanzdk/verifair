@@ -1930,3 +1930,53 @@ def test_sidebar_links_encode_odd_names(client):
 def test_name_form_error_takes_its_own_line():
     css = (Path(web.__file__).parent / "static" / "app.css").read_text()
     assert ".me-form .error { flex-basis: 100%; }" in css
+
+
+def test_page_query_count_does_not_grow_with_reports(client, settings, monkeypatch):
+    connect = db.connect
+    statements = []
+
+    def traced(path):
+        conn = connect(path)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    def seed(start, stop):
+        conn = connect(settings.db_path)
+        for n in range(start, stop):
+            id = f"r{n}"
+            db.push_report(
+                conn,
+                project=f"p{n % 3}",
+                title=id,
+                risk="low",
+                body=SAMPLE,
+                id=id,
+                author_id="owner000",
+                reviewers=["review00"],
+            )
+            db.sign_version(conn, report_id=id, version=1, signer_id="owner000", signer_name="O")
+            db.add_verdict(
+                conn,
+                report_id=id,
+                version=1,
+                reviewer_id="other000",
+                reviewer_name="X",
+                verdict="approve",
+            )
+        conn.close()
+
+    def counts():
+        result = []
+        for url in ("/", "/changes", "/changes?scope=reviewer", "/p/p1", "/r/r1"):
+            statements.clear()
+            assert client.get(url).status_code == 200
+            result.append(len(statements))
+        return result
+
+    client.cookies.set("vf_id", "review00")
+    monkeypatch.setattr(db, "connect", traced)
+    seed(0, 3)
+    few = counts()
+    seed(3, 30)
+    assert counts() == few

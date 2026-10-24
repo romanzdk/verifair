@@ -163,46 +163,51 @@ def _with_id_cookie(request: Request, response):
 NAV_PROJECTS_SHOWN = 8
 
 
-def _inbox(request: Request, conn: sqlite3.Connection, user_id: str) -> tuple[list[dict], dict]:
-    cached = getattr(request.state, "inbox", None)
-    if cached is not None:
-        return cached
+def _in_scope(row: dict, scope: str, user_id: str, legacy: bool) -> bool:
+    report = row["report"]
+    if scope == "author":
+        return report["author_id"] == user_id or (
+            legacy and report["author_id"] is None and report["author"] == user_id
+        )
+    if scope == "reviewer":
+        return user_id in row["requested"]
+    return True
+
+
+def _work(request: Request, conn: sqlite3.Connection, user_id: str) -> dict:
     legacy = not _shared(request)
-
-    def ids(scope: str) -> set[str]:
-        reports = db.list_reports(conn, None, scope=scope, user_id=user_id, legacy_author=legacy)
-        return {r["id"] for r in reports}
-
-    reports = db.list_reports(conn, None, user_id=user_id, legacy_author=legacy)
-    rows = _change_rows(conn, reports, user_id)
-    mine = ids("author")
+    rows = _change_rows(conn, db.list_reports(conn))
+    mine = {row["report"]["id"] for row in rows if _in_scope(row, "author", user_id, legacy)}
+    requested = {row["report"]["id"] for row in rows if user_id in row["requested"]}
     if legacy:
-        # in local mode anyone may sign an unowned draft, and signing makes them its owner
+        # in local mode anyone may sign an unowned draft, and signing makes them its owner,
+        # but a draft someone asked you to review is not yours to sign
         mine |= {
             row["report"]["id"]
             for row in rows
-            if row["report"]["author_id"] is None and row["status"] == "unsigned"
+            if row["report"]["author_id"] is None
+            and row["status"] == "unsigned"
+            and row["report"]["id"] not in requested
         }
-    groups = rules.inbox(rows, user_id=user_id, mine=mine, requested=ids("reviewer"))
-    request.state.inbox = rows, groups
-    return rows, groups
+    groups = rules.inbox(rows, user_id=user_id, mine=mine, requested=requested)
+    return {"rows": rows, "groups": groups}
 
 
 def _need_count(groups: dict) -> int:
     return sum(len(groups[key]) for key in ("review", "sign", "returned"))
 
 
-def _nav(conn: sqlite3.Connection, request: Request, user_id: str) -> dict:
-    rows, groups = _inbox(request, conn, user_id)
+def _nav(work: dict) -> dict:
+    rows = work["rows"]
     awaiting = Counter(r["report"]["project"] for r in rows if r["status"] == "awaiting_review")
     projects = [
         {"name": p, "awaiting": awaiting[p]}
-        for p in sorted(db.list_projects(conn), key=str.casefold)
+        for p in sorted({r["report"]["project"] for r in rows}, key=str.casefold)
     ]
     return {
         "nav_projects": projects[:NAV_PROJECTS_SHOWN],
         "nav_rest": projects[NAV_PROJECTS_SHOWN:],
-        "inbox_count": _need_count(groups),
+        "inbox_count": _need_count(work["groups"]),
     }
 
 
@@ -213,12 +218,13 @@ def _page(
     name: str,
     ctx: dict,
     status=200,
+    work: dict | None = None,
 ):
     url = request.url.remove_query_params("name_error")
     member = request.state.member
     ctx = (
         ctx
-        | _nav(conn, request, user[0])
+        | _nav(work or _work(request, conn, user[0]))
         | {
             "user_id": user[0],
             "user_name": user[1],
@@ -278,16 +284,6 @@ def _links(report: sqlite3.Row) -> list[tuple[str, str]]:
     if report["ticket_url"]:
         links.insert(0, (_ticket_label(report["ticket_url"]), report["ticket_url"]))
     return links
-
-
-def _status(conn: sqlite3.Connection, id: str, version: int) -> str:
-    signature = db.get_signature(conn, id, version)
-    return rules.compute_status(
-        db.list_verdicts(conn, id),
-        version,
-        signed=signature is not None,
-        signer_id=signature["signer_id"] if signature else None,
-    )
 
 
 def _sign_refusal(request: Request, report: sqlite3.Row, user_id: str) -> str | None:
@@ -416,22 +412,25 @@ def _scope_empty(scope: str) -> dict:
 def index(request: Request, conn: Conn, user: User, scope: str | None = None):
     if scope is not None:
         return RedirectResponse(f"/changes?scope={scope}" if scope in SCOPES else "/changes", 303)
-    ctx = {"active": "inbox", "first_run": not db.list_projects(conn)}
-    if not ctx["first_run"]:
-        groups = _inbox(request, conn, user[0])[1]
+    work = _work(request, conn, user[0])
+    groups = work["groups"]
+    ctx = {"active": "inbox", "first_run": not work["rows"]}
+    if work["rows"]:
         ctx |= {"groups": groups, "need_count": _need_count(groups)}
-    return _page(request, conn, user, "inbox.html", ctx)
+    return _page(request, conn, user, "inbox.html", ctx, work=work)
 
 
-def _change_rows(conn: sqlite3.Connection, reports: list[sqlite3.Row], user_id: str) -> list[dict]:
+def _change_rows(conn: sqlite3.Connection, reports: list[sqlite3.Row]) -> list[dict]:
+    ids = [report["id"] for report in reports]
+    verdicts_by, requests_by = db.verdicts_by_report(conn, ids), db.requests_by_report(conn, ids)
     names = {u["id"]: u["name"] for u in db.list_users(conn)}
     rows = []
     for report in reports:
         id, version = report["id"], report["latest_version"]
-        verdicts = db.list_verdicts(conn, id)
+        verdicts, requested = verdicts_by[id], requests_by[id]
         latest = rules.latest_verdicts(verdicts, version)
         verdict_names = {v["reviewer_id"]: v["reviewer_name"] for v in verdicts}
-        people = [*db.requested_reviewers(conn, id), *(v["reviewer_id"] for v in verdicts)]
+        people = [*requested, *(v["reviewer_id"] for v in verdicts)]
         reviewers = []
         for person in dict.fromkeys(people):
             if person in latest:
@@ -452,6 +451,7 @@ def _change_rows(conn: sqlite3.Connection, reports: list[sqlite3.Row], user_id: 
                 "ticket": _ticket_label(report["ticket_url"]) if report["ticket_url"] else None,
                 "signed_at": report["signed_at"],
                 "reviewed_by": set(latest),
+                "requested": set(requested),
                 "reviewers": reviewers,
             }
         )
@@ -475,14 +475,19 @@ def _list_page(
         scope = "all"
     if tab not in TABS:
         tab = "open"
-    reports = sorted(
-        db.list_reports(
-            conn, project, scope=scope, user_id=user[0], legacy_author=not _shared(request)
+    work = _work(request, conn, user[0])
+    legacy = not _shared(request)
+    rows = sorted(
+        (
+            row
+            for row in work["rows"]
+            if project in (None, row["report"]["project"])
+            and _in_scope(row, scope, user[0], legacy)
         ),
-        key=lambda r: (r["updated_at"], r["id"]),
+        key=lambda row: (row["report"]["updated_at"], row["report"]["id"]),
         reverse=True,
     )
-    rows = _change_rows(conn, reports, user[0])
+    reports = [row["report"] for row in rows]
     by_status = Counter(row["status"] for row in rows)
     counts = {status: by_status[status] for status in rules.STATUS_LABELS} | {
         "open": sum(by_status[status] for status in OPEN_STATUSES),
@@ -538,7 +543,7 @@ def _list_page(
                 empty_description=f"View everyone's changes{where}, or choose another scope.",
                 empty_action="View everyone's changes",
             )
-    return _page(request, conn, user, "changes.html", ctx)
+    return _page(request, conn, user, "changes.html", ctx, work=work)
 
 
 @router.get("/changes")
@@ -555,7 +560,7 @@ def project_page(
     tab: str = "open",
     scope: str = "all",
 ):
-    if project not in db.list_projects(conn):
+    if not db.project_exists(conn, project):
         raise HTTPException(404, "project not found")
     return _list_page(request, conn, user, scope=scope, tab=tab, project=project)
 

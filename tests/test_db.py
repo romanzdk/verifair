@@ -31,7 +31,6 @@ from verifair.db import (
     init_schema,
     latest_version,
     list_comments,
-    list_projects,
     list_reports,
     list_tokens,
     list_users,
@@ -211,17 +210,6 @@ def test_push_by_an_owner_to_an_unowned_report_is_refused(conn):
     assert not conn.in_transaction
 
 
-def test_author_scope_matches_the_legacy_author_only_when_asked(conn):
-    push_report(conn, project="p", title="Legacy", risk="low", body="a", author="alice")
-    push_report(conn, project="p", title="Owned", risk="low", body="b", author_id="alice")
-
-    def mine(**kwargs):
-        return [r["id"] for r in list_reports(conn, "p", scope="author", user_id="alice", **kwargs)]
-
-    assert sorted(mine()) == ["legacy", "owned"]
-    assert mine(legacy_author=False) == ["owned"]
-
-
 def test_list_reports_newest_first_with_latest_version(conn):
     push_report(conn, project="p", title="First", risk="low", body="a", id="r1")
     push_report(conn, project="p", title="Second", risk="low", body="b", id="r2")
@@ -259,10 +247,10 @@ def test_list_reports_all_projects_and_latest_signature(conn):
     assert rows["a"]["signed_at"] == signature["created_at"]
 
 
-def test_list_projects_distinct_sorted(conn):
-    for project in ("zeta", "alpha", "zeta"):
-        push_report(conn, project=project, title="T", risk="low", body="b")
-    assert list_projects(conn) == ["alpha", "zeta"]
+def test_project_exists(conn):
+    push_report(conn, project="zeta", title="T", risk="low", body="b")
+    assert db.project_exists(conn, "zeta")
+    assert not db.project_exists(conn, "alpha")
 
 
 def test_get_conn_route_write_is_visible_to_other_connection(settings):

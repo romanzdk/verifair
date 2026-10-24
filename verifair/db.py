@@ -355,35 +355,15 @@ def list_versions(conn: sqlite3.Connection, id: str) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def list_projects(conn: sqlite3.Connection) -> list[str]:
-    rows = conn.execute("SELECT DISTINCT project FROM reports ORDER BY project").fetchall()
-    return [r["project"] for r in rows]
+def project_exists(conn: sqlite3.Connection, project: str) -> bool:
+    return (
+        conn.execute("SELECT 1 FROM reports WHERE project=? LIMIT 1", (project,)).fetchone()
+        is not None
+    )
 
 
-def list_reports(
-    conn: sqlite3.Connection,
-    project: str | None,
-    *,
-    scope: str = "all",
-    user_id: str | None = None,
-    legacy_author: bool = True,
-) -> list[sqlite3.Row]:
-    conditions = ["1=1"]
-    parameters = []
-    if project is not None:
-        conditions.append("r.project=?")
-        parameters.append(project)
-    if scope == "author" and legacy_author:
-        conditions.append("(r.author_id=? OR (r.author_id IS NULL AND r.author=?))")
-        parameters.extend((user_id, user_id))
-    elif scope == "author":
-        conditions.append("r.author_id=?")
-        parameters.append(user_id)
-    elif scope == "reviewer":
-        conditions.append(
-            "EXISTS (SELECT 1 FROM review_requests q WHERE q.report_id=r.id AND q.reviewer_id=?)"
-        )
-        parameters.append(user_id)
+def list_reports(conn: sqlite3.Connection, project: str | None = None) -> list[sqlite3.Row]:
+    where, parameters = ("WHERE r.project=?", (project,)) if project is not None else ("", ())
     return conn.execute(
         "SELECT r.*, s.signer_id, s.created_at AS signed_at,"
         " (SELECT MAX(version) FROM versions v WHERE v.report_id = r.id) AS latest_version,"
@@ -391,9 +371,31 @@ def list_reports(
         "  AND c.parent_id IS NULL AND c.resolved_at IS NULL) AS open_threads"
         " FROM reports r LEFT JOIN signatures s ON s.report_id = r.id"
         " AND s.version = (SELECT MAX(version) FROM versions v WHERE v.report_id = r.id)"
-        " WHERE " + " AND ".join(conditions) + " ORDER BY r.created_at DESC, r.rowid DESC",
+        f" {where} ORDER BY r.created_at DESC, r.rowid DESC",
         parameters,
     ).fetchall()
+
+
+def _by_report(conn: sqlite3.Connection, sql: str, ids: list[str]) -> dict[str, list[sqlite3.Row]]:
+    grouped: dict[str, list[sqlite3.Row]] = {id: [] for id in ids}
+    if ids:
+        for row in conn.execute(sql.format(", ".join("?" * len(ids))), ids):
+            grouped[row["report_id"]].append(row)
+    return grouped
+
+
+def verdicts_by_report(conn: sqlite3.Connection, ids: list[str]) -> dict[str, list[sqlite3.Row]]:
+    return _by_report(conn, "SELECT * FROM verdicts WHERE report_id IN ({}) ORDER BY id", ids)
+
+
+def requests_by_report(conn: sqlite3.Connection, ids: list[str]) -> dict[str, list[str]]:
+    rows = _by_report(
+        conn,
+        "SELECT report_id, reviewer_id FROM review_requests WHERE report_id IN ({})"
+        " ORDER BY reviewer_id",
+        ids,
+    )
+    return {id: [r["reviewer_id"] for r in group] for id, group in rows.items()}
 
 
 def requested_reviewers(conn: sqlite3.Connection, report_id: str) -> list[str]:
