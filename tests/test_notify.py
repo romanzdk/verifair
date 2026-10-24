@@ -141,6 +141,7 @@ class FakeSMTP:
     offers_tls = True
     fail = None
     refuse = ()
+    errors = {}
     delay = 0
     active = peak = 0
     lock = threading.Lock()
@@ -173,6 +174,8 @@ class FakeSMTP:
     def send_message(self, message, to_addrs=None):
         if to_addrs[0] in self.refuse:
             raise smtplib.SMTPRecipientsRefused({to_addrs[0]: (550, b"no")})
+        if to_addrs[0] in self.errors:
+            raise self.errors[to_addrs[0]]
         with FakeSMTP.lock:
             FakeSMTP.active += 1
             FakeSMTP.peak = max(FakeSMTP.peak, FakeSMTP.active)
@@ -274,6 +277,27 @@ def test_a_refused_recipient_does_not_stop_the_others(smtp, monkeypatch, caplog)
     assert [to for _, to in smtp.sessions[0].sent] == [["bob@example.com"]]
     assert [r.getMessage() for r in caplog.records] == [
         "email failed report=r recipients=1 error=SMTPRecipientsRefused code=-"
+    ]
+
+
+def test_any_smtp_error_for_one_recipient_does_not_stop_the_others(smtp, monkeypatch, caplog):
+    monkeypatch.setattr(smtp, "errors", {"bad@x.com": smtplib.SMTPNotSupportedError("utf8")})
+    delivered = notify.send_email(
+        mail_settings("smtp://localhost:1025"), "r", "S", {"bad@x.com": "T", "bob@example.com": "T"}
+    )
+    assert delivered == ["bob@example.com"]
+    assert [r.getMessage() for r in caplog.records] == [
+        "email failed report=r recipients=1 error=SMTPNotSupportedError code=-"
+    ]
+
+
+def test_a_dropped_connection_stops_sending_and_logs_once(smtp, monkeypatch, caplog):
+    monkeypatch.setattr(smtp, "errors", {"c@x.com": smtplib.SMTPServerDisconnected("gone")})
+    letters = {"b@x.com": "T", "c@x.com": "T", "d@x.com": "T"}
+    delivered = notify.send_email(mail_settings("smtp://localhost:1025"), "r", "S", letters)
+    assert delivered == ["b@x.com"]
+    assert [r.getMessage() for r in caplog.records] == [
+        "email failed report=r recipients=3 error=SMTPServerDisconnected code=-"
     ]
 
 

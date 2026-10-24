@@ -372,6 +372,23 @@ def test_smtp_failure_logs_one_warning_and_the_request_succeeds(mail, team, outb
     assert db.get_signature(team, "r", 1) is not None
 
 
+def test_a_failed_email_is_sent_again_after_remove_and_add(mail, team, outbox):
+    add(mail, "carol@example.com")
+    outbox.fail = True
+    mail.post("/r/r/sign", data={"version": 1}, headers=ALICE)
+    assert outbox.sent == []
+    outbox.fail = False
+    mail.post("/r/r/reviewers/carol%40example.com/remove", headers=BOB | HX)
+    add(mail, "carol@example.com")
+    assert sent(outbox) == [("carol@example.com", 'Review requested: "T"')]
+
+
+def test_the_signer_adding_a_reviewer_is_not_named_twice(mail, team, outbox):
+    mail.post("/r/r/sign", data={"version": 1}, headers=ALICE)
+    add(mail, "carol@example.com", headers=ALICE)
+    assert outbox.sent[0].get_content().startswith('alice asked you to review "T" (v1).\n')
+
+
 def test_no_email_without_smtp(shared_client, team, outbox):
     add(shared_client, "bob@example.com")
     shared_client.post("/r/r/sign", data={"version": 1}, headers=ALICE)

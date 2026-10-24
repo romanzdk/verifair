@@ -36,7 +36,7 @@ With `VERIFAIR_SMTP_URL` and `VERIFAIR_EMAIL_FROM` set (see [configuration.md](c
 - when the author signs a version: to every requested reviewer except the signer,
 - when someone adds a reviewer while the current version is signed: to that person. Adding yourself sends nothing.
 
-A push makes a new unsigned version, so it sends no email; the reviewers get one when the author signs it. Emails go only to active members whose id is one plain address, such as `bob@example.com`. Each person gets at most one email per report version, so removing and adding them again sends nothing new. Local mode sends no email.
+A push makes a new unsigned version, so it sends no email; the reviewers get one when the author signs it. Emails go only to active members whose id is one plain address, such as `bob@example.com`. Each running verifair instance sends a person at most one email per report version, so removing and adding them again sends nothing new; a restart or another replica may send it again. An email that failed to send does not count, so after the mail server is back, removing and adding the person sends it. Local mode sends no email.
 
 The subject is `Review requested: "<title>"`. The text says who signed which version and who asked for the review, then the project, the risk, the report's **Judge this** section as plain text (code blocks left out, links as their text, up to about 1,500 characters, then "Read the rest on the page.") and the link:
 

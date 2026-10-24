@@ -912,18 +912,26 @@ def _email_reviewers(request, background, conn, report, version, recipients, add
     letters = {}
     for person in recipients:
         by = requesters.get(person)
-        named = by in users and by not in (signature["signer_id"], person)
-        asker = added_by or (users[by]["name"] if named else None)
+        signed_by_asker = by == signature["signer_id"]
+        named = by in users and by != person and not signed_by_asker
         subject, letters[person] = notify.review_email(
             report,
             version,
             judge,
             settings.base_url,
-            signer=signature["signer_name"],
-            asker=asker,
+            signer=None if added_by and signed_by_asker else signature["signer_name"],
+            asker=added_by or (users[by]["name"] if named else None),
             added=added_by is not None,
         )
-    background.add_task(notify.email, settings, report["id"], subject, letters)
+    background.add_task(_send_mail, request.app, report["id"], version, subject, letters)
+
+
+async def _send_mail(app, report_id: str, version: int, subject: str, letters: dict[str, str]):
+    delivered = await notify.email(app.state.settings, report_id, subject, letters)
+    with _MAIL_LOCK:
+        app.state.mailed.difference_update(
+            (report_id, person, version) for person in letters if person not in delivered
+        )
 
 
 def _reviewers_response(
