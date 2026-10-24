@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 import time
 from contextlib import closing
 from dataclasses import replace
@@ -655,3 +658,18 @@ def test_trace_and_combined_request_byte_limits(client, settings, chunked, over_
         assert response.json() == TOO_LARGE
     with closing(db.connect(settings.database_url)) as conn:
         assert db.list_reports(conn) == []
+
+
+def test_startup_config_error_is_one_line_and_exits_non_zero():
+    env = {k: v for k, v in os.environ.items() if not k.startswith("VERIFAIR_")}
+    result = subprocess.run(
+        [sys.executable, "-c", "import verifair.asgi"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    lines = result.stderr.strip().splitlines()
+    assert len(lines) == 1 and "VERIFAIR_API_TOKEN is required in local mode." in lines[0]
