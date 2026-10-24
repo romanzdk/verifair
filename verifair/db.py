@@ -690,30 +690,33 @@ HUMAN_ID_COLUMNS = (
 
 def lowercase_human_ids(conn: Connection) -> int:
     # local mode stores ids as sent, shared mode matches them to the lower-cased identity
-    # header. Python's lower() is how the header is read. An old human id such as "Agent"
-    # stays as it is so it does not turn into the agent.
+    # header. Python's lower() is how the header is read, and Postgres lower() differs from
+    # it outside ASCII, so Python maps the ids and one statement per column applies the map.
+    # An old human id such as "Agent" stays as it is so it does not turn into the agent.
     changed = 0
+    mapping = "unnest(%s::text[], %s::text[]) AS m(old, new)"
     with _write(conn):
         for table, column in HUMAN_ID_COLUMNS:
-            for row in conn.execute(
+            rows = conn.execute(
                 f"SELECT DISTINCT {column} AS id FROM {table} WHERE {column} IS NOT NULL"
-            ).fetchall():
-                old = row["id"]
-                new = old.lower()
-                if new in (old, "agent"):
-                    continue
-                if table == "review_requests":
-                    conn.execute(
-                        "INSERT INTO review_requests (report_id, reviewer_id)"
-                        " SELECT report_id, %s FROM review_requests WHERE reviewer_id=%s"
-                        " ON CONFLICT DO NOTHING",
-                        (new, old),
-                    )
-                    sql = "DELETE FROM review_requests WHERE reviewer_id=%s"
-                    changed += conn.execute(sql, (old,)).rowcount
-                else:
-                    sql = f"UPDATE {table} SET {column}=%s WHERE {column}=%s"
-                    changed += conn.execute(sql, (new, old)).rowcount
+            ).fetchall()
+            old = [r["id"] for r in rows if r["id"].lower() not in (r["id"], "agent")]
+            if not old:
+                continue
+            params = (old, [id.lower() for id in old])
+            if table == "review_requests":
+                conn.execute(
+                    "INSERT INTO review_requests (report_id, reviewer_id)"
+                    f" SELECT r.report_id, m.new FROM review_requests r, {mapping}"
+                    " WHERE r.reviewer_id = m.old ON CONFLICT DO NOTHING",
+                    params,
+                )
+                sql = f"DELETE FROM review_requests r USING {mapping} WHERE r.reviewer_id = m.old"
+            else:
+                sql = (
+                    f"UPDATE {table} t SET {column} = m.new FROM {mapping} WHERE t.{column} = m.old"
+                )
+            changed += conn.execute(sql, params).rowcount
     return changed
 
 
