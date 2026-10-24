@@ -30,11 +30,12 @@ function context(section, range, quote) {
 function openForm(section, quote, range) {
   const form = section.querySelector("form.cform");
   if (!form) return;
-  quote = quote.slice(0, QUOTE_MAX);
+  const chars = Array.from(quote).slice(0, QUOTE_MAX);
+  quote = chars.join("");
   form.quote.value = quote;
   [form.prefix.value, form.suffix.value] = context(section, range, quote);
   const preview = form.querySelector(".q");
-  const shown = quote.length > QUOTE_PREVIEW_MAX ? `${quote.slice(0, QUOTE_PREVIEW_MAX)}…` : quote;
+  const shown = chars.length > QUOTE_PREVIEW_MAX ? `${chars.slice(0, QUOTE_PREVIEW_MAX).join("")}…` : quote;
   preview.textContent = quote ? `"${shown}"` : "";
   preview.hidden = !quote;
   form.hidden = false;
@@ -201,8 +202,11 @@ function clearRequestError(anchor) {
   if (previous?.matches("p.vf-req-error")) previous.remove();
 }
 
-function errorCopy(status) {
+function errorCopy(status, body = "") {
   if (status === 401 || status === 403) return "Your access changed. Reload the page.";
+  if (status === 422 && body.includes("quote not found")) {
+    return "The selected text was not found. Cancel and select it again.";
+  }
   if (status === 422) return "Check the text and try again.";
   if (status === 404) return "This item no longer exists. Reload the page.";
   return `Something went wrong (${status}). Reload and try again.`;
@@ -251,7 +255,7 @@ document.body.addEventListener("htmx:afterSettle", (event) => {
     document.querySelector("#vf_verdict .vmsg")?.focus();
   }
 });
-document.body.addEventListener("htmx:responseError", (event) => showRequestError(event, errorCopy(event.detail.xhr.status)));
+document.body.addEventListener("htmx:responseError", (event) => showRequestError(event, errorCopy(event.detail.xhr.status, event.detail.xhr.responseText)));
 document.body.addEventListener("htmx:sendError", (event) =>
   showRequestError(event, "Connection lost. Your text is still here, try again."),
 );

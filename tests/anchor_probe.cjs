@@ -101,7 +101,38 @@ const cases = {
     assert.equal(scope.errorCopy(403), "Your access changed. Reload the page.");
     assert.equal(scope.errorCopy(404), "This item no longer exists. Reload the page.");
     assert.equal(scope.errorCopy(422), "Check the text and try again.");
+    assert.equal(
+      scope.errorCopy(422, '{"detail":"quote not found"}'),
+      "The selected text was not found. Cancel and select it again.",
+    );
     assert.equal(scope.errorCopy(500), "Something went wrong (500). Reload and try again.");
+  },
+  triple_click_clamp() {
+    const content = { childNodes: [{}, {}], contains: (node) => node === inside };
+    const section = { querySelector: () => content };
+    const inside = {
+      nodeType: 3,
+      parentElement: { closest: (selector) => (selector === "section .content" ? content : section) },
+    };
+    const selecting = (selected, endContainer) => ({
+      toString: () => selected,
+      getRangeAt: () => ({
+        startContainer: inside,
+        endContainer,
+        cloneRange() {
+          return {
+            setEnd(node, offset) { this.endContainer = node; this.endOffset = offset; },
+            toString: () => "Last paragraph",
+          };
+        },
+      }),
+    });
+    const nextBlock = {};
+    const triple = scope.sectionRange(selecting("Last paragraph\n", nextBlock));
+    assert.equal(triple.section, section);
+    assert.equal(triple.range.endContainer, content);
+    assert.equal(triple.range.endOffset, 2);
+    assert.equal(scope.sectionRange(selecting("Last paragraph\n\nNext heading", nextBlock)), null);
   },
   name_error_opens_closed_drawer() {
     const nav = (open, display) => {

@@ -15,6 +15,7 @@ import pytest
         "unicode_context",
         "unicode_context_boundary",
         "error_copy",
+        "triple_click_clamp",
         "name_error_opens_closed_drawer",
     ],
 )
