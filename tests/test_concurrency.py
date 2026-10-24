@@ -348,3 +348,12 @@ def test_a_cancelled_request_gives_its_connection_back(settings, make_app, monke
     finally:
         gc.enable()
     assert app.state.pool_slots._value == 1
+
+
+def test_a_request_after_the_database_dropped_the_pooled_connection_succeeds(client, admin_conn):
+    _report(client)
+    with client.app.state.pool.connection() as c:
+        pid = c.info.backend_pid
+    admin_conn.execute("SELECT pg_terminate_backend(%s, 2000)", (pid,))
+    response = client.get("/api/reports/r1", headers={"Authorization": "Bearer t"})
+    assert response.status_code == 200

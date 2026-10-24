@@ -176,7 +176,13 @@ def connect(url: str) -> Connection:
 
 def open_pool(url: str, max_size: int) -> ConnectionPool:
     pool = ConnectionPool(
-        url, min_size=1, max_size=max_size, timeout=10, kwargs=CONNECT_KWARGS, open=False
+        url,
+        min_size=1,
+        max_size=max_size,
+        timeout=10,
+        kwargs=CONNECT_KWARGS,
+        check=ConnectionPool.check_connection,
+        open=False,
     )
     pool.open(wait=True, timeout=10)
     return pool
