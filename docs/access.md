@@ -1,43 +1,118 @@
 # Roles and access
 
-verifair has two modes. `VERIFAIR_IDENTITY_HEADER` switches between them.
+verifair has two modes. `VERIFAIR_OIDC_ISSUER` switches between them.
 
-- **Local mode** (the header is not set): no sign-in. People set a name, kept in a cookie. Agents share one `VERIFAIR_API_TOKEN`. Anyone can resolve any thread. Use it on your own machine or in a small trusted group. The settings pages (`/access/tokens` and `/access/members`) only show a note.
-- **Shared mode** (the header is set): an auth proxy signs people in and verifair checks that they are members. Each agent uses a token owned by one member. This is the mode for a team.
+- **Local mode** (no issuer set): no sign-in. People set a name, kept in a cookie. Agents share one `VERIFAIR_API_TOKEN`. Anyone can resolve any thread. Use it on your own machine or in a small trusted group. The settings pages (`/access/tokens` and `/access/members`) only show a note.
+- **Shared mode** (issuer set): people sign in with your company login (Google, Microsoft Entra, Okta, Keycloak or any other OpenID Connect provider), and verifair checks that they are members. Each agent uses a token owned by one member. This is the mode for a team.
+
+verifair does the sign-in itself. You do not need an auth proxy in front of it.
 
 ## Set up shared mode
 
-1. Put verifair behind an auth proxy that signs users in, for example with SSO.
-2. The proxy must set the identity header on every request. It must strip any value the client sent and write its own. Otherwise anyone can pose as anyone.
-3. Make verifair reachable only through the proxy. Anyone who can reach it directly can send any header. See [Deploying](deployment.md#deploying) for how.
-4. Set `VERIFAIR_IDENTITY_HEADER` to the header name, for example `X-Forwarded-Email`.
-5. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID` to your own id as the proxy sends it, for example `jane@example.com`. Case does not matter. On a database with no members, startup makes this id the first admin. Once members exist, it adds no one.
-6. `VERIFAIR_API_TOKEN` is not needed. If it is set, shared mode refuses it and startup logs a warning.
+You need:
+
+- verifair on an HTTPS URL, for example `https://verifair.example.com`. Set `VERIFAIR_BASE_URL` to it. Sign-in sends people back to `VERIFAIR_BASE_URL/auth/callback`, so it must be the exact URL people open. Plain HTTP only works on `localhost` and `127.0.0.1`.
+- An OAuth client at your sign-in provider (see [Google](#sign-in-with-google) and [other providers](#other-providers) below).
+- A session secret: a random string of at least 32 characters. Create one with `openssl rand -base64 48`.
+
+Then set:
+
+| Variable | Value |
+| --- | --- |
+| `VERIFAIR_OIDC_ISSUER` | Your provider's issuer URL, for example `https://accounts.google.com` |
+| `VERIFAIR_OIDC_CLIENT_ID` | The client ID from your provider |
+| `VERIFAIR_OIDC_CLIENT_SECRET` | The client secret from your provider |
+| `VERIFAIR_SESSION_SECRET` | The session secret. Use the same value on every replica |
+| `VERIFAIR_OIDC_ALLOWED_DOMAINS` | Optional. Comma-separated email domains that may sign in, for example `example.com` |
+| `VERIFAIR_BOOTSTRAP_ADMIN_ID` | Your own email, for example `jane@example.com`. On a database with no members, startup makes it the first admin. Once members exist, it adds no one. Case does not matter |
+| `VERIFAIR_BASE_URL` | The HTTPS URL of verifair |
+
+`VERIFAIR_API_TOKEN` is not needed. If it is set, shared mode refuses it and startup logs a warning.
 
 ```bash
-export VERIFAIR_IDENTITY_HEADER=X-Forwarded-Email
+export VERIFAIR_BASE_URL=https://verifair.example.com
+export VERIFAIR_OIDC_ISSUER=https://accounts.google.com
+export VERIFAIR_OIDC_CLIENT_ID=1234-abcd.apps.googleusercontent.com
+export VERIFAIR_OIDC_CLIENT_SECRET=...
+export VERIFAIR_SESSION_SECRET="$(openssl rand -base64 48)"
+export VERIFAIR_OIDC_ALLOWED_DOMAINS=example.com
 export VERIFAIR_BOOTSTRAP_ADMIN_ID=jane@example.com
 uv run uvicorn verifair.asgi:app
 ```
 
-With compose, put the same settings in a `docker-compose.override.yml` next to `docker-compose.yml`. Compose reads it on its own. `!reset null` (Compose 2.24.4 or newer) removes the API token the main file sets:
+With compose, put the same settings in a `docker-compose.override.yml` next to `docker-compose.yml`. Compose reads it on its own. `!reset null` (Compose 2.24.4 or newer) removes the API token the main file sets. Keep the secrets in a `.env` file next to it, not in the YAML:
 
 ```yaml
 services:
   app:
     environment:
-      VERIFAIR_IDENTITY_HEADER: X-Forwarded-Email
+      VERIFAIR_BASE_URL: https://verifair.example.com
+      VERIFAIR_OIDC_ISSUER: https://accounts.google.com
+      VERIFAIR_OIDC_CLIENT_ID: ${VERIFAIR_OIDC_CLIENT_ID}
+      VERIFAIR_OIDC_CLIENT_SECRET: ${VERIFAIR_OIDC_CLIENT_SECRET}
+      VERIFAIR_SESSION_SECRET: ${VERIFAIR_SESSION_SECRET}
+      VERIFAIR_OIDC_ALLOWED_DOMAINS: example.com
       VERIFAIR_BOOTSTRAP_ADMIN_ID: jane@example.com
       VERIFAIR_API_TOKEN: !reset null
 ```
 
-The proxy rules above still apply. Compose only starts verifair on `127.0.0.1:8000`, so you still need to put an auth proxy in front of it.
+Compose only starts verifair on `127.0.0.1:8000`. Put an HTTPS reverse proxy (or your cluster's ingress) in front of it for the public URL.
 
-Startup fails when the database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set. It also fails when `VERIFAIR_BOOTSTRAP_ADMIN_ID` is set without `VERIFAIR_IDENTITY_HEADER`, so a missing header does not quietly start local mode. It also fails when the id is not a plain id (no spaces, `/` or `\`, and not `agent`). Startup logs `bootstrap admin created id=...` or `bootstrap skipped: members exist`.
+### Sign in with Google
 
-Once a database has members, it stays in shared mode. Starting it without `VERIFAIR_IDENTITY_HEADER` fails with `This database has members. Set VERIFAIR_IDENTITY_HEADER to run in shared mode.` This stops a config mistake from opening the workspace to everyone.
+1. Open the [Google Cloud console](https://console.cloud.google.com/) and pick or create a project for verifair.
+2. Go to **APIs & Services > OAuth consent screen** (in newer consoles: **Google Auth Platform**). Fill in the app name and a support email. Under **Audience**, pick **Internal** if you use Google Workspace: then only people in your organisation can sign in. Pick **External** only if you need accounts from outside it.
+3. Go to **APIs & Services > Credentials > Create credentials > OAuth client ID**. Pick the application type **Web application**.
+4. Under **Authorised redirect URIs**, add `https://<your host>/auth/callback`, for example `https://verifair.example.com/auth/callback`. It must match `VERIFAIR_BASE_URL` exactly. You do not need JavaScript origins.
+5. Create the client. Copy the **Client ID** into `VERIFAIR_OIDC_CLIENT_ID` and the **Client secret** into `VERIFAIR_OIDC_CLIENT_SECRET`. Set `VERIFAIR_OIDC_ISSUER=https://accounts.google.com`.
+6. Set `VERIFAIR_OIDC_ALLOWED_DOMAINS` to your Workspace domain, for example `example.com`. verifair then accepts only emails in that domain, and only accounts that Google marks as belonging to that Workspace (the `hd` claim). Personal Gmail accounts are refused.
 
-A request without the header, or with the header sent more than once, gets 401. A signed-in person who was never added gets 403 with a note to ask an admin to add their id. A deactivated member gets 403 `Your access to this workspace was turned off. Ask an admin to reactivate {id}.` Each refusal is logged at INFO as `membership denied reason=... path=...`, where the reason is `missing-header`, `duplicate-header`, `not-member` or `inactive`. `/healthz`, `/readyz` and `/static/` stay public. `/api/` uses tokens. Every other page, including `/docs` and `/openapi.json`, needs membership.
+### Other providers
+
+Any provider that supports OpenID Connect with the authorization code flow works. Create a client of type "web" or "confidential", add the redirect URI `https://<your host>/auth/callback`, and copy the client ID and secret. The issuer URL is:
+
+| Provider | `VERIFAIR_OIDC_ISSUER` |
+| --- | --- |
+| Google | `https://accounts.google.com` |
+| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant id>/v2.0` |
+| Okta | `https://<your org>.okta.com` or `https://<your org>.okta.com/oauth2/default` |
+| Keycloak | `https://<keycloak host>/realms/<realm>` |
+
+verifair reads `<issuer>/.well-known/openid-configuration` on the first sign-in, so the issuer must be the exact value the provider puts in its tokens. It asks for the scopes `openid email profile`.
+
+verifair only accepts an email that the provider marks as verified (the `email_verified` claim must be `true`). Google, Okta and Keycloak send it. Microsoft Entra ID does not send `email_verified`, so sign-in through Entra fails with `sign-in failed reason=email` today.
+
+### How sign-in works
+
+- Opening any page without a session sends you to `/login`, which sends you to the provider. After sign-in you come back to the page you opened.
+- Your member id is your email in lower case.
+- verifair keeps you signed in for 7 days with a cookie signed by `VERIFAIR_SESSION_SECRET`. After that you sign in again. Changing the secret signs everyone out. Every replica must use the same secret, or people are signed out when a request reaches another replica.
+- **Sign out** is at the bottom of the sidebar. It ends the verifair session only, not your session at the provider.
+- verifair checks membership on every request. A deactivated member is refused on their next request, even with a valid session cookie.
+- verifair checks the ID token it gets straight from the provider over HTTPS: issuer, audience, expiry, nonce, verified email and allowed domains. The sign-in uses `state` and PKCE, so a sign-in started on one browser cannot be finished on another.
+
+### Startup checks
+
+Startup fails with a clear message when:
+
+- `VERIFAIR_OIDC_ISSUER` is set without `VERIFAIR_OIDC_CLIENT_ID`, `VERIFAIR_OIDC_CLIENT_SECRET` or `VERIFAIR_SESSION_SECRET`, or the session secret is shorter than 32 characters.
+- The issuer or `VERIFAIR_BASE_URL` is not HTTPS (plain HTTP is only allowed for `localhost` and `127.0.0.1`).
+- `VERIFAIR_IDENTITY_HEADER` is set. The trusted-header mode was removed. See [Moving from the identity header](#moving-from-the-identity-header).
+- The database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set.
+- `VERIFAIR_BOOTSTRAP_ADMIN_ID` is set without `VERIFAIR_OIDC_ISSUER`, so a missing issuer does not quietly start local mode.
+- The bootstrap id is not a plain id (no spaces, `/` or `\`, and not `agent`).
+
+Startup logs `bootstrap admin created id=...` or `bootstrap skipped: members exist`. Secret values are never printed.
+
+Once a database has members, it stays in shared mode. Starting it without `VERIFAIR_OIDC_ISSUER` fails with `This database has members. Set VERIFAIR_OIDC_ISSUER to run in shared mode.` This stops a config mistake from opening the workspace to everyone.
+
+### Refusals
+
+- A page opened without a valid session goes to sign-in. An htmx request or a form post without one gets 401 `Sign in to use verifair.`
+- A signed-in person who was never added gets 403 with a note to ask an admin to add their email, and a **Sign out** button. A deactivated member gets 403 `Your access to this workspace was turned off. Ask an admin to reactivate {id}.`
+- Each refusal is logged at INFO as `membership denied reason=... path=...`. The reason is `no-session`, `bad-session` (a changed, expired or foreign cookie), `not-member` or `inactive`.
+- A failed sign-in shows **Sign-in failed** with a link to try again, and logs `sign-in failed reason=...`. The reason is `no-flow` (the sign-in took longer than 10 minutes or the cookie is missing), `state`, `provider-error`, `no-code`, `discovery`, `token-endpoint`, `id-token`, `iss`, `aud`, `exp`, `iat`, `nonce`, `email` (missing or not verified) or `domain`.
+- `/healthz`, `/readyz`, `/static/`, `/login`, `/auth/callback`, `/logout` and `/signed-out` stay public. `/api/` uses tokens. Every other page, including `/docs` and `/openapi.json`, needs membership.
 
 ## What members and admins can do
 
@@ -55,7 +130,7 @@ A request without the header, or with the header sent more than once, gets 401. 
 
 ## Members and roles
 
-Admins manage members on the **Members** page (`/access/members`, under **Settings** in the sidebar). Other members cannot open it. To add a member, enter their id as the proxy sends it, a display name, and a role: `admin` or `member`. Ids are matched without regard to case: verifair stores them in lower case and turns the header value into lower case too, so `Jane@Example.com` and `jane@example.com` are the same member. The members table changes roles and deactivates or reactivates people. Members are never deleted, so their history stays.
+Admins manage members on the **Members** page (`/access/members`, under **Settings** in the sidebar). Other members cannot open it. To add a member, enter their email, a display name, and a role: `admin` or `member`. Ids are matched without regard to case: verifair stores them in lower case and turns the email from sign-in into lower case too, so `Jane@Example.com` and `jane@example.com` are the same member. The members table changes roles and deactivates or reactivates people. Members are never deleted, so their history stays.
 
 A deactivated member is refused on their next request, and all their tokens are revoked. Reactivating them does not bring old tokens back.
 
@@ -97,27 +172,35 @@ In local mode, anyone can resolve any thread.
 
 ## Switching from local to shared mode
 
-A deployment that starts with `VERIFAIR_IDENTITY_HEADER` set runs in shared mode.
+A deployment that starts with `VERIFAIR_OIDC_ISSUER` set runs in shared mode.
 
 Before you switch:
 
 1. Back up the database with `pg_dump -Fc "$VERIFAIR_DATABASE_URL" > verifair.dump`.
-2. Set `VERIFAIR_BOOTSTRAP_ADMIN_ID`, or startup fails.
-3. Let `/api/` through the proxy without sign-in. Agents use tokens, not the browser login. Keep the proxy stripping the identity header on those routes too. With oauth2-proxy: `--skip-auth-route=^/api/`. Leave `--pass-authorization-header` and `--basic-auth-password` off: with either one set, oauth2-proxy removes the client's `Authorization` header even on skipped routes, so agent tokens never reach verifair.
-4. Point the liveness probe at `/healthz` and the readiness probe at `/readyz`. verifair needs no sign-in there, but oauth2-proxy asks for one on every route it does not skip. Add `--skip-auth-route=GET=^/(healthz|readyz)$`, use an exec probe, or probe the proxy's own `/ping` instead.
-5. Plan who to add first. After the switch, everyone except the bootstrap admin gets 403 until an admin adds them. The 403 page shows the exact id to add, so ask people to open verifair and send you that id. Ids are matched without regard to case.
+2. Set up sign-in as in [Set up shared mode](#set-up-shared-mode), including `VERIFAIR_BOOTSTRAP_ADMIN_ID`, or startup fails.
+3. Point the liveness probe at `/healthz` and the readiness probe at `/readyz`. They need no sign-in.
+4. Plan who to add first. After the switch, everyone except the bootstrap admin gets 403 until an admin adds them. The 403 page shows the exact email to add, so ask people to open verifair and send it to you.
 
 After the switch:
 
 - The bootstrap admin is already a member. Add the other members on `/access/members` and give each agent a member token. The old shared token stops working.
-- The first start in shared mode turns the stored ids into lower case once: report owners (`author_id`), requested reviewers, signers, verdict and comment authors, and `resolved_by`. Local mode stores them as they were sent, and shared mode matches them to the identity header in lower case. Startup logs `lowercased ids rows=N`. Later starts change nothing. An old id that would turn into `agent` stays as it is.
+- The first start in shared mode turns the stored ids into lower case once: report owners (`author_id`), requested reviewers, signers, verdict and comment authors, and `resolved_by`. Local mode stores them as they were sent, and shared mode matches them to the email from sign-in in lower case. Startup logs `lowercased ids rows=N`. Later starts change nothing. An old id that would turn into `agent` stays as it is.
 - Existing reports keep their `author_id`. A member can push new versions only to reports whose `author_id` is their id.
 - Reports with no owner are frozen. Push them again with an agent token under a new id.
-- If no admin can sign in any more, make someone admin again in the database. Use the id in lower case:
+- If no admin can sign in any more, make someone admin again in the database. Use the email in lower case:
 
   ```bash
   psql "$VERIFAIR_DATABASE_URL" -c "UPDATE users SET role='admin', active=1 WHERE id='jane@example.com'"
   ```
+
+## Moving from the identity header
+
+Older versions trusted a header from an auth proxy (`VERIFAIR_IDENTITY_HEADER`, often with oauth2-proxy). That mode was removed, and startup now fails while the variable is set.
+
+1. Set up sign-in as in [Set up shared mode](#set-up-shared-mode). You can reuse the OAuth client the proxy used: add the redirect URI `https://<your host>/auth/callback` to it.
+2. Remove `VERIFAIR_IDENTITY_HEADER` and take the auth proxy out. Keep your HTTPS reverse proxy or ingress.
+3. Member ids stay the same when the proxy sent the email (for example `X-Forwarded-Email`). If it sent something else, such as a user name, add each person again under their email; the old member cannot be renamed.
+4. Probes and `/api/` no longer need proxy skip rules.
 
 ## Not built yet
 
