@@ -19,7 +19,13 @@ from pydantic import AfterValidator
 
 from verifair import db, notify, rules
 from verifair.deps import get_conn
-from verifair.render import build_threads, split_sections, threads_by_section
+from verifair.render import (
+    build_threads,
+    normalize,
+    quote_found,
+    split_sections,
+    threads_by_section,
+)
 
 log = logging.getLogger("verifair")
 router = APIRouter()
@@ -627,6 +633,11 @@ def post_comment(
     user_id, name = user
     if not name:
         return _name_prompt(request, f"/r/{id}")
+    shown = db.get_version(conn, id, version)
+    if quote and shown:
+        same = [s for s in split_sections(shown["body"]) if s.heading == section]
+        if not quote_found(normalize(quote), same):
+            raise HTTPException(422, "quote not found")
     try:
         row = db.add_comment(
             conn,

@@ -167,6 +167,10 @@ def _locate(
     return None
 
 
+def quote_found(quote: str, sections: list[Section]) -> bool:
+    return _locate(quote, "", "", sections, []) is not None
+
+
 def build_threads(
     comments: list[dict[str, Any]], sections: list[Section], current_version: int
 ) -> list[Thread]:

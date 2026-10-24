@@ -539,6 +539,15 @@ def test_ambiguous_quote_without_context_422(client):
     assert _comment(client, section="Edge cases", quote="First day").status_code == 201
 
 
+@pytest.mark.parametrize("quote", ["not in the text", "First day"])
+def test_quote_missing_from_section_422(client, quote):
+    push(client)
+    r = _comment(client, section="Intent", quote=quote)
+    assert (r.status_code, r.json()) == (422, {"detail": "quote not found"})
+    assert client.get("/api/reports/prorate/comments", headers=H).json() == {"threads": []}
+    assert _comment(client, section="Intent", quote="Full  new\nprice").status_code == 201
+
+
 def test_prefix_suffix_pick_occurrence_and_roundtrip(client):
     push(client, body=DUP)
     r = _comment(client, section="Intent", quote="the fee is", prefix="5. later ", suffix=" 6.")

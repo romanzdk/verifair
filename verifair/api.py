@@ -26,6 +26,7 @@ from verifair.render import (
     build_threads,
     iter_occurrences,
     normalize,
+    quote_found,
     section_headings,
     split_sections,
 )
@@ -421,8 +422,10 @@ def post_comment(
         if body.section not in headings:
             return JSONResponse({"detail": "unknown section", "sections": headings}, 422)
         quote = normalize(body.quote or "")
+        same = [s for s in sections if s.heading == body.section]
+        if quote and not quote_found(quote, same):
+            raise HTTPException(422, "quote not found")
         if quote and not (body.prefix or body.suffix):
-            same = [s for s in sections if s.heading == body.section]
             hits = sum(
                 1
                 for _ in islice(

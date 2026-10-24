@@ -2148,3 +2148,12 @@ def test_name_cookie_with_a_nul_character_asks_for_a_name(client):
     r = client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Hi"})
     assert r.status_code == 200 and 'action="/me"' in r.text
     assert api_threads(client) == []
+
+
+def test_comment_with_quote_missing_from_section_is_refused(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    data = {"version": 1, "section": "Intent", "quote": "first day", "body": "Where?"}
+    r = client.post("/r/prorate/comments", data=data, headers={"HX-Request": "true"})
+    assert (r.status_code, r.json()) == (422, {"detail": "quote not found"})
+    assert api_threads(client) == []
