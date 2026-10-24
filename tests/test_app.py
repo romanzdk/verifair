@@ -4,6 +4,7 @@ from dataclasses import replace
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg_pool import ConnectionPool
 
 from verifair import db
 from verifair.app import create_app
@@ -383,3 +384,57 @@ def test_shared_mode_startup_lower_cases_local_mode_ids_once(
     make_app(shared_settings)
     assert _stored_ids(settings.database_url) == before
     assert not [r for r in caplog.records if r.getMessage().startswith("lowercased")]
+
+
+@pytest.fixture
+def unreachable():
+    swapped = []
+
+    def swap(app):
+        swapped.append((app, app.state.pool))
+        app.state.pool = ConnectionPool(
+            "host=127.0.0.1 port=1 connect_timeout=1", min_size=1, timeout=0.3, open=True
+        )
+
+    yield swap
+    for app, real in swapped:
+        app.state.pool.close()
+        app.state.pool = real
+
+
+def _assert_unavailable(response):
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "5"
+    assert response.text == "The database is not available. Try again in a moment."
+
+
+def test_api_answers_503_when_the_database_is_unreachable(client, unreachable, caplog):
+    unreachable(client.app)
+    caplog.set_level("ERROR", logger="verifair")
+    _assert_unavailable(client.get("/api/reports/r1", headers={"Authorization": "Bearer t"}))
+    assert [r.getMessage() for r in caplog.records] == [
+        "database unavailable path='/api/reports/r1': PoolTimeout:"
+        " couldn't get a connection after 0.30 sec"
+    ]
+
+
+def test_shared_mode_pages_answer_503_when_the_database_is_unreachable(shared_client, unreachable):
+    unreachable(shared_client.app)
+    _assert_unavailable(shared_client.get("/"))
+
+
+def test_a_dropped_connection_mid_request_is_a_503(client, monkeypatch):
+    def drop(*args, **kwargs):
+        raise psycopg.errors.AdminShutdown("terminating connection due to administrator command")
+
+    monkeypatch.setattr(db, "get_report", drop)
+    _assert_unavailable(client.get("/api/reports/r1", headers={"Authorization": "Bearer t"}))
+
+
+def test_other_database_errors_stay_500(client, monkeypatch):
+    def cancel(*args, **kwargs):
+        raise psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
+
+    monkeypatch.setattr(db, "get_report", cancel)
+    with pytest.raises(psycopg.errors.QueryCanceled):
+        client.get("/api/reports/r1", headers={"Authorization": "Bearer t"})

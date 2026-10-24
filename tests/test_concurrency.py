@@ -284,8 +284,8 @@ def test_pool_exhaustion_is_a_timeout_not_a_hang(client):
     client.app.state.pool.timeout = 0.5
     held = client.app.state.pool.getconn()
     try:
-        with client, pytest.raises(PoolTimeout):
-            _report(client)
+        with client:
+            assert _report(client).status_code == 503
     finally:
         client.app.state.pool.putconn(held)
 
@@ -299,11 +299,11 @@ def test_waiting_for_a_slot_and_a_connection_takes_one_pool_timeout_in_total(cli
             client.portal.call(slots.acquire)
             threading.Timer(0.6, client.portal.call, (slots.release,)).start()
             started = time.monotonic()
-            with pytest.raises(PoolTimeout):
-                _report(client)
+            status = _report(client).status_code
             took = time.monotonic() - started
     finally:
         pool.putconn(held)
+    assert status == 503
     assert 0.9 < took < 1.3
 
 

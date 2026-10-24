@@ -270,6 +270,7 @@ This endpoint signals feedback; it does not provide a lossless event stream. Sto
 | 404 | `"report not found"`, `"parent not found"` or `"comment not found"` |
 | 409 | `"id belongs to another project"` |
 | 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"ambiguous quote"`, `"unknown section"`, `"missing sections"` or, in shared mode, `"inactive reviewers"` |
+| 503 | not JSON: the plain text `The database is not available. Try again in a moment.` with a `Retry-After: 5` header. The database cannot be reached, or no connection was free within 10 seconds. Web pages answer the same way |
 
 An unknown section also lists the valid headings: `{"detail": "unknown section", "sections": ["Intent", "Edge cases"]}`. Missing sections lists the required headings the body lacks, in the configured order. Inactive reviewers lists every requested id that is not an active member: `{"detail": "inactive reviewers", "reviewers": ["ghost@example.com"]}`.
 
@@ -279,7 +280,7 @@ An unknown section also lists the valid headings: `{"detail": "unknown section",
 | --- | --- | --- |
 | `VERIFAIR_API_TOKEN` | required in local mode | Bearer token agents use for `/api` in local mode. Not accepted in shared mode (startup logs a warning if it is set) |
 | `VERIFAIR_DATABASE_URL` | required | Postgres connection URL (libpq format), for example `postgresql://verifair:verifair@localhost:5432/verifair` |
-| `VERIFAIR_DB_POOL_SIZE` | `10` | Most database connections one verifair process opens. A request waits up to 10 seconds for a free one, then fails with 500 |
+| `VERIFAIR_DB_POOL_SIZE` | `10` | Most database connections one verifair process opens. A request waits up to 10 seconds in total for a free one, then gets 503 with `Retry-After` |
 | `VERIFAIR_BASE_URL` | `http://localhost:8000` | Used for links in API responses and notifications |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | Comma-separated H2 headings every pushed body must have; empty turns the check off |
 | `VERIFAIR_IDENTITY_HEADER` | unset | Name of a request header that carries the user identity. Setting it turns on shared mode (see Roles and access) |

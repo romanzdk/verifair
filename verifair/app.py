@@ -21,6 +21,9 @@ CSP = (
 )
 log = logging.getLogger("verifair")
 SIGN_IN = "Sign in through your company login to use verifair."
+DB_UNAVAILABLE = "The database is not available. Try again in a moment."
+# connection exceptions, and the server shutting down or not accepting connections yet
+CONNECTION_LOST = ("08", "57P")
 STARTUP_LOCKED = (
     "Startup waited too long for a database lock held by another transaction. Restart to try again."
 )
@@ -109,20 +112,28 @@ def create_app(settings: Settings) -> FastAPI:
         request.state.member = None
         # Postgres text cannot hold NUL, so no stored id can match such a path
         response = JSONResponse({"detail": "Not Found"}, 404) if "\x00" in path else None
-        if (
-            response is None
-            and settings.identity_header
-            and not (is_api or path == "/healthz" or path.startswith("/static/"))
-        ):
-            response = await _membership_denial(request, settings)
-        if response is None and request.method == "POST" and not is_api:
-            site = request.headers.get("Sec-Fetch-Site")
-            if site is None:
-                response = JSONResponse({"detail": "browser request required"}, 403)
-            elif site not in ("same-origin", "none"):
-                response = PlainTextResponse("cross-origin request refused", 403)
-        if response is None:
-            response = await call_next(request)
+        try:
+            if (
+                response is None
+                and settings.identity_header
+                and not (is_api or path == "/healthz" or path.startswith("/static/"))
+            ):
+                response = await _membership_denial(request, settings)
+            if response is None and request.method == "POST" and not is_api:
+                site = request.headers.get("Sec-Fetch-Site")
+                if site is None:
+                    response = JSONResponse({"detail": "browser request required"}, 403)
+                elif site not in ("same-origin", "none"):
+                    response = PlainTextResponse("cross-origin request refused", 403)
+            if response is None:
+                response = await call_next(request)
+        # caught here, not in an exception handler, because those do not see the membership
+        # check above. PoolTimeout is an OperationalError without a SQLSTATE.
+        except psycopg.OperationalError as error:
+            if error.sqlstate is not None and not error.sqlstate.startswith(CONNECTION_LOST):
+                raise
+            log.error("database unavailable path=%r: %s: %s", path, type(error).__name__, error)
+            response = PlainTextResponse(DB_UNAVAILABLE, 503, headers={"Retry-After": "5"})
         response.headers["X-Content-Type-Options"] = "nosniff"
         if path == "/access" or path.startswith("/access/"):
             response.headers["Cache-Control"] = "no-store"
