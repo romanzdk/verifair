@@ -1,16 +1,18 @@
 <aside class="side" id="vf_sidebar"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% set on_plan = view_tab|default('report') == 'plan' %}
+  {% set anchor_url = shown_url if on_plan else '' %}
   {% with s = open_count - blocking_count %}<p class="dismiss" id="vf_blocking">{{ blocking_count }} blocking · {{ s }} suggestion{{ "s" if s != 1 }}</p>{% endwith %}
   <h4>On this page</h4>
   <ul>
-    {% for s in sections %}<li><a href="#{{ s.slug }}"><span class="toc-n">{{ loop.index }}</span>{{ s.heading }}</a>{% if open_by_section[s.slug] %}{% with n = open_by_section[s.slug] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endfor %}
-    {% if threads_by_section.get("vf_general") %}<li><a href="#vf_general">General comments</a>{% if open_by_section["vf_general"] %}{% with n = open_by_section["vf_general"] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endif %}
-    {% if threads_by_section.get(None) %}<li><a href="#vf_earlier">Earlier versions</a>{% if open_by_section[None] %}{% with n = open_by_section[None] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endif %}
+    {% for s in sections %}<li><a href="{{ anchor_url }}#{{ s.slug }}"><span class="toc-n">{{ loop.index }}</span>{{ s.heading }}</a>{% if open_by_section[s.slug] %}{% with n = open_by_section[s.slug] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endfor %}
+    {% if threads_by_section.get("vf_general") %}<li><a href="{{ anchor_url }}#vf_general">General comments</a>{% if open_by_section["vf_general"] %}{% with n = open_by_section["vf_general"] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endif %}
+    {% if threads_by_section.get(None) %}<li><a href="{{ anchor_url }}#vf_earlier">Earlier versions</a>{% if open_by_section[None] %}{% with n = open_by_section[None] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endif %}
   </ul>
   <h4>Reviewers</h4>
   {% for r in reviewers %}
   {% set label = labels.get(r.id, r.name) %}
   <div class="rev-item">
-  <div class="rev"><span class="av {{ r.id|avatar }}" aria-hidden="true">{{ r.name[:1]|upper }}</span><span class="rn" title="{{ label }}">{{ r.name }}</span>{% if r.id in removable %}<button type="button" class="btn sm" hx-post="{{ url }}/reviewers/{{ r.id|segment }}/remove" hx-target="#vf_sidebar" hx-swap="outerHTML" aria-label="Remove review request for {{ label }}">Remove</button>{% endif %}</div>
+  <div class="rev"><span class="av {{ r.id|avatar }}" aria-hidden="true">{{ r.name[:1]|upper }}</span><span class="rn" title="{{ label }}">{{ r.name }}</span>{% if not on_plan and r.id in removable %}<button type="button" class="btn sm" hx-post="{{ url }}/reviewers/{{ r.id|segment }}/remove" hx-target="#vf_sidebar" hx-swap="outerHTML" aria-label="Remove review request for {{ label }}">Remove</button>{% endif %}</div>
   <p class="rev-state">{% if r.verdict %}<span class="badge {{ 'b-approved' if r.verdict == 'approve' else 'b-changes_requested' }}{% if r.verdict_version != current_version %} b-stale{% endif %}">{{ r.label }}</span>{% else %}{{ r.label }}{% endif %}</p>
   {% if r.summary %}<p class="dismiss rev-summary">{{ r.summary }}</p>{% endif %}
   {% if reviewer_error and error_row == r.id %}<p class="error" role="alert" tabindex="-1">{{ reviewer_error }}</p>{% endif %}
@@ -18,16 +20,16 @@
   {% else %}
   <p class="dismiss">Nobody yet.</p>
   {% endfor %}
-  {% if requests_note %}<p class="dismiss">Open the latest version to change requests.</p>{% endif %}
+  {% if requests_note and not on_plan %}<p class="dismiss">Open the latest version to change requests.</p>{% endif %}
   {% if reviewer_status %}<p class="dismiss" data-rev-status>{{ reviewer_status }}</p>{% endif %}
   {% if reviewer_error and not error_row %}<p class="error" role="alert" tabindex="-1">{{ reviewer_error }}</p>{% endif %}
-  {% if request_options %}<form class="addrev" method="post" action="{{ url }}/reviewers" hx-post="{{ url }}/reviewers" hx-target="#vf_sidebar" hx-swap="outerHTML" hx-disabled-elt="find button">
+  {% if request_options and not on_plan %}<form class="addrev" method="post" action="{{ url }}/reviewers" hx-post="{{ url }}/reviewers" hx-target="#vf_sidebar" hx-swap="outerHTML" hx-disabled-elt="find button">
     <select name="reviewer_id" class="sel" aria-label="Request a review from" required><option value="" disabled selected>Choose a member…</option>{% for u in request_options %}<option value="{{ u.id }}">{{ u.label }}</option>{% endfor %}</select>
     <button class="btn sm" aria-label="Request review">Request</button>
   </form>{% endif %}
   <h4>Versions</h4>
   <ul>
-    {% for v in versions %}<li{% if v.version == version %} class="on"{% endif %}><a href="{{ url }}{% if v.version != current_version %}/v/{{ v.version }}{% endif %}">v{{ v.version }} · {{ v.created_at|date }}{% if v.commit %} · <code>{{ v.commit[:7] }}</code>{% endif %}</a></li>{% endfor %}
+    {% for v in versions %}<li{% if v.version == version %} class="on"{% endif %}><a href="{{ url }}{% if v.version != current_version %}/v/{{ v.version }}{% endif %}{% if on_plan and v.plan is not none %}?tab=plan{% endif %}">v{{ v.version }} · {{ v.created_at|date }}{% if v.commit %} · <code>{{ v.commit[:7] }}</code>{% endif %}</a></li>{% endfor %}
   </ul>
 </aside>
 {% if oob %}

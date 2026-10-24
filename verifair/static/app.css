@@ -444,6 +444,9 @@ body.has-verdict .side { padding-bottom: 112px; }
 .content blockquote { margin: 0 0 12px; padding: 0 0 0 12px; border-left: 3px solid var(--border); color: var(--text-muted); }
 .content :not(pre) > code { border: 1px solid var(--border); }
 .content th, .content td { padding: 8px; }
+.main > article.content { padding-top: 16px; overflow-wrap: anywhere; }
+.main > article.content h1 { font: 600 20px/28px var(--font); }
+.main > article.content h2 { display: block; margin: 20px 0 12px; }
 .dismiss, .empty { color: var(--text-muted); }
 .links { font-size: 13px; color: var(--text-muted); margin: 8px 0 24px; }
 .links a { color: var(--text-muted); text-decoration: underline; text-decoration-color: var(--border); }

@@ -71,6 +71,156 @@ def test_push_new_version_same_id(client):
     assert [v["version"] for v in g["versions"]] == [1, 2]
 
 
+def test_push_plan_presence_semantics(client, settings):
+    original = "  # Návrh 🦊\n\nOriginal Markdown.\r\n  "
+    replacement = "## Different headings\nA revised plan.\n"
+    for version, changes in enumerate(
+        [{"plan": original}, {}, {"plan": replacement}, {"plan": None}, {}], 1
+    ):
+        response = push(client, id="prorate", **changes)
+        assert response.status_code == 201
+        assert response.json() == {
+            "id": "prorate",
+            "version": version,
+            "url": "http://localhost:8000/r/prorate",
+        }
+    for id, changes in [("omitted", {}), ("null", {"plan": None})]:
+        assert push(client, id=id, **changes).status_code == 201
+    with closing(db.connect(settings.database_url)) as conn:
+        versions = db.list_versions(conn, "prorate")
+        assert [v["plan"] for v in versions] == [original, original, replacement, None, None]
+        assert [v["body"] for v in versions] == [SAMPLE] * 5
+        assert db.get_version(conn, "omitted", 1)["plan"] is None
+        assert db.get_version(conn, "null", 1)["plan"] is None
+    metadata = client.get("/api/reports/prorate", headers=H).json()
+    assert "plan" not in metadata and "body" not in metadata
+    assert all(set(v) == {"version", "created_at", "commit"} for v in metadata["versions"])
+
+
+@pytest.mark.parametrize(
+    "plan",
+    ["", " \t\n ", [], {}, 42, True, "plan\x00", "plan\ud800", "plan\udfff"],
+    ids=["empty", "blank", "list", "object", "number", "boolean", "nul", "high", "low"],
+)
+def test_push_plan_validation_is_atomic(client, settings, plan):
+    assert push(client, id="prorate", plan="# Original").status_code == 201
+    with closing(db.connect(settings.database_url)) as conn:
+        before_report = db.get_report(conn, "prorate")
+        before_versions = db.list_versions(conn, "prorate")
+    for id in ["new", "prorate"]:
+        payload = {
+            "id": id,
+            "project": "billing-service",
+            "title": "Should not overwrite",
+            "risk": "low",
+            "body": "changed body",
+            "plan": plan,
+            "reviewers": ["unexpected-reviewer"],
+        }
+        response = client.post(
+            "/api/reports",
+            content=json.dumps(payload),
+            headers=H | {"Content-Type": "application/json"},
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["loc"] == ["body", "plan"]
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.get_report(conn, "new") is None
+        assert db.get_report(conn, "prorate") == before_report
+        assert db.list_versions(conn, "prorate") == before_versions
+        assert db.requested_reviewers(conn, "prorate") == []
+
+
+def test_plan_does_not_replace_required_body(strict_client, settings):
+    valid_body = "## Verification\na\n\n## Rollback\nb\n\n## Security impact\nc"
+    assert (
+        push(strict_client, body=valid_body, plan="# Arbitrary design\nNo template.").status_code
+        == 201
+    )
+    assert push(strict_client, id="body-only", body=valid_body).status_code == 201
+    payload = {"project": "billing-service", "title": "Missing", "risk": "high", "plan": valid_body}
+    missing = strict_client.post("/api/reports", json=payload, headers=H)
+    assert missing.status_code == 422
+    assert missing.json()["detail"][0]["loc"] == ["body", "body"]
+    for body in [None, "", " \n "]:
+        assert push(strict_client, id="prorate", body=body, plan=valid_body).status_code == 422
+    invalid = push(strict_client, id="prorate", body="## Other\nx", plan=valid_body)
+    assert (invalid.status_code, invalid.json()) == (
+        422,
+        {"detail": "missing sections", "sections": ["Verification", "Rollback", "Security impact"]},
+    )
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.get_report(conn, "missing") is None
+        assert db.latest_version(conn, "prorate") == 1
+        assert db.get_version(conn, "prorate", 1)["body"] == valid_body
+
+
+@pytest.mark.parametrize("plan", ["# Changed", None], ids=["replace", "remove"])
+def test_plan_update_requires_new_report_signature(client, settings, plan):
+    assert push(client, plan="# Original").status_code == 201
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    assert client.post("/r/prorate/sign", data={"version": 1}).status_code == 200
+    client.cookies.set("vf_id", "alice000")
+    client.cookies.set("vf_name", "Alice")
+    assert (
+        client.post("/r/prorate/verdict", data={"verdict": "approve", "version": 1}).status_code
+        == 200
+    )
+    before = client.get("/api/reports/prorate", headers=H).json()
+    assert before["status"] == "approved"
+    with closing(db.connect(settings.database_url)) as conn:
+        signature = db.get_signature(conn, "prorate", 1)
+    response = push(client, id="prorate", plan=plan)
+    assert (response.status_code, response.json()["version"]) == (201, 2)
+    current = client.get("/api/reports/prorate", headers=H).json()
+    assert (current["status"], current["signed_by"], current["signed_at"]) == (
+        "unsigned",
+        None,
+        None,
+    )
+    assert current["verdicts"] == [before["verdicts"][0] | {"current": False}]
+    refused = client.post("/r/prorate/verdict", data={"verdict": "approve", "version": 2})
+    assert refused.status_code == 200
+    assert "The author has not signed this version yet." in refused.text
+    assert client.get("/api/reports/prorate", headers=H).json()["verdicts"] == current["verdicts"]
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.get_signature(conn, "prorate", 1) == signature
+        assert db.get_signature(conn, "prorate", 2) is None
+        assert [v["body"] for v in db.list_versions(conn, "prorate")] == [SAMPLE, SAMPLE]
+        assert [v["plan"] for v in db.list_versions(conn, "prorate")] == ["# Original", plan]
+
+
+def test_plan_headings_and_quotes_are_not_report_comment_anchors(client):
+    assert (
+        push(client, plan="## Plan only\nUnique plan quote.\n\n## Intent\nPlan intent.").status_code
+        == 201
+    )
+    unknown = _comment(client, section="Plan only", quote="Unique plan quote.")
+    assert (unknown.status_code, unknown.json()) == (
+        422,
+        {"detail": "unknown section", "sections": ["Intent", "Edge cases"]},
+    )
+    assert _comment(client, section="Intent", quote="Plan intent.").status_code == 422
+    assert client.get("/api/reports/prorate/comments", headers=H).json() == {"threads": []}
+    assert _comment(client, section="Intent", quote="Full new price.").status_code == 201
+
+
+def test_unauthorized_plan_push_preserves_snapshot(
+    shared_client, shared_settings, alice, bob, admin
+):
+    assert push(shared_client, auth=alice, plan="# Original").status_code == 201
+    for auth in [bob, admin]:
+        response = push(
+            shared_client, auth=auth, id="prorate", title="Taken over", plan="# Intruder"
+        )
+        assert (response.status_code, response.json()) == (403, {"detail": NOT_OWNER})
+    with closing(db.connect(shared_settings.database_url)) as conn:
+        assert db.latest_version(conn, "prorate") == 1
+        assert db.get_version(conn, "prorate", 1)["plan"] == "# Original"
+        assert db.get_report(conn, "prorate")["title"] == "Prorate"
+
+
 def test_push_bad_risk_or_empty_body_422(client):
     assert push(client, risk="extreme").status_code == 422
     assert push(client, body="").status_code == 422
@@ -1157,6 +1307,7 @@ def test_shared_mode_token_refusal_logs_escape_control_characters(
     [
         {"title": "a\x00b"},
         {"body": "## Intent\n\x00"},
+        {"plan": "# Plan\n\x00"},
         {"author": "bot\x00"},
         {"agent": "\x00"},
         {"model": "m\x00"},

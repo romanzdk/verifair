@@ -19,6 +19,8 @@ uv run uvicorn verifair.asgi:app
 
 Every start runs the schema SQL, which is safe to repeat. It runs under an advisory lock, so several copies can start at once. `CREATE INDEX IF NOT EXISTS` takes a lock that waits behind writes in progress, so a start can wait up to 5 seconds. After that it stops with `Startup waited too long for a database lock held by another transaction. Restart to try again.`
 
+Plan attachments add a nullable column to report versions; existing reports need no backfill. Update every application instance before clients send plans. Older writers cannot inherit plan attachments when creating a new version. A rollback keeps saved plans in the database but hides them; pause report updates until the updated application is restored, and keep the added column.
+
 Older versions kept their data in a SQLite file, `verifair.db`. This version does not read that file or move its data. Start with an empty database.
 
 ## Docker

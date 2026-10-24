@@ -11,8 +11,8 @@
     {% if ticket %}<a class="ext" href="{{ report.ticket_url }}">{{ ticket }}{{ icon("external-link", "ic12") }}</a>{% endif %}
     {% if is_current %}
     {% if signature %}<span>Signed by <b>{{ signature.signer_name }}</b> · {{ signature.created_at|date }}</span>
-    {% elif sign_refusal %}<span>{{ sign_refusal }}</span>
-    {% elif user_name %}<form class="sign" id="vf_sign" hx-post="{{ url }}/sign" hx-target="#vf_header" hx-swap="outerHTML" hx-disabled-elt="find button">
+    {% elif sign_refusal and view_tab|default('report') == 'report' %}<span>{{ sign_refusal }}</span>
+    {% elif user_name and view_tab|default('report') == 'report' %}<form class="sign" id="vf_sign" hx-post="{{ url }}/sign" hx-target="#vf_header" hx-swap="outerHTML" hx-disabled-elt="find button">
       <input type="hidden" name="version" value="{{ version }}">
       <button class="btn p">Sign this version</button>
     </form>{% endif %}

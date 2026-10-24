@@ -77,6 +77,41 @@ def test_concurrent_pushes_of_same_new_id_get_versions_1_and_2(url, monkeypatch)
     assert sorted(results) == [("r1", 1), ("r1", 2)]
 
 
+@pytest.mark.parametrize("existing", [True, False], ids=["existing-id", "same-new-id"])
+@pytest.mark.parametrize("replacement_writer", [0, 1])
+def test_concurrent_plan_inheritance_follows_previous_version(
+    url, monkeypatch, existing, replacement_writer
+):
+    with closing(connect(url)) as conn:
+        if existing:
+            _push(conn, id="r1", plan="A")
+        _slow(monkeypatch, "_lock_report")
+
+        def work(c, i):
+            replacing = i == replacement_writer
+            return push_report(
+                c,
+                project="p",
+                title="T",
+                risk="low",
+                id="r1",
+                body="replacement" if replacing else "omitted",
+                **({"plan": "B"} if replacing else {}),
+            )
+
+        results = _race(url, work)
+        versions = db.list_versions(conn, "r1")
+    assert sorted(results) == [("r1", n) for n in ([2, 3] if existing else [1, 2])]
+    assert [v["version"] for v in versions] == ([1, 2, 3] if existing else [1, 2])
+    previous = None
+    for version in versions:
+        if version["body"] == "omitted":
+            assert version["plan"] == previous
+        else:
+            assert version["plan"] == ("B" if version["body"] == "replacement" else "A")
+        previous = version["plan"]
+
+
 def test_twenty_parallel_pushes_of_one_title_get_distinct_slugs(url):
     results = _race(url, lambda c, _: _push(c), n=20)
     assert sorted(results) == sorted([("t", 1)] + [(f"t-{n}", 1) for n in range(2, 21)])

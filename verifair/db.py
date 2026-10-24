@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS versions (
     report_id TEXT NOT NULL REFERENCES reports(id),
     version INTEGER NOT NULL,
     body TEXT NOT NULL,
+    plan TEXT,
     created_at TEXT NOT NULL,
     "commit" TEXT,
     PRIMARY KEY (report_id, version)
@@ -240,6 +241,11 @@ def init_schema(conn: Connection) -> None:
             " AND table_name = 'review_requests' AND column_name = 'requested_by'"
         ).fetchone():
             conn.execute("ALTER TABLE review_requests ADD COLUMN IF NOT EXISTS requested_by TEXT")
+        if not conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()"
+            " AND table_name = 'versions' AND column_name = 'plan'"
+        ).fetchone():
+            conn.execute("ALTER TABLE versions ADD COLUMN IF NOT EXISTS plan TEXT")
 
 
 def push_report(
@@ -249,6 +255,8 @@ def push_report(
     title: str,
     risk: str,
     body: str,
+    plan: str | None = None,
+    inherit_plan: bool = True,
     id: str | None = None,
     ticket_url: str | None = None,
     links: list[str] | None = None,
@@ -336,10 +344,12 @@ def push_report(
                 " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                 [(id, reviewer, owner_id) for reviewer in set(reviewers) - {owner}],
             )
+        if plan is None and inherit_plan and version > 1:
+            plan = get_version(conn, id, version - 1)["plan"]
         conn.execute(
-            'INSERT INTO versions (report_id, version, body, created_at, "commit")'
-            " VALUES (%s, %s, %s, %s, %s)",
-            (id, version, body, now, commit),
+            'INSERT INTO versions (report_id, version, body, plan, created_at, "commit")'
+            " VALUES (%s, %s, %s, %s, %s, %s)",
+            (id, version, body, plan, now, commit),
         )
     log.info("report pushed id=%s project=%s version=%d", id, project, version)
     return id, version

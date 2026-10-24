@@ -1,5 +1,6 @@
 import pytest
 
+from verifair import render
 from verifair.db import add_comment, push_report
 from verifair.render import (
     Section,
@@ -29,6 +30,44 @@ def test_split_basic_headings_and_tables():
     assert [s.heading for s in secs] == ["Intent", "Edge cases"]
     assert [s.slug for s in secs] == ["intent", "edge-cases"]
     assert "<table>" in secs[1].html and secs[1].text == "a b 1 2"
+
+
+def test_render_markdown_preserves_document_and_escapes_html():
+    html = render.render_markdown(
+        "# Original plán\n\n## Steps\n\n- First\n- Second\n\n"
+        "| Item | Value |\n| --- | --- |\n| Café | ✓ |\n\n"
+        '```python\nprint("<safe>")\n```\n\n'
+        '<script>alert(1)</script>\n\n<img src=x onerror="alert(2)">\n\n'
+        "<!-- secret -->\n\n{{ 7 * 7 }}"
+    )
+    for part in (
+        "<h1>Original plán</h1>",
+        "<h2>Steps</h2>",
+        "<ul>",
+        "<li>First</li>",
+        "<table>",
+        "<td>Café</td>",
+        "<td>✓</td>",
+        '<pre><code class="language-python">',
+        "&lt;safe&gt;",
+        "&lt;script&gt;",
+        "&lt;img",
+        "&lt;!-- secret --&gt;",
+        "{{ 7 * 7 }}",
+    ):
+        assert part in html
+    assert "<script" not in html and "<img" not in html and "<!--" not in html
+    assert "data-section" not in html and 'id="' not in html
+
+
+def test_render_markdown_rejects_unsafe_links():
+    html = render.render_markdown(
+        "[bad](javascript:alert(1))\n\n[bad](data:text/html;base64,PHNjcmlwdD4=)\n\n"
+        "[safe](https://example.com/plan)\n\n![bad](data:image/svg+xml;base64,PHN2Zz4=)"
+    )
+    assert 'href="javascript:' not in html and 'href="data:' not in html
+    assert 'src="data:' not in html
+    assert '<a href="https://example.com/plan">safe</a>' in html
 
 
 def test_no_headings_is_single_report_section():

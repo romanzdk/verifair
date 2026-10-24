@@ -1,16 +1,27 @@
 {% extends "base.html" %}
 {% set drawer = true %}
-{% set inline_name_prompt = is_current and not user_name and not user_from_header %}
+{% set is_report = view_tab|default('report') == 'report' %}
+{% set inline_name_prompt = is_report and is_current and not user_name and not user_from_header %}
 {% block title %}{{ report.title }} · verifair{% endblock %}
-{% block body_class %}{% if is_current %} class="has-verdict"{% endif %}{% endblock %}
+{% block body_class %}{% if is_current and is_report %} class="has-verdict"{% endif %}{% endblock %}
 {% block crumbs %}<a href="/p/{{ report.project|urlencode }}">{{ report.project }}</a>{{ icon("chevron-right", "ic14") }}<span class="cur">{{ report.title }}</span>{% endblock %}
 {% block content %}
 {% if not is_current %}
-<div class="banner">Viewing v{{ version }} · current is v{{ current_version }} · <a href="{{ url }}">open current</a></div>
+<div class="banner">Viewing v{{ version }} · current is v{{ current_version }} · <a href="{{ url }}{% if not is_report and versions[0].plan is not none %}?tab=plan{% endif %}">open current</a></div>
 {% endif %}
 {% include "_header.html" %}
 <div class="body">
   <main class="main" id="vf_main">
+    {% if plan_html is not none %}
+    <nav class="tabs" aria-label="Report documents">
+      <a href="{{ shown_url }}"{% if is_report %} aria-current="page"{% endif %}>Report</a>
+      <a href="{{ shown_url }}?tab=plan"{% if not is_report %} aria-current="page"{% endif %}>Plan</a>
+    </nav>
+    {% endif %}
+    {% if not is_report %}
+    <p class="dismiss">Plan attached to report v{{ version }}. Read-only context; sign and review this version on the <a href="{{ shown_url }}">Report tab</a>.</p>
+    <article class="content">{{ plan_html|safe }}</article>
+    {% else %}
     {% if inline_name_prompt %}{% with next=here %}{% include "_name_prompt.html" %}{% endwith %}{% endif %}
     {% for s in sections %}
     <section id="{{ s.slug }}" data-section="{{ s.heading }}">
@@ -41,6 +52,7 @@
       </div>
     </section>
     {% endif %}
+    {% endif %}
     {% if links %}
     <p class="links">Links: {% for label, href in links %}<a href="{{ href }}">{{ label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
     {% endif %}
@@ -48,7 +60,7 @@
   {% include "_sidebar.html" %}
 </div>
 <p id="vf_rev_live" class="sr-only" role="status"></p>
-{% if is_current %}
+{% if is_current and is_report %}
 {% include "_verdict.html" %}
 <div id="vf_popover" class="pop" hidden><button type="button">{{ icon("message-square", "ic12") }} Comment on selection</button></div>
 {% endif %}
