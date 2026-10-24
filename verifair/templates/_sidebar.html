@@ -8,7 +8,7 @@
   </ul>
   <h4>Reviewers</h4>
   {% for r in reviewers %}
-  <div class="rev"><span class="av {{ r.id|avatar }}">{{ r.name[:1]|upper }}</span><span class="rn">{{ r.name }}</span> · {% if r.verdict %}<span class="badge {{ 'b-approved' if r.verdict == 'approve' else 'b-changes_requested' }}{% if r.verdict_version != current_version %} b-stale{% endif %}">{{ r.label }}</span>{% else %}{{ r.label }}{% endif %}</div>
+  <div class="rev"><span class="av {{ r.id|avatar }}" aria-hidden="true">{{ r.name[:1]|upper }}</span><span class="rn">{{ r.name }}</span> · {% if r.verdict %}<span class="badge {{ 'b-approved' if r.verdict == 'approve' else 'b-changes_requested' }}{% if r.verdict_version != current_version %} b-stale{% endif %}">{{ r.label }}</span>{% else %}{{ r.label }}{% endif %}</div>
   {% if r.summary %}<p class="dismiss rev-summary">{{ r.summary }}</p>{% endif %}
   {% else %}
   <p class="dismiss">Nobody yet.</p>

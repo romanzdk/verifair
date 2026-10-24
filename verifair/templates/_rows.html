@@ -4,21 +4,22 @@
 {% set marks = {"approve": ("ok", "check"), "request_changes": ("no", "x"), "stale": ("stale", "check")} %}
 {% set what = {"approve": "approved v" ~ r.latest_version, "request_changes": "requested changes on v" ~ r.latest_version, "stale": "reviewed an earlier version"} %}
 <a class="chg" href="/r/{{ r.id|urlencode }}">
-  <span class="si {{ st }}" title="{{ STATUS_LABELS[st] }}">{{ icon(STATUS_ICONS[st]) }}</span>
+  <span class="si {{ st }}" title="{{ STATUS_LABELS[st] }}" aria-hidden="true">{{ icon(STATUS_ICONS[st]) }}</span>
   <div class="chg-main">
     <div class="chg-t">{{ r.title }}</div>
     <div class="chg-m">{{ (([r.project] if show_project else []) + ["v" ~ r.latest_version] + ([row.ticket] if row.ticket else []))|join(" · ") }}</div>
   </div>
-  <span class="badge b-{{ st }}">{{ STATUS_LABELS[st] }}</span>
-  <span class="risk {{ r.risk }}">{{ icon("risk-" ~ r.risk, "ic14") }}{{ r.risk|capitalize }}</span>
-  <span class="av {{ (r.author_id or r.author)|avatar }}" title="Author: {{ r.author }}">{% if r.author == "agent" %}{{ icon("bot", "ic14") }}{% else %}{{ r.author[:1]|upper }}{% endif %}</span>
-  <span class="stack">
+  <span class="sr-only">{{ STATUS_LABELS[st] }}, {{ r.risk }} risk, by {{ r.author }}{% if row.reviewers %}, reviewers: {% for rv in row.reviewers %}{{ rv.name }} {{ what[rv.mark] if rv.mark else "review requested" }}{{ ", " if not loop.last }}{% endfor %}{% endif %}</span>
+  <span class="badge b-{{ st }}" aria-hidden="true">{{ STATUS_LABELS[st] }}</span>
+  <span class="risk {{ r.risk }}" aria-hidden="true">{{ icon("risk-" ~ r.risk, "ic14") }}{{ r.risk|capitalize }}</span>
+  <span class="av {{ (r.author_id or r.author)|avatar }}" title="Author: {{ r.author }}" aria-hidden="true">{% if r.author == "agent" %}{{ icon("bot", "ic14") }}{% else %}{{ r.author[:1]|upper }}{% endif %}</span>
+  <span class="stack" aria-hidden="true">
     {% for rv in row.reviewers[:2] %}
     <span class="av {{ rv.id|avatar }}" title="{{ rv.name }} · {{ what[rv.mark] if rv.mark else 'review requested' }}">{{ rv.name[:1]|upper }}{% if rv.mark %}<span class="v {{ marks[rv.mark][0] }}">{{ icon(marks[rv.mark][1], "") }}</span>{% endif %}</span>
     {% endfor %}
     {% if row.reviewers|length > 2 %}<span class="more">+{{ row.reviewers|length - 2 }}</span>{% endif %}
   </span>
-  {% if r.open_threads %}<span class="cm" title="{{ r.open_threads }} open thread{{ 's' if r.open_threads != 1 }}">{{ icon("message-square", "ic14") }}<span class="cnt">{{ r.open_threads }}</span></span>{% else %}<span class="cm"></span>{% endif %}
+  {% if r.open_threads %}<span class="cm" title="{{ r.open_threads }} open thread{{ 's' if r.open_threads != 1 }}">{{ icon("message-square", "ic14") }}<span class="cnt">{{ r.open_threads }}</span><span class="sr-only"> open thread{{ "s" if r.open_threads != 1 }}</span></span>{% else %}<span class="cm"></span>{% endif %}
   <time class="when{% if waiting %} wait{% endif %}" datetime="{{ when }}" title="{{ when|date }} {{ when[11:16] }} UTC">{% if waiting %}waiting {{ when|age }}{% else %}{{ when|ago }}{% endif %}</time>
 </a>
 {% endmacro %}

@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Agent tokens · verifair{% endblock %}
 {% block crumbs %}<span>Settings</span>{{ icon("chevron-right", "ic14") }}<span class="cur">Agent tokens</span>{% endblock %}
-{% macro new_token_fields() %}
+{% macro new_token_fields(autofocus=False) %}
 <input type="hidden" name="nonce" value="{{ nonce }}">
-<input name="label" maxlength="60" required placeholder="Label, for example laptop" aria-label="Token label" class="inp">
+<input name="label" maxlength="60" required placeholder="Label, for example laptop" aria-label="Token label" class="inp"{% if autofocus %} autofocus{% endif %}>
 <button class="btn p">Create token</button>
 {% endmacro %}
 {% macro token_rows(tokens, owner=False) %}
@@ -12,7 +12,7 @@
   <tbody>
     {% for t in tokens %}
     <tr>
-      {% if owner %}<td data-label="Owner"><span class="who"><span class="av sm {{ t.owner_id|avatar }}">{{ t.owner_id[:1]|upper }}</span>{{ t.owner_id }}</span></td>{% endif %}
+      {% if owner %}<td data-label="Owner"><span class="who"><span class="av sm {{ t.owner_id|avatar }}" aria-hidden="true">{{ t.owner_id[:1]|upper }}</span>{{ t.owner_id }}</span></td>{% endif %}
       <td data-label="Label">{{ t.label }}</td>
       <td data-label="Token id"><code>{{ t.id }}</code></td>
       <td data-label="Created"><time datetime="{{ t.created_at }}">{{ t.created_at|date }}</time></td>
@@ -31,10 +31,10 @@
 {% endmacro %}
 {% block actions %}{% if member %}
 <button class="btn p" popovertarget="vf_new_token_form">{{ icon("plus", "ic14") }}<span class="lbl">New token</span></button>
-<form id="vf_new_token_form" popover method="post" action="/access/tokens" class="menu">{{ new_token_fields() }}</form>
+<form id="vf_new_token_form" popover method="post" action="/access/tokens" class="menu">{{ new_token_fields(autofocus=True) }}</form>
 {% endif %}{% endblock %}
 {% block content %}
-<main class="app-page">
+<main class="app-page" id="vf_main">
 {% if not shared %}
   <div class="ph"><div><h1>Agent tokens</h1></div></div>
   <p>Access management needs a sign-in proxy. See the README.</p>

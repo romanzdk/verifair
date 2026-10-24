@@ -11,7 +11,7 @@
 {% endif %}
 {% endmacro %}
 {% block content %}
-<main class="app-page">
+<main class="app-page" id="vf_main">
 {% if first_run %}
   <div class="welcome">
     <div class="hero">{{ icon("inbox") }}</div>
@@ -44,7 +44,7 @@ export VERIFAIR_API_TOKEN={% if shared %}vf_…{% else %}"&lt;your token&gt;"{% 
   {{ group(groups.returned, "circle-x", "Returned to you", "Changes requested") }}
   {% if waiting %}
   <details class="grp">
-    <summary class="grp-h">{{ icon("circle-dot") }}Waiting on others<span class="cnt">{{ waiting }}</span><span class="sp"></span><span class="show"><span class="when-closed">Show {{ waiting }}</span><span class="when-open">Hide</span>{{ icon("chevron-down", "ic14") }}</span></summary>
+    <summary class="grp-h"><h2 class="grp-t">{{ icon("circle-dot") }}Waiting on others<span class="cnt">{{ waiting }}</span></h2><span class="sp"></span><span class="show"><span class="when-closed">Show {{ waiting }}</span><span class="when-open">Hide</span>{{ icon("chevron-down", "ic14") }}</span></summary>
     <div class="list">{% for row in groups.waiting %}{{ change_row(row) }}{% endfor %}</div>
   </details>
   {% endif %}

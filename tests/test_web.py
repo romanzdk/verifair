@@ -200,7 +200,7 @@ def test_review_page_sits_in_the_drawer_shell(client):
     assert 'href="/p/billing-service"' in crumbs and '<span class="cur">Prorate</span>' in crumbs
     nav_link = re.search(r'<a [^>]*href="/p/billing-service"[^>]*>', page.split("</nav>")[0])
     assert 'aria-current="page"' in nav_link.group(0)
-    assert page.index('<main class="main">') < page.index('id="vf_verdict"')
+    assert page.index('<main class="main" id="vf_main">') < page.index('id="vf_verdict"')
     assert page.count("<main") == 1
     assert '<body class="has-verdict">' in page
     push(client, id="prorate")
@@ -481,7 +481,7 @@ def test_first_visit_shows_inline_name_prompt(client):
     push(client, id="prorate", body="## Intent\nChanged.")
     r = client.get("/r/prorate")
     assert "Set your name</b>" in r.text
-    assert r.text.index('<main class="main">') < r.text.index('class="name-prompt"')
+    assert r.text.index('<main class="main" id="vf_main">') < r.text.index('class="name-prompt"')
     assert 'name="next" value="/r/prorate"' in r.text
     assert 'class="name-prompt"' not in client.get("/r/prorate/v/1").text
     client.cookies.set("vf_name", "Alice")
@@ -1980,3 +1980,85 @@ def test_page_query_count_does_not_grow_with_reports(client, settings, monkeypat
     few = counts()
     seed(3, 30)
     assert counts() == few
+
+
+def test_skip_link_and_plain_nav_section_titles(client, shared_client):
+    push(client)
+    sign(client)
+    pages = [client.get(url).text for url in ("/", "/changes", "/p/billing-service", "/r/prorate")]
+    pages += [shared_client.get(url).text for url in ("/access/tokens", "/access/members")]
+    for page in pages:
+        assert '<a class="skip" href="#vf_main">Skip to content</a>' in page
+        assert page.count('id="vf_main"') == 1
+        assert re.search(r'<main class="[^"]*" id="vf_main"', page)
+        assert "<h6" not in page and '<h2 class="nav-h">Your work</h2>' in page
+
+
+def test_change_row_reads_well_without_the_picture(client):
+    push(client, reviewers=["bob00000"], risk="high")
+    sign(client)
+    client.cookies.set("vf_name", "Alice")
+    client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
+    row = client.get("/changes?tab=all").text.split('<a class="chg"')[1].split("</a>")[0]
+    said = re.search(r'<span class="sr-only">([^<]*)</span>', row)[1]
+    assert (
+        said
+        == "Approved, high risk, by agent, reviewers: bob00000 review requested, Alice approved v1"
+    )
+    outside_stack = re.sub(r'(<span class="stack"[^>]*>).*', r"\1", row, flags=re.S)
+    for part in re.findall(r'<span class="(?:si|badge|risk|av|stack)\b[^>]*>', outside_stack):
+        assert 'aria-hidden="true"' in part, part
+
+
+def test_waiting_group_has_a_heading_and_avatars_are_hidden(client):
+    push(client)
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    client.post("/r/prorate/sign", data={"version": 1})
+    page = client.get("/").text
+    summary = page.split('<details class="grp"')[1].split("</summary>")[0]
+    assert '<h2 class="grp-t">' in summary and "Waiting on others" in summary
+    nav = page.split('class="app-user"')[1]
+    assert re.search(r'<span class="av [^"]*" aria-hidden="true">S</span>', nav)
+
+
+def test_new_token_menu_focuses_the_label(shared_client):
+    page = shared_client.get("/access/tokens").text
+    menu = page.split('id="vf_new_token_form"')[1].split("</form>")[0]
+    assert 'aria-label="Token label" class="inp" autofocus' in menu
+    inline = page.split('class="panel inline-form"')[1].split("</form>")[0]
+    assert "autofocus" not in inline
+
+
+def _contrast(a, b):
+    def luminance(colour):
+        rgb = [int(colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+        rgb = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+        return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+
+    high, low = sorted((luminance(a), luminance(b)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def test_text_colours_pass_contrast_in_both_themes():
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    light = dict(re.findall(r"(--[\w-]+): (#[0-9a-f]{6})", css.split(":root {")[1].split("}")[0]))
+    dark = light | dict(
+        re.findall(r"(--[\w-]+): (#[0-9a-f]{6})", css.split(":root {")[2].split("}")[0])
+    )
+    for theme in (light, dark):
+        warn, bg = theme["--risk-medium"], theme["--bg"]
+        tint = "#" + "".join(
+            f"{round(int(warn[i : i + 2], 16) * 0.12 + int(bg[i : i + 2], 16) * 0.88):02x}"
+            for i in (1, 3, 5)
+        )
+        for background in (theme["--bg"], theme["--bg-side"]):
+            assert _contrast(theme["--text-subtle"], background) >= 4.5
+            assert _contrast(theme["--link"], background) >= 4.5
+            assert _contrast(theme["--accent"], background) >= 3
+        assert _contrast(theme["--warn-text"], tint) >= 4.5
+    assert "a { color: var(--link);" in css
+    assert ":focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }" in css
+    assert ".chg:focus-visible { outline-offset: -2px; background: var(--bg-hover); }" in css
+    for rule in (".banner {", ".tag-blocking {", ".side li .n {"):
+        assert "color: var(--warn-text)" in css.split(rule)[1].split("}")[0], rule

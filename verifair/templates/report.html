@@ -10,7 +10,7 @@
 {% endif %}
 {% include "_header.html" %}
 <div class="body">
-  <main class="main">
+  <main class="main" id="vf_main">
     {% if inline_name_prompt %}{% with next=here %}{% include "_name_prompt.html" %}{% endwith %}{% endif %}
     {% for s in sections %}
     <section id="{{ s.slug }}" data-section="{{ s.heading }}">

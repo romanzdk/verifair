@@ -2,7 +2,7 @@
 {% block title %}Members · verifair{% endblock %}
 {% block crumbs %}<span>Settings</span>{{ icon("chevron-right", "ic14") }}<span class="cur">Members</span>{% endblock %}
 {% block content %}
-<main class="app-page">
+<main class="app-page" id="vf_main">
 {% if not shared %}
   <div class="ph"><div><h1>Members</h1></div></div>
   <p>Access management needs a sign-in proxy. See the README.</p>
@@ -24,7 +24,7 @@
       {% for u in users %}{% set action = "/access/users/" ~ u.id|segment %}
       <tr>
         <td data-label="Id"><code>{{ u.id }}</code>{% if u.id == me %} <small>(you)</small>{% endif %}</td>
-        <td data-label="Name"><span class="who"><span class="av sm {{ u.id|avatar }}">{{ u.name[:1]|upper }}</span>{{ u.name }}</span></td>
+        <td data-label="Name"><span class="who"><span class="av sm {{ u.id|avatar }}" aria-hidden="true">{{ u.name[:1]|upper }}</span>{{ u.name }}</span></td>
         <td data-label="Role"><form method="post" action="{{ action }}" class="role-form">
           <select name="role" class="sel" aria-label="Role for {{ u.id }}">{% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}</select>
           <button class="btn sm" aria-label="Save role for {{ u.id }}">Save</button>

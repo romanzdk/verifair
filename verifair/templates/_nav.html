@@ -2,12 +2,12 @@
 <nav class="app-nav" id="vf_nav" popover aria-label="Main"{% if nav_oob %} hx-swap-oob="true"{% endif %}>
   <a class="brand" href="/"><span class="mark">{{ icon("check", "") }}</span><b>veri<span>fair</span></b></a>
   <div class="nav">
-    <h6>Your work</h6>
+    <h2 class="nav-h">Your work</h2>
     {{ item("/", icon("inbox"), "Inbox", active == "inbox", inbox_count, acc=True) }}
     {{ item("/changes?scope=reviewer", icon("user-check"), "My reviews", active == "reviewer") }}
     {{ item("/changes?scope=author", icon("git-pull-request"), "My changes", active == "author") }}
     {{ item("/changes", icon("layers"), "All changes", active == "all") }}
-    <h6>Projects</h6>
+    <h2 class="nav-h">Projects</h2>
     {% for p in nav_projects %}
     {{ item("/p/" ~ p.name|urlencode, icon("folder"), p.name, p.name == active_project, p.awaiting) }}
     {% else %}
@@ -21,7 +21,7 @@
       {% endfor %}
     </details>
     {% endif %}
-    <h6>Settings</h6>
+    <h2 class="nav-h">Settings</h2>
     {% if shared %}
     {{ item("/access/tokens", icon("key-round"), "Agent tokens", active == "tokens") }}
     {% if is_admin %}{{ item("/access/members", icon("users"), "Members", active == "members") }}{% endif %}
@@ -31,10 +31,10 @@
   </div>
   <div class="app-user">
     {% if user_from_header %}
-    <div class="me-row"><span class="av">{{ user_name[:1]|upper }}</span><span class="me">{{ user_name }}</span><span class="role{% if is_admin %} admin{% endif %}">{{ "Admin" if is_admin else "Member" }}</span></div>
+    <div class="me-row"><span class="av {{ user_id|avatar }}" aria-hidden="true">{{ user_name[:1]|upper }}</span><span class="me">{{ user_name }}</span><span class="role{% if is_admin %} admin{% endif %}">{{ "Admin" if is_admin else "Member" }}</span></div>
     {% else %}
     <details class="me"{% if name_error and not inline_name_prompt %} open{% endif %}>
-      <summary class="me-row"><span class="av">{{ (user_name or "?")[:1]|upper }}</span><span class="me-name">{{ user_name or "Set your name" }}</span>{{ icon("chevron-down", "ic14") }}</summary>
+      <summary class="me-row"><span class="av {{ user_id|avatar }}" aria-hidden="true">{{ (user_name or "?")[:1]|upper }}</span><span class="me-name">{{ user_name or "Set your name" }}</span>{{ icon("chevron-down", "ic14") }}</summary>
       <form method="post" action="/me" class="me-form">
         {% if name_error and not inline_name_prompt %}<p class="error">Enter a name (1–60 characters).</p>{% endif %}
         <input name="name" value="{{ user_name or '' }}" maxlength="60" required placeholder="Your name" aria-label="Your name">

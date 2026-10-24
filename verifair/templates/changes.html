@@ -4,7 +4,7 @@
 {% block crumbs %}{% if project %}<a href="/p/{{ project|urlencode }}">{{ project }}</a>{{ icon("chevron-right", "ic14") }}<span class="cur">Changes</span>{% else %}<span class="cur">{{ title }}</span>{% endif %}{% endblock %}
 {% block actions %}<a class="btn" href="/docs">{{ icon("book-open", "ic14") }}<span class="lbl">Push a report</span></a>{% endblock %}
 {% block content %}
-<main class="app-page">
+<main class="app-page" id="vf_main">
   <div class="ph"><div><h1>{{ title }}</h1><div class="meta">{{ meta }}</div></div></div>
   {{ status_tabs(counts, tab, scope) }}
   {% if rows %}
