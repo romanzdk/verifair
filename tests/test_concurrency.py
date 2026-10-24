@@ -290,6 +290,23 @@ def test_pool_exhaustion_is_a_timeout_not_a_hang(client):
         client.app.state.pool.putconn(held)
 
 
+def test_waiting_for_a_slot_and_a_connection_takes_one_pool_timeout_in_total(client):
+    pool, slots = client.app.state.pool, client.app.state.pool_slots
+    pool.timeout = 1
+    held = pool.getconn()
+    try:
+        with client:
+            client.portal.call(slots.acquire)
+            threading.Timer(0.6, client.portal.call, (slots.release,)).start()
+            started = time.monotonic()
+            with pytest.raises(PoolTimeout):
+                _report(client)
+            took = time.monotonic() - started
+    finally:
+        pool.putconn(held)
+    assert 0.9 < took < 1.3
+
+
 def test_healthz_needs_no_worker_thread(client):
     holder = object()
 

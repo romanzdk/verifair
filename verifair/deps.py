@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
@@ -17,16 +18,21 @@ async def borrow(app: FastAPI) -> AsyncIterator[db.Connection]:
     # thread: threads parked there can take every worker thread while the requests holding
     # the connections wait for one to run their handler, and nothing moves until PoolTimeout.
     pool, slots = app.state.pool, app.state.pool_slots
+    timed_out = PoolTimeout(f"couldn't get a connection after {pool.timeout:.2f} sec")
+    deadline = time.monotonic() + pool.timeout
     try:
         await asyncio.wait_for(slots.acquire(), pool.timeout)
     except TimeoutError:
-        raise PoolTimeout(f"couldn't get a connection after {pool.timeout:.2f} sec") from None
+        raise timed_out from None
     try:
         # shielded so a dropped request still gets and returns the connection, and the GC
         # never has to (FastAPI's contextmanager_in_threadpool skips __exit__ on cancel)
-        borrowed = pool.connection()
+        borrowed = pool.connection(timeout=deadline - time.monotonic())
         with anyio.CancelScope(shield=True):
-            conn = await run_in_threadpool(borrowed.__enter__)
+            try:
+                conn = await run_in_threadpool(borrowed.__enter__)
+            except PoolTimeout:
+                raise timed_out from None
         exc_info = (None, None, None)
         try:
             yield conn
