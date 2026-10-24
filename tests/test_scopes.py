@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 
 import pytest
@@ -358,3 +359,22 @@ def test_inbox_local_mode_signer_and_unowned_drafts(client):
     assert client.post("/r/unowned/sign", data={"version": 1}).status_code == 200
     assert 'href="/r/unowned"' in as_user("carol000")["Waiting on others"]
     assert "Needs your signature" not in as_user("bob00000")
+
+
+def nav_link(page, href):
+    return re.search(rf'<a href="{re.escape(href)}"[^>]*>.*?</a>', page).group(0)
+
+
+def test_sidebar_counts(team):
+    bob = "bob@example.com"
+    assert publish(team, "r1", by=bob, reviewers=["alice@example.com"]).status_code == 201
+    assert publish(team, "r2", by=bob, project="other").status_code == 201
+    assert team.post("/r/r1/sign", headers=BOB, data={"version": 1}).status_code == 200
+    page = team.get("/", headers=ALICE).text
+    assert 'class="nav-n acc">1<' in nav_link(page, "/")
+    assert ">1<" in nav_link(page, "/p/billing")
+    assert "nav-n" not in nav_link(page, "/p/other")
+    assert 'class="nav-n acc">1<' in nav_link(team.get("/r/r1", headers=ALICE).text, "/")
+    assert 'class="nav-n acc">1<' in nav_link(team.get("/", headers=BOB).text, "/")
+    carol = {"X-Forwarded-Email": "carol@example.com"}
+    assert "nav-n" not in nav_link(team.get("/", headers=carol).text, "/")

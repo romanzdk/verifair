@@ -254,13 +254,20 @@ def test_local_mode_access_is_a_note_and_posts_are_404(client):
         assert r.headers["cache-control"] == "no-store"
 
 
-def test_access_link_on_landing_pages_in_shared_mode_only(shared_client, conn, client):
+def test_settings_links_by_role_and_mode(shared_client, as_user, conn, client):
     db.push_report(conn, project="p", title="T", risk="low", body="## A\nx", id="r")
-    for path in ("/", "/p/p"):
-        assert 'href="/access/tokens"' in shared_client.get(path, headers=ADMIN).text, path
-    review = shared_client.get("/r/r", headers=ADMIN).text
-    assert "/access" not in review.split('<div class="app-main">')[1]
-    assert 'href="/access"' not in client.get("/").text
+    bob = as_user("bob@example.com")
+    local_db = db.connect(str(client.app.state.settings.db_path))
+    db.push_report(local_db, project="p", title="T", risk="low", body="## A\nx", id="r")
+    local_db.close()
+    for path in ("/", "/p/p", "/r/r"):
+        admin = shared_client.get(path, headers=ADMIN).text
+        member = shared_client.get(path, headers=bob).text
+        assert 'href="/access/tokens"' in admin and 'href="/access/members"' in admin, path
+        assert 'href="/access/tokens"' in member, path
+        assert 'href="/access/members"' not in member, path
+        local = client.get(path).text
+        assert "/access" not in local and "Settings need a sign-in proxy" in local, path
 
 
 def test_report_context_refuses_moderation_without_a_member_in_shared_mode(conn):

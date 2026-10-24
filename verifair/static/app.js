@@ -207,7 +207,15 @@ function showRequestError(event, message) {
   else anchor.after(line);
 }
 
+function showNavForNameError() {
+  const nav = document.getElementById("vf_nav");
+  if (nav?.querySelector("details.me[open]") && getComputedStyle(nav).display === "none") {
+    nav.showPopover();
+  }
+}
+
 highlight();
+showNavForNameError();
 document.body.addEventListener("htmx:afterSwap", highlight);
 document.body.addEventListener("htmx:responseError", (event) => showRequestError(event, errorCopy(event.detail.xhr.status)));
 document.body.addEventListener("htmx:sendError", (event) =>

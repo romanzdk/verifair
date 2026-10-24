@@ -15,6 +15,7 @@ import pytest
         "unicode_context",
         "unicode_context_boundary",
         "error_copy",
+        "name_error_opens_closed_drawer",
     ],
 )
 def test_actual_javascript_anchor_ranges(case):

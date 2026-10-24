@@ -160,10 +160,42 @@ def _with_id_cookie(request: Request, response):
     return response
 
 
-def _nav(conn: sqlite3.Connection) -> dict:
+NAV_PROJECTS_SHOWN = 8
+
+
+def _inbox(request: Request, conn: sqlite3.Connection, user_id: str) -> tuple[list[dict], dict]:
+    cached = getattr(request.state, "inbox", None)
+    if cached is not None:
+        return cached
+    legacy = not _shared(request)
+
+    def ids(scope: str) -> set[str]:
+        reports = db.list_reports(conn, None, scope=scope, user_id=user_id, legacy_author=legacy)
+        return {r["id"] for r in reports}
+
+    reports = db.list_reports(conn, None, user_id=user_id, legacy_author=legacy)
+    rows = _change_rows(conn, reports, user_id)
+    mine = ids("author")
+    if legacy:
+        # in local mode anyone may sign an unowned draft, and signing makes them its owner
+        mine |= {
+            row["report"]["id"]
+            for row in rows
+            if row["report"]["author_id"] is None and row["status"] == "unsigned"
+        }
+    groups = rules.inbox(rows, user_id=user_id, mine=mine, requested=ids("reviewer"))
+    request.state.inbox = rows, groups
+    return rows, groups
+
+
+def _nav(conn: sqlite3.Connection, request: Request, user_id: str) -> dict:
+    rows, groups = _inbox(request, conn, user_id)
+    awaiting = Counter(r["report"]["project"] for r in rows if r["status"] == "awaiting_review")
+    projects = sorted(db.list_projects(conn), key=str.casefold)
     return {
-        "nav_projects": [{"name": p, "awaiting": 0} for p in db.list_projects(conn)],
-        "inbox_count": 0,
+        "nav_projects": [{"name": p, "awaiting": awaiting[p]} for p in projects],
+        "nav_more": max(0, len(projects) - NAV_PROJECTS_SHOWN),
+        "inbox_count": sum(len(groups[key]) for key in ("review", "sign", "returned")),
     }
 
 
@@ -179,7 +211,7 @@ def _page(
     member = request.state.member
     ctx = (
         ctx
-        | _nav(conn)
+        | _nav(conn, request, user[0])
         | {
             "user_id": user[0],
             "user_name": user[1],
@@ -379,25 +411,7 @@ def index(request: Request, conn: Conn, user: User, scope: str | None = None):
         return RedirectResponse(f"/changes?scope={scope}" if scope in SCOPES else "/changes", 303)
     ctx = {"active": "inbox", "first_run": not db.list_projects(conn)}
     if not ctx["first_run"]:
-        legacy = not _shared(request)
-
-        def ids(scope: str) -> set[str]:
-            reports = db.list_reports(
-                conn, None, scope=scope, user_id=user[0], legacy_author=legacy
-            )
-            return {r["id"] for r in reports}
-
-        reports = db.list_reports(conn, None, user_id=user[0], legacy_author=legacy)
-        rows = _change_rows(conn, reports, user[0])
-        mine = ids("author")
-        if legacy:
-            # in local mode anyone may sign an unowned draft, and signing makes them its owner
-            mine |= {
-                row["report"]["id"]
-                for row in rows
-                if row["report"]["author_id"] is None and row["status"] == "unsigned"
-            }
-        groups = rules.inbox(rows, user_id=user[0], mine=mine, requested=ids("reviewer"))
+        groups = _inbox(request, conn, user[0])[1]
         ctx |= {
             "groups": groups,
             "need_count": sum(len(groups[key]) for key in ("review", "sign", "returned")),
@@ -549,6 +563,7 @@ def report_page(id: str, request: Request, conn: Conn, user: User):
         conn, report, db.latest_version(conn, id), user[0], request.state.member, _shared(request)
     )
     ctx["sign_refusal"] = _sign_refusal(request, report, user[0])
+    ctx["active_project"] = report["project"]
     return _page(request, conn, user, "report.html", ctx)
 
 
@@ -558,6 +573,7 @@ def report_version_page(id: str, n: int, request: Request, conn: Conn, user: Use
     if db.get_version(conn, id, n) is None:
         raise HTTPException(404, "version not found")
     ctx = report_context(conn, report, n, user[0], request.state.member, _shared(request))
+    ctx["active_project"] = report["project"]
     return _page(request, conn, user, "report.html", ctx)
 
 
@@ -811,6 +827,7 @@ def _access(
 ):
     member = request.state.member
     ctx = {
+        "active": "tokens",
         "shared": _shared(request),
         "error": error,
         "new_token": token,

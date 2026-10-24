@@ -42,7 +42,7 @@ const document = {
     };
   },
 };
-const scope = vm.createContext({ document, Node: { ELEMENT_NODE: 1 }, NodeFilter: { SHOW_TEXT: 4 }, window: {}, addEventListener: () => {} });
+const scope = vm.createContext({ document, Node: { ELEMENT_NODE: 1 }, NodeFilter: { SHOW_TEXT: 4 }, window: {}, getComputedStyle: (node) => node.style, addEventListener: () => {} });
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../verifair/static/app.js"), "utf8"), scope);
 
 function find(parts, quote, start) {
@@ -102,6 +102,26 @@ const cases = {
     assert.equal(scope.errorCopy(404), "This item no longer exists. Reload the page.");
     assert.equal(scope.errorCopy(422), "Check the text and try again.");
     assert.equal(scope.errorCopy(500), "Something went wrong (500). Reload and try again.");
+  },
+  name_error_opens_closed_drawer() {
+    const nav = (open, display) => {
+      const shown = [];
+      return {
+        style: { display },
+        shown,
+        showPopover: () => shown.push(true),
+        querySelector: (selector) => (open && selector === "details.me[open]" ? {} : null),
+      };
+    };
+    const run = (...args) => {
+      const target = nav(...args);
+      document.getElementById = () => target;
+      scope.showNavForNameError();
+      return target.shown.length;
+    };
+    assert.equal(run(true, "none"), 1);
+    assert.equal(run(true, "flex"), 0);
+    assert.equal(run(false, "none"), 0);
   },
 };
 cases[process.argv[2]]();

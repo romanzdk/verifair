@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from verifair import web
+from verifair import db, web
 from verifair.app import CSP as APP_CSP
 
 H = {"Authorization": "Bearer t"}
@@ -1807,3 +1807,34 @@ def test_user_block_local_and_shared(client, shared_client, as_user):
     assert "sign-in proxy" not in bob
     admin = shared_client.get("/").text
     assert ">Admin<" in admin and 'href="/access/members"' in admin
+
+
+def test_sidebar_collapses_after_eight_projects(client):
+    for n in range(10):
+        assert push(client, project=f"p{n:02}", id=f"r{n}").status_code == 201
+    home = client.get("/").text
+    more = home.index('<details class="nav-more">')
+    assert home.index('href="/p/p07"') < more < home.index('href="/p/p08"')
+    assert "Show 2 more" in home
+    page = client.get("/p/p09").text
+    assert '<details class="nav-more" open>' in page
+    assert re.search(r'<a href="/p/p09"[^>]*aria-current="page"', page)
+
+
+def test_sidebar_links_encode_odd_names(client):
+    name = "a b&c#?%"
+    conn = db.connect(client.app.state.settings.db_path)
+    db.push_report(conn, project=name, title="T", risk="low", body="## A\nx", id="x y")
+    conn.close()
+    home = client.get("/").text
+    assert 'href="/p/a%20b%26c%23%3F%25"' in home
+    assert 'href="/r/x%20y"' in client.get("/changes").text
+    page = client.get("/p/a%20b%26c%23%3F%25")
+    assert page.status_code == 200
+    assert re.search(r'<a href="/p/a%20b%26c%23%3F%25"[^>]*aria-current="page"', page.text)
+    assert "a b&amp;c#?%" in page.text.split('<nav class="crumbs"')[1].split("</nav>")[0]
+
+
+def test_name_form_error_takes_its_own_line():
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    assert ".me-form .error { flex-basis: 100%; }" in css
