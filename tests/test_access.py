@@ -159,15 +159,16 @@ def test_admin_adds_promotes_deactivates_and_reactivates(shared_client, conn, ca
 def test_add_member_validates_id_and_name(shared_client, conn, data):
     r = shared_client.post("/access/users", data=data | {"role": "member"}, headers=ADMIN)
     assert r.status_code == 422
-    assert "Enter an id (1–200 characters) and a name (1–60 characters)." in r.text
+    assert "Enter an email (1–200 characters) and a name (1–60 characters)." in r.text
     assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
 
 
 def test_add_member_accepts_the_limits(shared_client, conn):
-    data = {"id": "e" * 200, "name": "E" * 60, "role": "admin"}
+    email = "e" * 188 + "@example.com"
+    data = {"id": email, "name": "E" * 60, "role": "admin"}
     r = shared_client.post("/access/users", data=data, headers=ADMIN, follow_redirects=False)
     assert r.status_code == 303
-    assert db.get_user(conn, "e" * 200)["role"] == "admin"
+    assert db.get_user(conn, email)["role"] == "admin"
 
 
 def test_last_admin_cannot_demote_or_deactivate_themselves(shared_client, conn):
@@ -360,33 +361,25 @@ def test_browser_check_refusals_on_access_keep_the_security_headers(shared_clien
     "id",
     [
         "../tokens/x/revoke",
-        "a/b",
-        "a\\b",
-        "a\nb",
-        "a\x00b",
-        "a\x7fb",
-        "a b",
-        "a\tb",
+        "a/b@x.com",
+        "a\\b@x.com",
+        "a\nb@x.com",
+        "a\x00b@x.com",
+        "a\x7fb@x.com",
+        "a b@x.com",
+        "a\tb@x.com",
         ".",
         "..",
+        "bob",
+        "agent",
+        " AGENT ",
+        "jän@example.com",
     ],
 )
-def test_add_member_refuses_ids_that_are_not_plain(shared_client, conn, id):
+def test_add_member_refuses_ids_that_are_not_emails(shared_client, conn, id):
     r = shared_client.post("/access/users", data={"id": id, "name": "X"}, headers=ADMIN)
     assert r.status_code == 422
-    assert "Use a plain id such as jane@example.com." in r.text
-    assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
-
-
-@pytest.mark.parametrize("id", ["agent", "Agent", " AGENT "])
-def test_add_member_says_the_agent_id_is_reserved(shared_client, conn, id):
-    r = shared_client.post("/access/users", data={"id": id, "name": "X"}, headers=ADMIN)
-    assert r.status_code == 422
-    error = (
-        '<p class="error" id="vf_member_error" role="alert">The id agent is reserved for agents.'
-    )
-    assert f"{error}</p>" in r.text
-    assert "Use a plain id" not in r.text.split('id="add-member"')[1].split("<label")[0]
+    assert "Enter an email such as jane@example.com." in r.text
     assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
 
 
@@ -437,7 +430,7 @@ def test_access_table_cells_carry_their_labels(shared_client, conn):
     tokens = shared_client.get("/access/tokens", headers=ADMIN).text
     members = shared_client.get("/access/members", headers=ADMIN).text
     labels = ("Owner", "Label", "Token id", "Created", "Last used", "Status")
-    for page, names in ((tokens, labels), (members, ("Id", "Name", "Role", "Status"))):
+    for page, names in ((tokens, labels), (members, ("Email", "Name", "Role", "Status"))):
         for label in names:
             assert f'<td data-label="{label}">' in page, label
     assert '<td data-label="Status"><span class="badge b-approved">Active</span></td>' in members
@@ -487,8 +480,8 @@ def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, con
     assert "!confirm(message)" in js and "event.preventDefault()" in js
 
 
-PLAIN = "Use a plain id such as jane@example.com."
-MEMBER_INPUT = "Enter an id (1–200 characters) and a name (1–60 characters)."
+PLAIN = "Enter an email such as jane@example.com."
+MEMBER_INPUT = "Enter an email (1–200 characters) and a name (1–60 characters)."
 
 
 @pytest.mark.parametrize(
@@ -510,7 +503,7 @@ def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, da
         '<form method="post" action="/access/users#add-member" class="panel addform" '
     )
     assert (
-        f'name="id" value="{data["id"]}" autofocus'
+        f'name="id" type="email" value="{data["id"]}" autofocus'
         ' aria-invalid="true" aria-describedby="vf_member_error"'
     ) in card
     assert f'name="name" value="{data["name"]}"' in card
@@ -521,7 +514,11 @@ def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, da
 def test_add_member_inputs_check_the_id_in_the_browser(shared_client):
     page = shared_client.get("/access/members", headers=ADMIN).text
     card = page.split('id="add-member"')[1].split("</form>")[0]
-    assert f'name="id" value="" maxlength="200" pattern="[^\\s\\/\\\\]+" title="{PLAIN}"' in card
+    assert (
+        f'name="id" type="email" value="" maxlength="200" pattern="[^\\s\\/\\\\]+@[^\\s\\/\\\\]+"'
+        f' title="{PLAIN}"'
+    ) in card
+    assert "<th>Email</th>" in page and 'data-label="Email"' in page
     assert 'name="name" value="" maxlength="60"' in card
     assert '<option value="member" selected>' in card
     assert 'class="error"' not in card and "autofocus" not in page

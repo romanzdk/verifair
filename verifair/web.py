@@ -128,9 +128,8 @@ NoNul = AfterValidator(db.no_nul)
 Body = Annotated[str, Form(max_length=20000), NoNul]
 LAST_ADMIN = "There must be at least one active admin."
 MEMBER_EXISTS = "That member already exists."
-MEMBER_INPUT = "Enter an id (1–200 characters) and a name (1–60 characters)."
-MEMBER_PLAIN = "Use a plain id such as jane@example.com."
-MEMBER_AGENT = "The id agent is reserved for agents."
+MEMBER_INPUT = "Enter an email (1–200 characters) and a name (1–60 characters)."
+MEMBER_EMAIL = "Enter an email such as jane@example.com."
 NOT_MEMBER = "You are not a member of this workspace yet. Ask an admin to add {id}."
 DEACTIVATED = "Your access to this workspace was turned off. Ask an admin to reactivate {id}."
 LABEL_INPUT = "Enter a label (1–60 characters)."
@@ -1516,10 +1515,8 @@ def add_member(
     clean_id, clean_name = id.strip().lower(), name.strip()
     if not (_fits(clean_id, 200) and _fits(clean_name, 60)):
         return refuse(MEMBER_INPUT, 422)
-    if clean_id == "agent":
-        return refuse(MEMBER_AGENT, 422)
-    if not plain_id(clean_id):
-        return refuse(MEMBER_PLAIN, 422)
+    if not email_id(clean_id):
+        return refuse(MEMBER_EMAIL, 422)
     try:
         db.add_user(conn, id=clean_id, name=clean_name, role=role)
     except ValueError:

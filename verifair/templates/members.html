@@ -13,18 +13,18 @@
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/access/users#add-member" class="panel addform" id="add-member">
     {% if member_error %}<p class="error" id="vf_member_error" role="alert">{{ member_error }}</p>{% endif %}
-    <label>Email<input name="id" value="{{ member_form.id }}"{% if member_error %} autofocus aria-invalid="true" aria-describedby="vf_member_error"{% endif %} maxlength="200" pattern="[^\s\/\\]+" title="Use a plain id such as jane@example.com." required placeholder="jane@example.com" class="inp"></label>
+    <label>Email<input name="id" type="email" value="{{ member_form.id }}"{% if member_error %} autofocus aria-invalid="true" aria-describedby="vf_member_error"{% endif %} maxlength="200" pattern="[^\s\/\\]+@[^\s\/\\]+" title="Enter an email such as jane@example.com." required placeholder="jane@example.com" class="inp"></label>
     <label>Name<input name="name" value="{{ member_form.name }}" maxlength="60" required placeholder="Jane" class="inp"></label>
     <label>Role<select name="role" class="sel">{% for r in roles %}<option value="{{ r }}"{% if r == member_form.role %} selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}</select></label>
     <button class="btn p">{{ icon("plus", "ic14") }}Add member</button>
   </form>
   <div class="panel"><table class="t">
-    <thead><tr><th>Id</th><th>Name</th><th>Role</th><th>Status</th><th class="r"><span class="sr-only">Actions</span></th></tr></thead>
+    <thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Status</th><th class="r"><span class="sr-only">Actions</span></th></tr></thead>
     <tbody>
       {% for u in users %}{% set action = "/access/users/" ~ u.id|segment %}
       <tr>
         {% set roles_select %}<select{% if u.id != me and u.active %} name="role"{% endif %} class="sel" aria-label="Role for {{ u.id }}"{% if u.id == me or not u.active %} disabled{% endif %}>{% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}</select>{% endset %}
-        <td data-label="Id"><code>{{ u.id }}</code></td>
+        <td data-label="Email"><code>{{ u.id }}</code></td>
         <td data-label="Name"><span class="who"><span class="av sm {{ u.id|avatar }}" aria-hidden="true">{{ u.name[:1]|upper }}</span>{{ u.name }}</span></td>
         <td data-label="Role">{% if u.id == me or not u.active %}{{ roles_select }}{% else %}<form method="post" action="{{ action }}" class="role-form">
           {{ roles_select }}
