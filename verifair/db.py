@@ -184,13 +184,24 @@ def connect(url: str) -> Connection:
 
 
 def open_pool(url: str, max_size: int) -> ConnectionPool:
+    # one dead connection usually means the server restarted and every idle one is dead.
+    # Dropping them all at once spares getconn() trying each with backoff (0, 1, 2, 4 s).
+    # The pool calls this outside its lock, and check() tests with the static
+    # check_connection, so this neither deadlocks nor recurses.
+    def check(conn: Connection) -> None:
+        try:
+            ConnectionPool.check_connection(conn)
+        except Exception:
+            pool.check()
+            raise
+
     pool = ConnectionPool(
         url,
         min_size=1,
         max_size=max_size,
         timeout=10,
         kwargs=CONNECT_KWARGS,
-        check=ConnectionPool.check_connection,
+        check=check,
         open=False,
     )
     pool.open(wait=True, timeout=10)

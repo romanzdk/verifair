@@ -3,11 +3,13 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
+from dataclasses import replace
 
 import anyio
 import anyio.to_thread
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 from psycopg.pq import TransactionStatus
 from psycopg_pool import PoolTimeout
 
@@ -359,3 +361,20 @@ def test_a_request_after_the_database_dropped_the_pooled_connection_succeeds(cli
     admin_conn.execute("SELECT pg_terminate_backend(%s, 2000)", (pid,))
     response = client.get("/api/reports/r1", headers={"Authorization": "Bearer t"})
     assert response.status_code == 200
+
+
+# after a database restart every idle connection is dead; trying them one by one
+# with the pool's backoff (0, 1, 2, 4 s) made the first request hang
+def test_first_request_after_all_pooled_connections_died_is_fast(settings, make_app, admin_conn):
+    client = TestClient(make_app(replace(settings, db_pool_size=3)))
+    pool = client.app.state.pool
+    assert _report(client).status_code == 201
+    held = [pool.getconn() for _ in range(3)]
+    pids = [c.info.backend_pid for c in held]
+    for c in held:
+        pool.putconn(c)
+    admin_conn.execute("SELECT pg_terminate_backend(pid, 2000) FROM unnest(%s::int[]) pid", (pids,))
+    started = time.monotonic()
+    response = client.get("/api/reports/r1", headers={"Authorization": "Bearer t"})
+    assert response.status_code == 200
+    assert time.monotonic() - started < 0.5
