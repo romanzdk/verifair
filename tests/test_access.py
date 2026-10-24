@@ -1,3 +1,4 @@
+import asyncio
 import re
 from contextlib import closing
 from pathlib import Path
@@ -305,7 +306,7 @@ def test_current_user_refuses_a_missing_member_in_shared_mode(shared_settings):
         cookies={"vf_id": "mallory0", "vf_name": "Mallory"},
     )
     with pytest.raises(HTTPException) as denied:
-        web.current_user(request)
+        asyncio.run(web.current_user(request))
     assert denied.value.status_code == 401
 
 

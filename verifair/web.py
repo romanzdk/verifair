@@ -134,7 +134,7 @@ def _shared(request: Request) -> bool:
     return request.app.state.settings.identity_header is not None
 
 
-def current_user(request: Request) -> tuple[str, str | None]:
+async def current_user(request: Request) -> tuple[str, str | None]:
     member = request.state.member
     request.state.user_from_header = _shared(request)
     if request.state.user_from_header:
@@ -887,7 +887,7 @@ def _denied(request: Request, message: str, back: str | None = "/access/tokens",
     return templates.TemplateResponse(request, "denied.html", ctx, status_code=403)
 
 
-def access_member(request: Request) -> db.Row:
+async def access_member(request: Request) -> db.Row:
     if not _shared(request):
         raise HTTPException(404, "not found")
     return request.state.member
