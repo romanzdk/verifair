@@ -281,3 +281,105 @@ def test_html_responses_carry_csp(client):
     for path in ["/r/t", "/healthz", "/static/app.js", "/api/reports/t"]:
         r = client.get(path, headers=H)
         assert r.headers["x-content-type-options"] == "nosniff", path
+
+
+def _seed_local_mode_ids(settings, make_app):
+    # local mode stores ids as the agent or browser sent them
+    local = TestClient(make_app(settings), headers={"Authorization": "Bearer t"})
+    pushed = local.post(
+        "/api/reports",
+        json={
+            "id": "old",
+            "project": "p",
+            "title": "Old change",
+            "risk": "low",
+            "body": "## A\nx",
+            "author_id": "Jane@Example.com",
+            "reviewers": ["Bob@Example.com", "CAROL@example.com", "carol@example.com"],
+        },
+    )
+    assert pushed.status_code == 201
+    local.app.state.pool.close()
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(conn, project="p", title="Legacy", risk="low", body="b", id="legacy")
+        db.push_report(conn, project="p", title="Unowned", risk="low", body="b", id="unowned")
+        for id in ("old", "legacy"):
+            db.sign_version(
+                conn, report_id=id, version=1, signer_id="Jane@Example.com", signer_name="J"
+            )
+        conn.execute("UPDATE reports SET author_id=NULL WHERE id='legacy'")
+        db.add_verdict(
+            conn,
+            report_id="old",
+            version=1,
+            reviewer_id="JANE@example.com",
+            reviewer_name="Jane",
+            verdict="approve",
+        )
+        for author in ("Bob@Example.com", "agent", "Agent"):
+            cid = db.add_comment(
+                conn,
+                report_id="old",
+                version=1,
+                author_id=author,
+                author_name=author,
+                body="Why?",
+                section="A",
+                blocking=False,
+            )["id"]
+            db.resolve_thread(conn, "old", cid, by=author)
+
+
+def _stored_ids(url):
+    queries = {
+        "reports": "SELECT id, author_id FROM reports ORDER BY id",
+        "signatures": "SELECT report_id, signer_id FROM signatures ORDER BY report_id",
+        "verdicts": "SELECT reviewer_id FROM verdicts",
+        "comments": "SELECT author_id, resolved_by FROM comments ORDER BY id",
+        "requests": "SELECT report_id, reviewer_id FROM review_requests ORDER BY reviewer_id",
+    }
+    with closing(psycopg.connect(url)) as conn:
+        return {name: conn.execute(sql).fetchall() for name, sql in queries.items()}
+
+
+def test_shared_mode_startup_lower_cases_local_mode_ids_once(
+    settings, shared_settings, make_app, caplog
+):
+    shared_settings = replace(shared_settings, database_url=settings.database_url)
+    _seed_local_mode_ids(settings, make_app)
+    caplog.set_level("INFO", logger="verifair")
+    client = TestClient(make_app(shared_settings), headers={"Sec-Fetch-Site": "same-origin"})
+    assert _stored_ids(settings.database_url) == {
+        "reports": [("legacy", None), ("old", "jane@example.com"), ("unowned", None)],
+        "signatures": [("legacy", "jane@example.com"), ("old", "jane@example.com")],
+        "verdicts": [("jane@example.com",)],
+        "comments": [
+            ("bob@example.com", "bob@example.com"),
+            ("agent", "agent"),
+            ("Agent", "Agent"),
+        ],
+        "requests": [("old", "bob@example.com"), ("old", "carol@example.com")],
+    }
+    assert "lowercased ids rows=8" in [r.getMessage() for r in caplog.records]
+
+    with closing(db.connect(settings.database_url)) as conn:
+        for id in ("jane@example.com", "bob@example.com"):
+            db.add_user(conn, id=id, name=id.partition("@")[0], role="member")
+        token, _ = db.create_token(conn, owner_id="jane@example.com", label="agent")
+    jane = {"X-Forwarded-Email": "JANE@Example.COM"}
+    pushed = client.post(
+        "/api/reports",
+        json={"project": "p", "title": "Old change", "risk": "low", "body": "## A\ny", "id": "old"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert (pushed.status_code, pushed.json()["version"]) == (201, 2)
+    assert "Old change" in client.get("/changes?scope=author", headers=jane).text
+    assert client.post("/r/old/sign", data={"version": 2}, headers=jane).status_code == 200
+    bob = client.get("/", headers={"X-Forwarded-Email": "bob@example.com"})
+    assert "Old change" in bob.text
+
+    before = _stored_ids(settings.database_url)
+    caplog.clear()
+    make_app(shared_settings)
+    assert _stored_ids(settings.database_url) == before
+    assert not [r for r in caplog.records if r.getMessage().startswith("lowercased")]

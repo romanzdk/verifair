@@ -77,6 +77,8 @@ def create_app(settings: Settings) -> FastAPI:
                 raise RuntimeError(
                     "VERIFAIR_BOOTSTRAP_ADMIN_ID is required to create the first admin"
                 )
+            if settings.identity_header and (changed := db.lowercase_human_ids(conn)):
+                log.info("lowercased ids rows=%d", changed)
     except psycopg.errors.LockNotAvailable as error:
         pool.close()
         raise RuntimeError(STARTUP_LOCKED) from error

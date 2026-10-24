@@ -657,6 +657,45 @@ def update_user(
     return get_user(conn, id), revoked
 
 
+HUMAN_ID_COLUMNS = (
+    ("reports", "author_id"),
+    ("signatures", "signer_id"),
+    ("verdicts", "reviewer_id"),
+    ("comments", "author_id"),
+    ("comments", "resolved_by"),
+    ("review_requests", "reviewer_id"),
+)
+
+
+def lowercase_human_ids(conn: Connection) -> int:
+    # local mode stores ids as sent, shared mode matches them to the lower-cased identity
+    # header. Python's lower() is how the header is read. An old human id such as "Agent"
+    # stays as it is so it does not turn into the agent.
+    changed = 0
+    with _write(conn):
+        for table, column in HUMAN_ID_COLUMNS:
+            for row in conn.execute(
+                f"SELECT DISTINCT {column} AS id FROM {table} WHERE {column} IS NOT NULL"
+            ).fetchall():
+                old = row["id"]
+                new = old.lower()
+                if new in (old, "agent"):
+                    continue
+                if table == "review_requests":
+                    conn.execute(
+                        "INSERT INTO review_requests (report_id, reviewer_id)"
+                        " SELECT report_id, %s FROM review_requests WHERE reviewer_id=%s"
+                        " ON CONFLICT DO NOTHING",
+                        (new, old),
+                    )
+                    sql = "DELETE FROM review_requests WHERE reviewer_id=%s"
+                    changed += conn.execute(sql, (old,)).rowcount
+                else:
+                    sql = f"UPDATE {table} SET {column}=%s WHERE {column}=%s"
+                    changed += conn.execute(sql, (new, old)).rowcount
+    return changed
+
+
 def bootstrap_admin(conn: Connection, admin_id: str) -> bool:
     admin_id, now = admin_id.lower(), _now()
     with _write(conn):
