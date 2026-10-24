@@ -270,7 +270,7 @@ This endpoint signals feedback; it does not provide a lossless event stream. Sto
 | 404 | `"report not found"`, `"parent not found"` or `"comment not found"` |
 | 409 | `"id belongs to another project"` |
 | 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"ambiguous quote"`, `"unknown section"`, `"missing sections"` or, in shared mode, `"inactive reviewers"` |
-| 503 | not JSON: the plain text `The database is not available. Try again in a moment.` with a `Retry-After: 5` header. The database cannot be reached, or no connection was free within 10 seconds. Web pages answer the same way |
+| 503 | not JSON: the plain text `The database is not available. Try again in a moment.` with a `Retry-After: 5` header. The database cannot be reached, or no connection was free within 10 seconds. Web pages answer the same way. If the connection drops while a write is being saved, the change may already be stored: read it back before sending it again |
 
 An unknown section also lists the valid headings: `{"detail": "unknown section", "sections": ["Intent", "Edge cases"]}`. Missing sections lists the required headings the body lacks, in the configured order. Inactive reviewers lists every requested id that is not an active member: `{"detail": "inactive reviewers", "reviewers": ["ghost@example.com"]}`.
 
