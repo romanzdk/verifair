@@ -1,6 +1,6 @@
-import sqlite3
 from dataclasses import dataclass
 
+from verifair.db import Row
 from verifair.render import Thread
 
 STATUS_LABELS = {
@@ -29,12 +29,12 @@ class Reviewer:
     summary: str = ""
 
 
-def _by_id(row: sqlite3.Row) -> int:
+def _by_id(row: Row) -> int:
     return row["id"]
 
 
-def latest_verdicts(verdicts: list[sqlite3.Row], version: int) -> dict[str, sqlite3.Row]:
-    latest: dict[str, sqlite3.Row] = {}
+def latest_verdicts(verdicts: list[Row], version: int) -> dict[str, Row]:
+    latest: dict[str, Row] = {}
     for row in sorted(verdicts, key=_by_id):
         if row["version"] == version:
             latest[row["reviewer_id"]] = row
@@ -42,7 +42,7 @@ def latest_verdicts(verdicts: list[sqlite3.Row], version: int) -> dict[str, sqli
 
 
 def compute_status(
-    verdicts: list[sqlite3.Row], current_version: int, signed: bool, signer_id: str | None = None
+    verdicts: list[Row], current_version: int, signed: bool, signer_id: str | None = None
 ) -> str:
     if not signed:
         return "unsigned"
@@ -58,9 +58,9 @@ def compute_status(
     return "awaiting_review"
 
 
-def reviewers(comments: list[sqlite3.Row], verdicts: list[sqlite3.Row]) -> list[Reviewer]:
+def reviewers(comments: list[Row], verdicts: list[Row]) -> list[Reviewer]:
     names: dict[str, str] = {}
-    latest: dict[str, sqlite3.Row] = {}
+    latest: dict[str, Row] = {}
     rows = [(r, r["author_id"], r["author_name"]) for r in comments]
     rows += [(r, r["reviewer_id"], r["reviewer_name"]) for r in verdicts]
     # ids are per table, so only the timestamp can order a comment against a verdict

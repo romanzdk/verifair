@@ -1,6 +1,6 @@
 import pytest
 
-from verifair.db import add_comment, add_verdict, connect, init_schema, push_report, resolve_thread
+from verifair.db import add_comment, add_verdict, push_report, resolve_thread
 from verifair.render import build_threads
 from verifair.rules import (
     can_approve,
@@ -14,12 +14,9 @@ from verifair.rules import (
 
 
 @pytest.fixture
-def conn():
-    c = connect(":memory:")
-    init_schema(c)
-    push_report(c, project="p", title="T", risk="low", body="x", id="r")
-    yield c
-    c.close()
+def conn(conn):
+    push_report(conn, project="p", title="T", risk="low", body="x", id="r")
+    return conn
 
 
 def _verdict(conn, reviewer_id, verdict, version=1, name=None):

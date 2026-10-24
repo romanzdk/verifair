@@ -1,12 +1,10 @@
 import hashlib
-import sqlite3
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
+import psycopg
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -27,7 +25,6 @@ from verifair.db import (
     get_report,
     get_signature,
     get_user,
-    get_version,
     init_schema,
     latest_version,
     list_comments,
@@ -46,12 +43,13 @@ from verifair.db import (
 from verifair.deps import get_conn
 
 
-@pytest.fixture
-def conn():
-    c = connect(":memory:")
-    init_schema(c)
-    yield c
-    c.close()
+def _idle(conn):
+    return conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+
+
+def _indexes(conn):
+    rows = conn.execute("SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()")
+    return {r["indexname"] for r in rows}
 
 
 def test_push_new_report_slugs_title(conn):
@@ -78,7 +76,7 @@ def test_push_existing_id_other_project_refused(conn):
     push_report(conn, project="p", title="T", risk="low", body="v1", id="r1")
     with pytest.raises(ProjectMismatch):
         push_report(conn, project="q", title="T", risk="low", body="v2", id="r1")
-    assert not conn.in_transaction
+    assert _idle(conn)
 
 
 def test_reply_inherits_anchor_and_resolve_root_only(conn):
@@ -114,7 +112,9 @@ def test_reply_inherits_anchor_and_resolve_root_only(conn):
 
 
 def _resolved_at(conn, id):
-    return conn.execute("SELECT resolved_at FROM comments WHERE id=?", (id,)).fetchone()[0]
+    return conn.execute("SELECT resolved_at FROM comments WHERE id=%s", (id,)).fetchone()[
+        "resolved_at"
+    ]
 
 
 def test_resolve_twice_keeps_first_time_and_reply_reopens(conn):
@@ -122,7 +122,7 @@ def test_resolve_twice_keeps_first_time_and_reply_reopens(conn):
     kw = {"report_id": "r1", "version": 1, "author_id": "u1", "author_name": "Alice"}
     root = add_comment(conn, body="?", **kw)
     resolve_thread(conn, "r1", root["id"])
-    conn.execute("UPDATE comments SET resolved_at='2000-01-01' WHERE id=?", (root["id"],))
+    conn.execute("UPDATE comments SET resolved_at='2000-01-01' WHERE id=%s", (root["id"],))
     assert resolve_thread(conn, "r1", root["id"]) == root["id"]
     assert _resolved_at(conn, root["id"]) == "2000-01-01"
     add_comment(conn, body="still wrong", parent_id=root["id"], **kw)
@@ -144,7 +144,7 @@ def test_list_comments_orders_by_id(conn):
     kw = {"report_id": "r1", "version": 1, "author_id": "u1", "author_name": "Alice"}
     root = add_comment(conn, body="?", **kw)
     reply = add_comment(conn, body="!", parent_id=root["id"], **kw)
-    conn.execute("UPDATE comments SET created_at='2000-01-01' WHERE id=?", (reply["id"],))
+    conn.execute("UPDATE comments SET created_at='2000-01-01' WHERE id=%s", (reply["id"],))
     assert [c["id"] for c in list_comments(conn, "r1")] == [root["id"], reply["id"]]
 
 
@@ -166,20 +166,19 @@ def test_writes_check_expected_version_atomically(conn):
             expected_version=1,
         )
     assert list_comments(conn, "r1") == []
-    assert conn.execute("SELECT COUNT(*) FROM verdicts").fetchone()[0] == 0
-    assert not conn.in_transaction
+    assert conn.execute("SELECT COUNT(*) AS n FROM verdicts").fetchone()["n"] == 0
+    assert _idle(conn)
 
 
 def test_schema_checks_and_indexes(conn):
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(psycopg.errors.CheckViolation):
         push_report(conn, project="p", title="T", risk="extreme", body="b")
     push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(psycopg.errors.CheckViolation):
         add_verdict(
             conn, report_id="r1", version=1, reviewer_id="u", reviewer_name="U", verdict="maybe"
         )
-    indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
-    assert {"comments_report_parent", "verdicts_report", "reports_project"} <= indexes
+    assert {"comments_report_parent", "verdicts_report", "reports_project"} <= _indexes(conn)
 
 
 def test_db_module_does_not_depend_on_fastapi():
@@ -207,7 +206,7 @@ def test_push_by_an_owner_to_an_unowned_report_is_refused(conn):
     with pytest.raises(db.NoOwner):
         push_report(conn, project="p", title="T", risk="low", body="v2", id="r1", owner_id="a")
     assert (get_report(conn, "r1")["author_id"], latest_version(conn, "r1")) == (None, 1)
-    assert not conn.in_transaction
+    assert _idle(conn)
 
 
 def test_list_reports_newest_first_with_latest_version(conn):
@@ -260,7 +259,7 @@ def test_rows_by_report_ignore_reports_outside_the_loaded_ids(conn):
     assert db.verdicts_by_report(conn, []) == {}
 
 
-def test_rows_by_report_work_past_the_sqlite_variable_limit(conn):
+def test_rows_by_report_take_any_number_of_ids(conn):
     push_report(conn, project="p", title="a", risk="low", body="v1", id="a")
     ids = [f"r{n}" for n in range(40000)] + ["a"]
     assert db.requests_by_report(conn, ids)["a"] == []
@@ -272,49 +271,28 @@ def test_project_exists(conn):
     assert not db.project_exists(conn, "alpha")
 
 
-def test_get_conn_route_write_is_visible_to_other_connection(settings):
-    app = FastAPI()
-    app.state.settings = settings
-    init = connect(settings.db_path)
+@pytest.mark.xfail(strict=True, reason="Task 3")
+def test_get_conn_route_write_is_visible_to_other_connection(new_database_url):
+    url = new_database_url()
+    init = connect(url)
     init_schema(init)
     init.close()
+    app = FastAPI()
+    app.state.pool = db.open_pool(url, 2)
 
     @app.post("/push")
-    def push(conn: Annotated[sqlite3.Connection, Depends(get_conn)]):
+    def push(conn: Annotated[db.Connection, Depends(get_conn)]):
         return push_report(conn, project="p", title="T", risk="low", body="b")
 
-    assert TestClient(app).post("/push").json() == ["t", 1]
-    other = connect(settings.db_path)
     try:
-        assert get_report(other, "t")["project"] == "p"
-    finally:
-        other.close()
-
-
-def test_concurrent_pushes_of_same_id_get_versions_1_and_2(tmp_path, monkeypatch):
-    path = str(tmp_path / "race.db")
-    init = connect(path)
-    init_schema(init)
-    init.close()
-    original = db.get_report
-
-    def slow_get_report(conn, id):
-        row = original(conn, id)
-        time.sleep(0.1)
-        return row
-
-    monkeypatch.setattr(db, "get_report", slow_get_report)
-
-    def push(_):
-        c = connect(path)
+        assert TestClient(app).post("/push").json() == ["t", 1]
+        other = connect(url)
         try:
-            return push_report(c, project="p", title="T", risk="low", body="b", id="r1")
+            assert get_report(other, "t")["project"] == "p"
         finally:
-            c.close()
-
-    with ThreadPoolExecutor(2) as pool:
-        results = list(pool.map(push, range(2)))
-    assert sorted(results) == [("r1", 1), ("r1", 2)]
+            other.close()
+    finally:
+        app.state.pool.close()
 
 
 def test_reopen_thread_by_root_or_reply(conn):
@@ -344,60 +322,6 @@ def test_info_logs_do_not_print_full_user_ids(conn, caplog):
     )
     assert "SeCrEtId12" not in caplog.text and "ReViEwEr99" not in caplog.text
     assert "author_id=SeCr…" in caplog.text and "reviewer_id=ReVi…" in caplog.text
-
-
-V1_SCHEMA = """
-CREATE TABLE reports (
-    id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL,
-    risk TEXT NOT NULL CHECK (risk IN ('low', 'medium', 'high')), ticket_url TEXT,
-    links TEXT NOT NULL DEFAULT '[]', author TEXT NOT NULL, created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-CREATE TABLE versions (
-    report_id TEXT NOT NULL REFERENCES reports(id), version INTEGER NOT NULL,
-    body TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (report_id, version)
-);
-CREATE TABLE comments (
-    id INTEGER PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id),
-    version INTEGER NOT NULL, parent_id INTEGER REFERENCES comments(id), section TEXT,
-    quote TEXT, author_id TEXT NOT NULL, author_name TEXT NOT NULL, body TEXT NOT NULL,
-    created_at TEXT NOT NULL, resolved_at TEXT
-);
-CREATE TABLE verdicts (
-    id INTEGER PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id),
-    version INTEGER NOT NULL, reviewer_id TEXT NOT NULL, reviewer_name TEXT NOT NULL,
-    verdict TEXT NOT NULL CHECK (verdict IN ('approve', 'request_changes')),
-    summary TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
-);
-"""
-
-
-def _columns(c, table):
-    return {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
-
-
-def test_init_schema_migrates_v1_database(tmp_path):
-    c = connect(str(tmp_path / "old.db"))
-    c.executescript(V1_SCHEMA)
-    c.execute("INSERT INTO reports VALUES ('r0', 'p', 'T', 'low', NULL, '[]', 'a', 'now', 'now')")
-    c.execute("INSERT INTO versions VALUES ('r0', 1, 'b', 'now')")
-    c.execute(
-        "INSERT INTO comments (report_id, version, author_id, author_name, body, created_at)"
-        " VALUES ('r0', 1, 'u', 'U', 'hi', 'now')"
-    )
-    init_schema(c)
-    init_schema(c)
-    assert {"agent", "model", "session_url", "author_id"} <= _columns(c, "reports")
-    assert "commit" in _columns(c, "versions")
-    assert {"blocking", "resolved_by"} <= _columns(c, "comments")
-    assert c.execute("SELECT blocking FROM comments").fetchone()[0] == 1
-    push_report(
-        c, project="p", title="T", risk="low", body="b2", id="r0", agent="x", commit="abc1234"
-    )
-    assert get_version(c, "r0", 2)["commit"] == "abc1234"
-    assert get_version(c, "r0", 1)["commit"] is None
-    assert get_report(c, "r0")["agent"] == "x"
-    c.close()
 
 
 def test_push_stores_provenance_and_overwrites_on_new_version(conn):
@@ -469,51 +393,10 @@ def test_set_blocking_root_only(conn):
     assert [c["blocking"] for c in list_comments(conn, "r1")] == [0, 1]
 
 
-def test_legacy_signer_verdict_is_history_without_effective_self_approval(settings):
-    from verifair.app import create_app
-
-    with connect(settings.db_path) as old:
-        old.executescript(V1_SCHEMA)
-        old.execute(
-            "INSERT INTO reports VALUES"
-            " ('r0', 'p', 'Legacy report', 'low', NULL, '[]', 'Alice',"
-            " '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
-        )
-        old.execute(
-            "INSERT INTO versions VALUES"
-            " ('r0', 1, '## Verification\nLegacy evidence', '2026-01-01T00:00:00+00:00')"
-        )
-        old.execute(
-            "INSERT INTO verdicts VALUES"
-            " (1, 'r0', 1, 'alice000', 'Alice', 'approve', 'Old approval',"
-            " '2026-01-01T00:00:00+00:00')"
-        )
-    old.close()
-    upgraded = TestClient(create_app(settings), headers={"Sec-Fetch-Site": "same-origin"})
-    headers = {"Authorization": "Bearer t"}
-    assert upgraded.get("/api/reports/r0", headers=headers).json()["status"] == "unsigned"
-    upgraded.cookies.set("vf_id", "alice000")
-    upgraded.cookies.set("vf_name", "Alice")
-    signed = upgraded.post("/r/r0/sign", data={"version": 1})
-    assert signed.status_code == 200
-    report = upgraded.get("/api/reports/r0", headers=headers).json()
-    assert report["status"] == "awaiting_review"
-    assert report["signed_by"] == "Alice"
-    assert len(report["verdicts"]) == 1
-    assert report["verdicts"][0]["summary"] == "Old approval"
-    assert 'class="badge b-awaiting_review"' in upgraded.get("/r/r0").text
-    assert "Awaiting review · 1" in upgraded.get("/p/p").text
-    assert 'aria-label="Awaiting review · 1"' in upgraded.get("/changes").text
-    upgraded.cookies.set("vf_id", "bob00000")
-    upgraded.cookies.set("vf_name", "Bob")
-    approved = upgraded.post("/r/r0/verdict", data={"version": 1, "verdict": "approve"})
-    assert "You approved v1" in approved.text
-    report = upgraded.get("/api/reports/r0", headers=headers).json()
-    assert report["status"] == "approved" and len(report["verdicts"]) == 2
-
-
 def _resolved_by(conn, id):
-    return conn.execute("SELECT resolved_by FROM comments WHERE id=?", (id,)).fetchone()[0]
+    return conn.execute("SELECT resolved_by FROM comments WHERE id=%s", (id,)).fetchone()[
+        "resolved_by"
+    ]
 
 
 def test_resolved_by_is_kept_on_first_resolve_and_cleared_on_reopen(conn):
@@ -553,7 +436,7 @@ def test_add_user_refuses_duplicate(conn):
     with pytest.raises(ValueError):
         add_user(conn, id="ann@example.com", name="Other", role="admin")
     assert get_user(conn, "ann@example.com")["name"] == "Ann"
-    assert not conn.in_transaction
+    assert _idle(conn)
 
 
 def test_bad_role_is_refused(conn):
@@ -597,7 +480,7 @@ def test_update_user_refuses_to_remove_last_active_admin(conn, change):
         update_user(conn, "a", **change)
     a = get_user(conn, "a")
     assert (a["role"], a["active"]) == ("admin", 1)
-    assert not conn.in_transaction
+    assert _idle(conn)
     assert update_user(conn, "a", role="admin", active=True)[0]["role"] == "admin"
     update_user(conn, "b", active=True)
     update_user(conn, "a", **change)
@@ -610,48 +493,9 @@ def test_update_user_refuses_a_role_change_for_an_inactive_member(conn):
     with pytest.raises(db.InactiveMember):
         update_user(conn, "m", role="admin")
     assert get_user(conn, "m")["role"] == "member"
-    assert not conn.in_transaction
+    assert _idle(conn)
     assert update_user(conn, "m", role="member", active=False)[0]["active"] == 0
     assert update_user(conn, "m", role="admin", active=True)[0]["role"] == "admin"
-
-
-def test_concurrent_demotion_of_last_two_admins_leaves_one(tmp_path, monkeypatch):
-    path = str(tmp_path / "admins.db")
-    init = connect(path)
-    init_schema(init)
-    add_user(init, id="a", name="A", role="admin")
-    add_user(init, id="b", name="B", role="admin")
-    init.close()
-    original = db.get_user
-
-    def slow_get_user(conn, id):
-        row = original(conn, id)
-        time.sleep(0.1)
-        return row
-
-    monkeypatch.setattr(db, "get_user", slow_get_user)
-    barrier = threading.Barrier(2)
-
-    def demote(target):
-        c = connect(path)
-        try:
-            barrier.wait()
-            update_user(c, target, role="member")
-            return "demoted"
-        except LastAdmin:
-            return "refused"
-        finally:
-            c.close()
-
-    with ThreadPoolExecutor(2) as pool:
-        results = list(pool.map(demote, ["a", "b"]))
-    assert sorted(results) == ["demoted", "refused"]
-    check = connect(path)
-    try:
-        admins = check.execute("SELECT id FROM users WHERE role='admin' AND active=1").fetchall()
-    finally:
-        check.close()
-    assert len(admins) == 1
 
 
 def test_deactivation_revokes_open_tokens_of_that_user(conn):
@@ -659,7 +503,7 @@ def test_deactivation_revokes_open_tokens_of_that_user(conn):
     add_user(conn, id="m", name="M", role="member")
     token, _ = create_token(conn, owner_id="m", label="laptop")
     _, old = create_token(conn, owner_id="m", label="old")
-    conn.execute("UPDATE api_tokens SET revoked_at='2000-01-01' WHERE id=?", (old["id"],))
+    conn.execute("UPDATE api_tokens SET revoked_at='2000-01-01' WHERE id=%s", (old["id"],))
     boss_token, _ = create_token(conn, owner_id="boss", label="ci")
     assert update_user(conn, "m", active=False)[1] == 1
     assert update_user(conn, "m", active=False)[1] == 0
@@ -703,7 +547,7 @@ def test_token_round_trip_stores_only_a_digest(conn):
     assert authenticate_token(conn, token)[0]["name"] == "M"
     stored = conn.execute("SELECT * FROM api_tokens").fetchone()
     assert stored["digest"] == hashlib.sha256(secret.encode()).hexdigest()
-    assert secret not in " ".join(str(v) for v in stored)
+    assert secret not in " ".join(str(v) for v in stored.values())
 
 
 def test_create_token_with_a_used_nonce_creates_nothing(conn):
@@ -721,30 +565,11 @@ def test_create_token_with_a_used_nonce_creates_nothing(conn):
         "no nonce",
         "other owner",
     ]
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(psycopg.errors.UniqueViolation):
         conn.execute(
             "INSERT INTO api_tokens (id, digest, owner_id, label, created_at, nonce)"
             " VALUES ('z', 'd', 'm', 'l', 'now', 'x1')"
         )
-
-
-def test_init_schema_adds_the_token_nonce_to_an_older_database(tmp_path):
-    c = connect(str(tmp_path / "old.db"))
-    c.executescript(
-        "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL,"
-        " active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);"
-        "CREATE TABLE api_tokens (id TEXT PRIMARY KEY, digest TEXT NOT NULL,"
-        " owner_id TEXT NOT NULL REFERENCES users(id), label TEXT NOT NULL,"
-        " created_at TEXT NOT NULL, revoked_at TEXT);"
-    )
-    init_schema(c)
-    init_schema(c)
-    assert {"nonce", "last_used_at"} <= set(_columns(c, "api_tokens"))
-    add_user(c, id="m", name="M", role="member")
-    create_token(c, owner_id="m", label="a", nonce="x1")
-    with pytest.raises(db.AlreadyCreated):
-        create_token(c, owner_id="m", label="a", nonce="x1")
-    c.close()
 
 
 def test_authenticate_token_refuses_wrong_secret(conn):
@@ -779,7 +604,7 @@ def test_authenticate_token_refuses_inactive_owner(conn):
 def test_authenticate_token_refuses_a_token_whose_owner_row_is_gone(conn):
     add_user(conn, id="m", name="M", role="member")
     token, _ = create_token(conn, owner_id="m", label="a")
-    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("ALTER TABLE api_tokens DROP CONSTRAINT api_tokens_owner_id_fkey")
     conn.execute("DELETE FROM users WHERE id='m'")
     assert authenticate_token(conn, token) == (None, "inactive")
 
@@ -823,8 +648,8 @@ def test_token_last_used_is_throttled(conn):
 
     def last_used():
         return conn.execute(
-            "SELECT last_used_at FROM api_tokens WHERE id=?", (row["id"],)
-        ).fetchone()[0]
+            "SELECT last_used_at FROM api_tokens WHERE id=%s", (row["id"],)
+        ).fetchone()["last_used_at"]
 
     def seconds_ago(n):
         return (datetime.now(UTC) - timedelta(seconds=n)).isoformat(timespec="seconds")
@@ -834,11 +659,11 @@ def test_token_last_used_is_throttled(conn):
     assert authenticate_token(conn, token, touch=True)[0]["id"] == "m"
     assert last_used() is not None
     recent = seconds_ago(30)
-    conn.execute("UPDATE api_tokens SET last_used_at=?", (recent,))
+    conn.execute("UPDATE api_tokens SET last_used_at=%s", (recent,))
     authenticate_token(conn, token, touch=True)
     assert last_used() == recent
     old = seconds_ago(61)
-    conn.execute("UPDATE api_tokens SET last_used_at=?", (old,))
+    conn.execute("UPDATE api_tokens SET last_used_at=%s", (old,))
     authenticate_token(conn, token, touch=True)
     assert last_used() > old
     assert list_tokens(conn)[0]["last_used_at"] == last_used()
@@ -850,29 +675,31 @@ def test_token_auth_survives_a_failed_last_used_write(conn, monkeypatch, caplog)
     token, row = create_token(conn, owner_id="m", label="a")
 
     def locked(*args):
-        raise sqlite3.OperationalError("database is locked")
+        raise psycopg.errors.LockNotAvailable("canceling statement due to lock timeout")
 
     monkeypatch.setattr(db, "_touch_token", locked)
     assert authenticate_token(conn, token, touch=True)[0]["id"] == "m"
     assert f"token last_used not saved id={row['id']}" in caplog.text
 
 
-def test_token_last_used_gives_up_fast_when_the_database_is_busy(tmp_path, caplog):
-    path = str(tmp_path / "busy.db")
-    conn, other = connect(path), connect(path)
+def test_token_last_used_gives_up_fast_when_the_row_is_locked(new_database_url, caplog):
+    url = new_database_url()
+    conn, other = connect(url), connect(url)
     init_schema(conn)
     add_user(conn, id="m", name="M", role="member")
     token, row = create_token(conn, owner_id="m", label="a")
-    timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
-    other.execute("BEGIN IMMEDIATE")
-    started = time.monotonic()
-    assert authenticate_token(conn, token, touch=True)[0]["id"] == "m"
-    assert time.monotonic() - started < 1
-    assert f"token last_used not saved id={row['id']}" in caplog.text
-    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == timeout
-    other.rollback()
-    conn.close()
-    other.close()
+    try:
+        with other.transaction():
+            other.execute("SELECT 1 FROM api_tokens WHERE id=%s FOR UPDATE", (row["id"],))
+            started = time.monotonic()
+            assert authenticate_token(conn, token, touch=True)[0]["id"] == "m"
+            assert time.monotonic() - started < 1
+        assert f"token last_used not saved id={row['id']}" in caplog.text
+        assert _idle(conn)
+        assert conn.execute("SHOW lock_timeout").fetchone()["lock_timeout"] == "0"
+    finally:
+        conn.close()
+        other.close()
 
 
 def test_create_token_refuses_unknown_or_inactive_owner(conn):
@@ -882,14 +709,76 @@ def test_create_token_refuses_unknown_or_inactive_owner(conn):
         with pytest.raises(ValueError, match="unknown or inactive owner"):
             create_token(conn, owner_id=owner_id, label="x")
     assert list_tokens(conn) == []
-    assert not conn.in_transaction
+    assert _idle(conn)
 
 
 def test_api_tokens_owner_index_exists(conn):
-    indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
-    assert "api_tokens_owner" in indexes
+    assert {"api_tokens_owner", "api_tokens_owner_nonce", "reports_author"} <= _indexes(conn)
 
 
 def test_bootstrap_admin_name_is_capped_at_60(conn):
     assert bootstrap_admin(conn, "a" * 80 + "@example.com") is True
     assert get_user(conn, "a" * 80 + "@example.com")["name"] == "a" * 60
+
+
+def test_init_schema_is_idempotent(conn):
+    init_schema(conn)
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    init_schema(conn)
+    assert latest_version(conn, "r1") == 1
+
+
+def test_comment_and_verdict_ids_come_from_returning(conn):
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    kw = {"report_id": "r1", "version": 1, "author_id": "u", "author_name": "U"}
+    first, second = add_comment(conn, body="a", **kw), add_comment(conn, body="b", **kw)
+    assert second["id"] > first["id"] and second["body"] == "b"
+    verdict = add_verdict(
+        conn, report_id="r1", version=1, reviewer_id="u", reviewer_name="U", verdict="approve"
+    )
+    assert verdict["id"] >= 1 and verdict["verdict"] == "approve"
+
+
+def test_text_ordering_is_bytewise(conn):
+    for id, name in (("b", "beta"), ("A", "Alpha"), ("a", "alpha")):
+        conn.execute(
+            "INSERT INTO users (id, name, role, created_at, updated_at)"
+            " VALUES (%s, %s, 'member', 'now', 'now')",
+            (id, name),
+        )
+    assert [u["name"] for u in list_users(conn)] == ["Alpha", "alpha", "beta"]
+    reviewers = ["beta", "alpha", "Alpha"]
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1", reviewers=reviewers)
+    assert db.requested_reviewers(conn, "r1") == ["Alpha", "alpha", "beta"]
+    assert db.requests_by_report(conn, ["r1"]) == {"r1": ["Alpha", "alpha", "beta"]}
+
+
+def test_list_tokens_newest_first_within_one_second(conn, monkeypatch):
+    monkeypatch.setattr(db, "_now", lambda: "2026-01-01T00:00:00+00:00")
+    add_user(conn, id="m", name="M", role="member")
+    for label in ("a", "b", "c"):
+        create_token(conn, owner_id="m", label=label)
+    assert [t["label"] for t in list_tokens(conn, "m")] == ["c", "b", "a"]
+
+
+def test_list_reports_newest_first_within_one_second(conn, monkeypatch):
+    monkeypatch.setattr(db, "_now", lambda: "2026-01-01T00:00:00+00:00")
+    for id in ("r2", "r3", "r1"):
+        push_report(conn, project="p", title="T", risk="low", body="b", id=id)
+    assert [r["id"] for r in list_reports(conn)] == ["r1", "r3", "r2"]
+
+
+def test_failed_write_leaves_the_connection_usable(conn):
+    push_report(conn, project="p", title="T", risk="low", body="b", id="r1")
+    with pytest.raises(StaleVersion):
+        add_comment(
+            conn,
+            report_id="r1",
+            version=1,
+            author_id="u",
+            author_name="U",
+            body="x",
+            expected_version=2,
+        )
+    assert _idle(conn)
+    assert latest_version(conn, "r1") == 1

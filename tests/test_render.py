@@ -1,6 +1,6 @@
 import pytest
 
-from verifair.db import add_comment, connect, init_schema, push_report
+from verifair.db import add_comment, push_report
 from verifair.render import (
     Section,
     _score,
@@ -14,12 +14,9 @@ from verifair.render import (
 
 
 @pytest.fixture
-def conn():
-    c = connect(":memory:")
-    init_schema(c)
-    push_report(c, project="p", title="T", risk="low", body="x", id="r")
-    yield c
-    c.close()
+def conn(conn):
+    push_report(conn, project="p", title="T", risk="low", body="x", id="r")
+    return conn
 
 
 def _section(heading: str, text: str) -> Section:
@@ -262,10 +259,11 @@ def test_threads_sort_by_id_not_created_at(conn):
     second = add_comment(conn, body="2", **kwargs)
     reply = add_comment(conn, body="re", parent_id=first["id"], **kwargs)
     conn.execute(
-        "UPDATE comments SET created_at = '2000-01-01T00:00:00+00:00' WHERE id = ?", (second["id"],)
+        "UPDATE comments SET created_at = '2000-01-01T00:00:00+00:00' WHERE id = %s",
+        (second["id"],),
     )
     conn.execute(
-        "UPDATE comments SET created_at = '1999-01-01T00:00:00+00:00' WHERE id = ?", (reply["id"],)
+        "UPDATE comments SET created_at = '1999-01-01T00:00:00+00:00' WHERE id = %s", (reply["id"],)
     )
     threads = build_threads(_comments(conn), [], 1)
     assert [t.root["id"] for t in threads] == [first["id"], second["id"]]

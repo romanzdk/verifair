@@ -1,10 +1,10 @@
 import re
-import sqlite3
 import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from os.path import commonprefix
+from typing import Any
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
@@ -25,8 +25,8 @@ class Section:
 
 @dataclass
 class Thread:
-    root: sqlite3.Row
-    replies: list[sqlite3.Row]
+    root: dict[str, Any]
+    replies: list[dict[str, Any]]
     section_slug: str | None
     found: bool
     stale: bool
@@ -168,12 +168,12 @@ def _locate(
 
 
 def build_threads(
-    comments: list[sqlite3.Row], sections: list[Section], current_version: int
+    comments: list[dict[str, Any]], sections: list[Section], current_version: int
 ) -> list[Thread]:
     by_heading: dict[str, list[Section]] = {}
     for s in sections:
         by_heading.setdefault(s.heading, []).append(s)
-    replies: dict[int, list[sqlite3.Row]] = {}
+    replies: dict[int, list[dict[str, Any]]] = {}
     for c in comments:
         if c["parent_id"] is not None:
             replies.setdefault(c["parent_id"], []).append(c)
