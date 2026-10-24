@@ -214,6 +214,20 @@ function showNavForNameError() {
   }
 }
 
+function closeNav() {
+  const nav = document.getElementById("vf_nav");
+  if (nav?.hidePopover && nav.matches(":popover-open")) nav.hidePopover();
+}
+
+const wide = window.matchMedia?.("(min-width: 1024px)");
+wide?.addEventListener("change", () => {
+  if (wide.matches && !document.querySelector(".app.drawer")) closeNav();
+});
+document.addEventListener("focusout", (event) => {
+  const to = event.relatedTarget;
+  if (to && event.target.closest("#vf_nav") && !to.closest("#vf_nav, [popovertarget=vf_nav]")) closeNav();
+});
+
 highlight();
 showNavForNameError();
 document.body.addEventListener("htmx:afterSwap", highlight);
