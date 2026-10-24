@@ -54,6 +54,39 @@ def test_bad_pool_size_is_a_clear_error(monkeypatch, value):
     assert str(error.value) == "VERIFAIR_DB_POOL_SIZE must be a whole number of 1 or more."
 
 
+SMTP_ERROR = (
+    "VERIFAIR_SMTP_URL must look like smtp://user:password@host:587"
+    " or smtps://user:password@host:465"
+)
+
+
+@pytest.mark.parametrize(
+    ("url", "sender", "message"),
+    [
+        ("smtp://mail:1025", "", "VERIFAIR_EMAIL_FROM is required when VERIFAIR_SMTP_URL is set."),
+        ("https://u:secret@mail", "v@x.com", SMTP_ERROR),
+        ("smtp://", "v@x.com", SMTP_ERROR),
+        ("smtp://u:secret@mail:port", "v@x.com", SMTP_ERROR),
+    ],
+)
+def test_bad_email_settings_are_a_clear_error(monkeypatch, url, sender, message):
+    monkeypatch.setenv("VERIFAIR_API_TOKEN", "t")
+    monkeypatch.setenv("VERIFAIR_SMTP_URL", url)
+    monkeypatch.setenv("VERIFAIR_EMAIL_FROM", sender)
+    with pytest.raises(RuntimeError) as error:
+        load_settings()
+    assert str(error.value) == message
+
+
+def test_email_settings_come_from_the_environment(monkeypatch):
+    monkeypatch.setenv("VERIFAIR_API_TOKEN", "t")
+    assert (load_settings().smtp_url, load_settings().email_from) == (None, None)
+    monkeypatch.setenv("VERIFAIR_SMTP_URL", "smtps://u:p@mail:465")
+    monkeypatch.setenv("VERIFAIR_EMAIL_FROM", " verifair@example.com ")
+    s = load_settings()
+    assert (s.smtp_url, s.email_from) == ("smtps://u:p@mail:465", "verifair@example.com")
+
+
 def _record_pools(monkeypatch):
     pools = []
     open_pool = db.open_pool

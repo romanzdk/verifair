@@ -1,5 +1,9 @@
 import logging
+import smtplib
+import ssl
 from collections.abc import Mapping
+from email.message import EmailMessage
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
@@ -51,3 +55,51 @@ def send(settings: Settings, text: str) -> None:
     except (httpx.HTTPError, httpx.InvalidURL) as exc:
         status = getattr(getattr(exc, "response", None), "status_code", "")
         log.warning("slack notification failed: %s %s", type(exc).__name__, status)
+
+
+JUDGE_THIS_MAX = 1500
+
+
+def review_email(report: Mapping, asker: str, judge: str, base_url: str) -> tuple[str, str]:
+    lines = [
+        f"{asker} asked you to review {report['title']}.",
+        f"Project: {report['project']}",
+        f"Risk: {report['risk']}",
+    ]
+    if judge:
+        trimmed = judge[:JUDGE_THIS_MAX] + ("…" if len(judge) > JUDGE_THIS_MAX else "")
+        lines += ["", "Judge this:", trimmed]
+    lines += ["", f"{base_url}/r/{quote(report['id'])}"]
+    subject = " ".join(f"Review requested: {report['title']}".split())
+    return subject, "\n".join(lines)
+
+
+def email(settings: Settings, recipients: list[str], subject: str, text: str) -> None:
+    if not settings.smtp_url or not recipients:
+        return
+    url = urlsplit(settings.smtp_url)
+    # smtplib does not check certificates unless it gets a default context
+    tls = ssl.create_default_context()
+    try:
+        if url.scheme == "smtps":
+            server = smtplib.SMTP_SSL(url.hostname, url.port or 0, timeout=10, context=tls)
+        else:
+            server = smtplib.SMTP(url.hostname, url.port or 0, timeout=10)
+        with server:
+            server.ehlo()
+            if url.scheme == "smtp" and server.has_extn("starttls"):
+                server.starttls(context=tls)
+            if url.username:
+                server.login(unquote(url.username), unquote(url.password or ""))
+            for to in recipients:
+                message = EmailMessage()
+                message["Subject"], message["From"], message["To"] = (
+                    subject,
+                    settings.email_from,
+                    to,
+                )
+                message.set_content(text)
+                server.send_message(message)
+    except Exception as exc:
+        code = f" {exc.smtp_code}" if isinstance(exc, smtplib.SMTPResponseException) else ""
+        log.warning("email failed: %s%s", type(exc).__name__, code)

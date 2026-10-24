@@ -853,10 +853,26 @@ def sign(
         settings = request.app.state.settings
         text = notify.ready_for_review_text(report, version, name, settings.base_url)
         background.add_task(notify.send, settings, text)
+        others = [p for p in db.requested_reviewers(conn, id) if p != user_id]
+        _email_reviewers(request, background, conn, report, others, name)
     ctx = report_context(conn, report, version, user_id, request.state.member, _shared(request))
     ctx |= {"oob": True, "verdict_oob": True}
     nav = _nav_oob(request, conn, user, ctx)
     return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html"], ctx, tail=nav)
+
+
+def _email_reviewers(request: Request, background, conn, report, recipients, asker: str):
+    settings = request.app.state.settings
+    if not (settings.smtp_url and _shared(request)):
+        return
+    active = {u["id"] for u in db.list_users(conn) if u["active"]}
+    recipients = [p for p in recipients if p in active and "@" in p]
+    if not recipients:
+        return
+    body = db.get_version(conn, report["id"], db.latest_version(conn, report["id"]))["body"]
+    judge = next((s.text for s in split_sections(body) if s.heading == "Judge this"), "")
+    subject, text = notify.review_email(report, asker, judge, settings.base_url)
+    background.add_task(notify.email, settings, recipients, subject, text)
 
 
 def _reviewers_response(request: Request, conn: db.Connection, report, user, error=None):
@@ -873,6 +889,7 @@ def request_review(
     conn: Conn,
     user: User,
     member: Member,
+    background: BackgroundTasks,
     reviewer_id: Annotated[str, Form(max_length=256), NoNul] = "",
 ):
     report = _require_report(conn, id)
@@ -885,6 +902,8 @@ def request_review(
         log.info(
             "access action=add_reviewer actor=%s target=%s report=%s", user[0], target["id"], id
         )
+        if target["id"] != user[0] and db.get_signature(conn, id, db.latest_version(conn, id)):
+            _email_reviewers(request, background, conn, report, [target["id"]], user[1])
     return _reviewers_response(request, conn, report, user)
 
 

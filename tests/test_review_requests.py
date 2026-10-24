@@ -1,7 +1,10 @@
 import re
+import smtplib
 from contextlib import closing
+from dataclasses import replace
 
 import pytest
+from fastapi.testclient import TestClient
 
 from verifair import db
 
@@ -117,3 +120,127 @@ def test_local_mode_has_no_picker_and_refuses_the_routes(client, settings):
     assert 'class="addrev"' not in client.get("/r/r").text
     assert client.post("/r/r/reviewers", data={"reviewer_id": "bob"}).status_code == 404
     assert client.post("/r/r/reviewers/bob/remove").status_code == 404
+
+
+class Outbox:
+    def __init__(self):
+        self.sent = []
+        self.fail = False
+
+    def __call__(self, host, port, timeout):
+        outbox = self
+
+        class Session:
+            def __enter__(self):
+                if outbox.fail:
+                    raise ConnectionRefusedError
+                return self
+
+            def __exit__(self, *exc):
+                pass
+
+            def ehlo(self):
+                pass
+
+            def has_extn(self, name):
+                return False
+
+            def send_message(self, message):
+                outbox.sent.append(message)
+
+        return Session()
+
+
+@pytest.fixture
+def outbox(monkeypatch):
+    box = Outbox()
+    monkeypatch.setattr(smtplib, "SMTP", box)
+    return box
+
+
+@pytest.fixture
+def mail(shared_settings, make_app, team, outbox):
+    settings = replace(shared_settings, smtp_url="smtp://mail:1025", email_from="vf@example.com")
+    app = make_app(settings)
+    return TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
+
+
+def sent(outbox):
+    return [(m["To"], m["Subject"]) for m in outbox.sent]
+
+
+def test_signing_emails_every_requested_reviewer_except_the_signer(mail, team, outbox):
+    db.add_user(team, id="gone@example.com", name="gone", role="member")
+    db.add_user(team, id="ops", name="ops", role="member")
+    for who in ("bob@example.com", "carol@example.com", "gone@example.com", "ops"):
+        add(mail, who)
+    db.add_review_request(team, "r", "alice@example.com")
+    db.update_user(team, "gone@example.com", active=False)
+    assert outbox.sent == []
+    assert mail.post("/r/r/sign", data={"version": 1}, headers=ALICE).status_code == 200
+    assert sent(outbox) == [
+        ("bob@example.com", "Review requested: T"),
+        ("carol@example.com", "Review requested: T"),
+    ]
+    text = outbox.sent[0].get_content()
+    assert text.startswith("alice asked you to review T.\nProject: p\nRisk: high\n")
+    assert "Judge this:\nIs a day the right unit?\n" in text
+    assert text.endswith("http://localhost:8000/r/r\n")
+    mail.post("/r/r/sign", data={"version": 1}, headers=ALICE)
+    assert len(outbox.sent) == 2
+
+
+def test_adding_a_reviewer_to_a_signed_version_emails_only_them(mail, team, outbox):
+    add(mail, "bob@example.com")
+    assert outbox.sent == []
+    mail.post("/r/r/sign", data={"version": 1}, headers=ALICE)
+    outbox.sent.clear()
+    add(mail, "carol@example.com")
+    add(mail, "carol@example.com")
+    add(mail, "bob@example.com", headers=BOB)
+    assert sent(outbox) == [("carol@example.com", "Review requested: T")]
+    assert outbox.sent[0].get_content().startswith("bob asked you to review T.")
+
+
+def test_a_push_makes_an_unsigned_version_so_it_sends_no_email(mail, team, outbox):
+    mail.post("/r/r/sign", data={"version": 1}, headers=ALICE)
+    token, _ = db.create_token(team, owner_id="alice@example.com", label="agent")
+    pushed = mail.post(
+        "/api/reports",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "id": "r",
+            "project": "p",
+            "title": "T",
+            "risk": "high",
+            "body": BODY,
+            "reviewers": ["carol@example.com"],
+        },
+    )
+    assert pushed.status_code == 201 and outbox.sent == []
+
+
+def test_smtp_failure_logs_one_warning_and_the_request_succeeds(mail, team, outbox, caplog):
+    add(mail, "bob@example.com")
+    outbox.fail = True
+    assert mail.post("/r/r/sign", data={"version": 1}, headers=ALICE).status_code == 200
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings == ["email failed: ConnectionRefusedError"]
+    assert db.get_signature(team, "r", 1) is not None
+
+
+def test_no_email_without_smtp(shared_client, team, outbox):
+    add(shared_client, "bob@example.com")
+    shared_client.post("/r/r/sign", data={"version": 1}, headers=ALICE)
+    assert outbox.sent == []
+
+
+def test_no_email_in_local_mode(settings, make_app, outbox):
+    app = make_app(replace(settings, smtp_url="smtp://mail:1025", email_from="vf@example.com"))
+    client = TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(conn, project="p", title="T", risk="low", body=BODY, id="r")
+        db.add_review_request(conn, "r", "bob@example.com")
+    client.cookies.set("vf_name", "Alice")
+    assert client.post("/r/r/sign", data={"version": 1}).status_code == 200
+    assert outbox.sent == []
