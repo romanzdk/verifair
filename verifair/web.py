@@ -121,6 +121,7 @@ NOT_MEMBER = "You are not a member of this workspace yet. Ask an admin to add {i
 DEACTIVATED = "Your access to this workspace was turned off. Ask an admin to reactivate {id}."
 LABEL_INPUT = "Enter a label (1–60 characters)."
 ADMIN_ONLY = "Only an admin can manage members."
+REVIEWER_REFUSED = "Pick an active member who does not own this report."
 OWNER_ONLY = "Only the token owner or an admin can revoke it."
 ALREADY_CREATED = (
     "This token was already created. Its secret was shown only once."
@@ -354,8 +355,12 @@ def report_context(
         t.root["id"]: t.root["resolved_by"] for t in threads if shared and t.root["resolved_by"]
     }
     signer_id = signature["signer_id"] if signature else None
-    requested = [p for p in db.requested_reviewers(conn, id) if p != signer_id]
-    names = {u["id"]: u["name"] for u in db.list_users(conn)} if resolved_by or requested else {}
+    all_requested = db.requested_reviewers(conn, id)
+    requested = [p for p in all_requested if p != signer_id]
+    users = db.list_users(conn) if shared or resolved_by or requested else []
+    names = {u["id"]: u["name"] for u in users}
+    judged = rules.latest_verdicts(verdicts, current)
+    can_request = shared and version == current
     return {
         "report": report,
         "url": f"/r/{url_quote(id)}",
@@ -382,7 +387,7 @@ def report_context(
         ),
         "versions": db.list_versions(conn, id)[::-1],
         "links": _links(report),
-        "my_verdict": rules.latest_verdicts(verdicts, current).get(user_id),
+        "my_verdict": judged.get(user_id),
         "verdict_block": UNSIGNED
         if signature is None
         else SELF_REVIEW
@@ -393,6 +398,15 @@ def report_context(
             t.root["id"] for t in threads if _can_moderate(shared, member, user_id, t.root, report)
         },
         "resolvers": {cid: names.get(by, by) for cid, by in resolved_by.items()},
+        "removable": {p for p in requested if p not in judged} if can_request else set(),
+        "request_options": [
+            u
+            for u in users
+            if can_request
+            and u["active"]
+            and u["id"] != report["author_id"]
+            and u["id"] not in all_requested
+        ],
     }
 
 
@@ -843,6 +857,47 @@ def sign(
     ctx |= {"oob": True, "verdict_oob": True}
     nav = _nav_oob(request, conn, user, ctx)
     return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html"], ctx, tail=nav)
+
+
+def _reviewers_response(request: Request, conn: db.Connection, report, user, error=None):
+    latest = db.latest_version(conn, report["id"])
+    ctx = report_context(conn, report, latest, user[0], request.state.member, True)
+    ctx["reviewer_error"] = error
+    return _partial(request, ["_sidebar.html"], ctx, tail=_nav_oob(request, conn, user, ctx))
+
+
+@router.post("/r/{id}/reviewers")
+def request_review(
+    id: str,
+    request: Request,
+    conn: Conn,
+    user: User,
+    member: Member,
+    reviewer_id: Annotated[str, Form(max_length=256), NoNul] = "",
+):
+    report = _require_report(conn, id)
+    target = db.get_user(conn, reviewer_id.strip().lower())
+    if target is None or not target["active"] or target["id"] == report["author_id"]:
+        if not request.headers.get("HX-Request"):
+            raise HTTPException(422, REVIEWER_REFUSED)
+        return _reviewers_response(request, conn, report, user, REVIEWER_REFUSED)
+    if db.add_review_request(conn, id, target["id"]):
+        log.info(
+            "access action=add_reviewer actor=%s target=%s report=%s", user[0], target["id"], id
+        )
+    return _reviewers_response(request, conn, report, user)
+
+
+@router.post("/r/{id}/reviewers/{reviewer_id:path}/remove")
+def remove_review(
+    id: str, reviewer_id: str, request: Request, conn: Conn, user: User, member: Member
+):
+    report = _require_report(conn, id)
+    if db.remove_review_request(conn, id, reviewer_id):
+        log.info(
+            "access action=remove_reviewer actor=%s target=%s report=%s", user[0], reviewer_id, id
+        )
+    return _reviewers_response(request, conn, report, user)
 
 
 @router.post("/me")

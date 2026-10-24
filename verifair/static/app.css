@@ -421,6 +421,9 @@ body.has-verdict .side { padding-bottom: 112px; }
 .rev { display: flex; align-items: center; gap: 8px; margin: 4px 0; white-space: nowrap; }
 .rev .rn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .rev .badge { flex: none; }
+.rev .btn { margin-left: auto; }
+.addrev { display: flex; gap: 6px; margin: 8px 0 0; }
+.addrev .sel { flex: 1; min-width: 0; height: 28px; }
 .rev-summary { margin: 2px 0 6px 32px; color: var(--text-muted); font-size: 12px; white-space: pre-wrap; }
 
 .main section { padding: 16px 0 8px; }

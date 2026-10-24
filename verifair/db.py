@@ -417,6 +417,27 @@ def requested_reviewers(conn: Connection, report_id: str) -> list[str]:
     ]
 
 
+def add_review_request(conn: Connection, report_id: str, reviewer_id: str) -> bool:
+    return (
+        conn.execute(
+            "INSERT INTO review_requests (report_id, reviewer_id) VALUES (%s, %s)"
+            " ON CONFLICT DO NOTHING",
+            (report_id, reviewer_id),
+        ).rowcount
+        > 0
+    )
+
+
+def remove_review_request(conn: Connection, report_id: str, reviewer_id: str) -> bool:
+    return (
+        conn.execute(
+            "DELETE FROM review_requests WHERE report_id=%s AND reviewer_id=%s",
+            (report_id, reviewer_id),
+        ).rowcount
+        > 0
+    )
+
+
 def add_comment(
     conn: Connection,
     *,
