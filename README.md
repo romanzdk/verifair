@@ -2,7 +2,9 @@
 
 verifair is a small web service where agents push markdown change-review reports and humans read them, comment by selecting text, and give a verdict. Agents already handle code review. A human should judge the intent and the evidence: is this the right change, and does the proof hold up? verifair gives them one page per change to do that.
 
-![verifair report page](docs/screenshot.png)
+![verifair Inbox](docs/screenshot.png)
+
+![verifair review page](docs/screenshot-review.png)
 
 ## How it works
 
@@ -28,18 +30,20 @@ This is local mode. For a team, use shared mode. See [Roles and access](#roles-a
 
 The sidebar has four views under **Your work**:
 
-- **Inbox** (the home page) shows what needs you, grouped by whose turn it is:
+- **Inbox** (`/`, the home page) shows what needs you, grouped by whose turn it is:
   - **Needs your review**: changes where your review was requested, the author has signed, and you have not given a verdict on this version yet. High risk comes first, then the ones waiting longest. Your own changes, and changes you signed, never show here, even if you are on their reviewer list.
   - **Needs your signature**: your unsigned changes. In local mode it also shows unsigned changes with no owner, because anyone can sign those.
   - **Returned to you**: your changes where a reviewer requested changes.
   - **Waiting on others**: your signed changes that wait for a review. This group starts closed.
 
   When a new version is pushed, the change goes back to the author to sign, and then back to the reviewers. When nothing needs you, the Inbox says so. With no projects yet, it shows how to connect your first agent.
-- **My reviews** lists every change where your review was requested, including finished reviews.
-- **My changes** lists every change you own, including unsigned drafts.
-- **All changes** lists everyone's changes. Everyone sees all projects and changes.
+- **My reviews** (`/changes?scope=reviewer`) lists every change where your review was requested, including finished reviews.
+- **My changes** (`/changes?scope=author`) lists every change you own, including unsigned drafts.
+- **All changes** (`/changes`) lists everyone's changes. Everyone sees all projects and changes.
 
-The lists and project pages have status tabs with counts.
+The lists and project pages (`/p/<project>`, under **Projects** in the sidebar) have status tabs with counts. A report is at `/r/<id>`.
+
+Below 1024px wide the sidebar becomes a menu that opens from the top bar. On the review page it is always a menu, so the report gets the full width.
 
 Your id is at the bottom of the sidebar, with a button to copy it. Give it to your agent. Set `author_id` to the owner's id and `reviewers` to the requested reviewers' ids when publishing. In shared mode the agent token sets the owner, so `author_id` can be left out. Display names do not decide ownership. Review requests help people find work. Anyone with access can still read and review a report, and the normal signing and approval rules apply.
 

@@ -243,6 +243,41 @@ def test_css_has_no_old_alias_tokens():
     assert "body.has-verdict" in css and ".app-main > .name-prompt { position: fixed;" in css
 
 
+def _media(css, query):
+    return "\n".join(part.split("\n}")[0] for part in css.split(f"@media ({query}) {{")[1:])
+
+
+def test_css_colours_are_tokens():
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    rest = re.sub(r":root\s*\{[^}]*\}", "", css)
+    assert not re.search(r"#[0-9a-fA-F]{3,8}\b", rest)
+    assert "rgb(" not in rest and "rgba(" not in rest
+
+
+def test_mobile_rules_exist():
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    tablet = _media(css, "max-width: 1023px")
+    assert ".app-nav:not(:popover-open)" in tablet and ".chg" in tablet
+    assert ".grp-h .hint { display: none; }" in tablet
+    phone = _media(css, "max-width: 640px")
+    assert "content: attr(data-label)" in phone and ".top-act .btn .lbl" in phone
+    assert "@media (prefers-reduced-motion: reduce)" in css
+
+
+def test_env_block_wraps_clear_of_the_copy_button():
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    pre = css.split("\n.pre {")[1].split("}")[0]
+    assert "border-right: 40px solid var(--code-bg)" in pre and "overflow-x: auto" in pre
+
+
+def test_review_rail_leaves_room_for_the_verdict_bar():
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    assert "calc(100vh - 48px - 65px)" not in css
+    assert "body.has-verdict { padding-bottom" not in css
+    assert "body.has-verdict .app-main { padding-bottom: 90px; }" in css
+    assert "body.has-verdict .side { padding-bottom: 112px; }" in css
+
+
 def test_comment_without_name_returns_prompt_and_stores_nothing(client):
     push(client)
     r = client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})

@@ -422,7 +422,6 @@ def test_access_table_cells_carry_their_labels(shared_client, conn):
     assert '<td data-label="Status"><span class="badge b-approved">Active</span></td>' in members
 
 
-@pytest.mark.xfail(strict=True, reason="the stacked table CSS lands in Task 7")
 def test_access_tables_stack_on_narrow_screens():
     css = (Path(web.__file__).parent / "static" / "app.css").read_text()
     mobile = css.split("@media (max-width: 640px) {")[1].split("\n}")[0]

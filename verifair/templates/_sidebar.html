@@ -13,7 +13,7 @@
   {% else %}
   <p class="dismiss">Nobody yet.</p>
   {% endfor %}
-  <h4 class="gap">Versions</h4>
+  <h4>Versions</h4>
   <ul>
     {% for v in versions %}<li{% if v.version == version %} class="on"{% endif %}><a href="{{ url }}{% if v.version != current_version %}/v/{{ v.version }}{% endif %}">v{{ v.version }} · {{ v.created_at|date }}{% if v.commit %} · <code>{{ v.commit[:7] }}</code>{% endif %}</a></li>{% endfor %}
   </ul>
