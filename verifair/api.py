@@ -29,7 +29,7 @@ from verifair.render import (
     section_headings,
     split_sections,
 )
-from verifair.rules import NO_OWNER, compute_status
+from verifair.rules import NO_OWNER, compute_status, latest_verdicts
 
 NOT_OWNER = "This report belongs to another member."
 SHARED_TOKEN = "The shared token is not accepted in shared mode. Use a member agent token."
@@ -191,7 +191,11 @@ def _comment_json(row: db.Row, root: db.Row | None = None) -> dict:
     }
 
 
-def _verdict_json(row: db.Row, current: int) -> dict:
+def _latest_ids(verdicts: list[db.Row], current: int) -> set[int]:
+    return {row["id"] for row in latest_verdicts(verdicts, current).values()}
+
+
+def _verdict_json(row: db.Row, latest_ids: set[int]) -> dict:
     return {
         "reviewer": row["reviewer_name"],
         "reviewer_id": row["reviewer_id"],
@@ -199,7 +203,7 @@ def _verdict_json(row: db.Row, current: int) -> dict:
         "version": row["version"],
         "summary": row["summary"],
         "created_at": row["created_at"],
-        "current": row["version"] == current,
+        "current": row["id"] in latest_ids,
     }
 
 
@@ -264,6 +268,7 @@ def get_report(id: str, conn: Conn):
     current = db.latest_version(conn, id)
     verdicts = db.list_verdicts(conn, id)
     signature = db.get_signature(conn, id, current)
+    latest_ids = _latest_ids(verdicts, current)
     return {
         "id": report["id"],
         "project": report["project"],
@@ -290,7 +295,7 @@ def get_report(id: str, conn: Conn):
             {"version": v["version"], "created_at": v["created_at"], "commit": v["commit"]}
             for v in db.list_versions(conn, id)
         ],
-        "verdicts": [_verdict_json(v, current) for v in verdicts],
+        "verdicts": [_verdict_json(v, latest_ids) for v in verdicts],
     }
 
 
@@ -319,6 +324,7 @@ def _poll_wait(
             return None, {
                 event: max((r["id"] for r in items), default=0) for event, items in rows.items()
             }
+        latest_ids = _latest_ids(rows.get("verdict", []), current)
         events = []
         for event, items in rows.items():
             for row in items:
@@ -332,7 +338,7 @@ def _poll_wait(
                         continue
                 elif row["id"] <= after[event]:
                     continue
-                value = _verdict_json(row, current) if event == "verdict" else _comment_json(row)
+                value = _verdict_json(row, latest_ids) if event == "verdict" else _comment_json(row)
                 events.append(
                     (created, {"event": event, event: value, "next_since": row["created_at"]})
                 )

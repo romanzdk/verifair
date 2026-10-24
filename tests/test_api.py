@@ -221,6 +221,25 @@ def test_verdicts_carry_reviewer_id_and_current(client):
     }
 
 
+def test_only_latest_verdict_per_reviewer_is_current(client):
+    push(client)
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    client.post("/r/prorate/sign", data={"version": 1})
+    client.cookies.set("vf_id", "alice000")
+    client.cookies.set("vf_name", "Alice")
+    client.post(
+        "/r/prorate/verdict", data={"verdict": "request_changes", "version": 1, "summary": "no"}
+    )
+    client.post("/r/prorate/verdict", data={"verdict": "approve", "version": 1})
+    g = client.get("/api/reports/prorate", headers=H).json()
+    assert g["status"] == "approved"
+    assert [(v["verdict"], v["current"]) for v in g["verdicts"]] == [
+        ("request_changes", False),
+        ("approve", True),
+    ]
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
