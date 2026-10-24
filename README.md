@@ -54,7 +54,7 @@ Each test gets its own schema in that database and drops it at the end. Set `VER
 The sidebar has four views under **Your work**:
 
 - **Inbox** (`/`, the home page) shows what needs you, grouped by whose turn it is:
-  - **Needs your review**: changes where your review was requested, the author has signed, and you have not given a verdict on this version yet. High risk comes first, then the ones waiting longest. Your own changes, and changes you signed, never show here, even if you are on their reviewer list.
+  - **Needs your review**: changes where your review was requested and the status is awaiting review: the author has signed this version and no reviewer has given a verdict on it yet. As soon as any reviewer gives a verdict, the change leaves this group for every requested reviewer. When a reviewer requests changes, the turn passes to the author (it shows in their **Returned to you**), and it comes back to you after the author pushes and signs a new version. High risk comes first, then the ones waiting longest. Your own changes, and changes you signed, never show here, even if you are on their reviewer list.
   - **Needs your signature**: your unsigned changes. In local mode it also shows unsigned changes with no owner, because anyone can sign those.
   - **Returned to you**: your changes where a reviewer requested changes.
   - **Waiting on others**: your signed changes that wait for a review. This group starts closed.
