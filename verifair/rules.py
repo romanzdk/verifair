@@ -110,3 +110,34 @@ def can_moderate(
         or role == "admin"
         or (root_author_id == "agent" and user_id == report_author_id)
     )
+
+
+RISK_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
+def _newest_first(rows: list[dict]) -> list[dict]:
+    return sorted(rows, key=lambda row: row["report"]["updated_at"], reverse=True)
+
+
+def inbox(
+    rows: list[dict], *, user_id: str, mine: set[str], requested: set[str]
+) -> dict[str, list[dict]]:
+    def is_mine(row: dict, status: str) -> bool:
+        return row["report"]["id"] in mine and row["status"] == status
+
+    review = [
+        row
+        for row in rows
+        if row["report"]["id"] in requested
+        and row["report"]["id"] not in mine
+        and row["status"] == "awaiting_review"
+        and user_id not in row["reviewed_by"]
+    ]
+    return {
+        "review": sorted(
+            review, key=lambda row: (RISK_RANK[row["report"]["risk"]], row["signed_at"])
+        ),
+        "sign": _newest_first([row for row in rows if is_mine(row, "unsigned")]),
+        "returned": _newest_first([row for row in rows if is_mine(row, "changes_requested")]),
+        "waiting": _newest_first([row for row in rows if is_mine(row, "awaiting_review")]),
+    }

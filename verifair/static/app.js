@@ -230,10 +230,11 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
       const result = button.parentElement.querySelector("[data-copy-result]");
       try {
         await navigator.clipboard.writeText(field ? field.value ?? field.textContent : button.dataset.copyIdentity);
-        result.textContent = field ? "Token copied." : "Identity copied.";
+        result.textContent = field?.tagName === "PRE" ? "Copied." : field ? "Token copied." : "Identity copied.";
       } catch {
-        field?.select();
-        result.textContent = field ? "Select the token above to copy it." : "Select the ID above to copy it.";
+        field?.select?.();
+        result.textContent = field?.tagName === "PRE" ? "Select the text above to copy it."
+          : field ? "Select the token above to copy it." : "Select the ID above to copy it.";
       }
     });
   });

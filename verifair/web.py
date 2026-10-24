@@ -93,7 +93,6 @@ Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 YEAR = 365 * 24 * 3600
 USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
 PLAIN_ID = re.compile(r"[^/\\\x00-\x1f\x7f\s]+")
-STATUS_ORDER = ("awaiting_review", "changes_requested", "unsigned", "approved")
 SCOPES = {"all": "All changes", "author": "My changes", "reviewer": "My reviews"}
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 UNSIGNED = "The author has not signed this version yet."
@@ -360,9 +359,7 @@ def _moderation_refusal(request, conn, report, user_id, cid):
     return _thread_response(request, conn, report, user_id, cid, error=rules.MODERATION)
 
 
-def _landing_scope(scope: str, user_id: str) -> dict:
-    if scope not in SCOPES:
-        scope = "all"
+def _scope_empty(scope: str) -> dict:
     titles = {
         "all": "No projects yet",
         "author": "No changes owned by you yet",
@@ -373,68 +370,35 @@ def _landing_scope(scope: str, user_id: str) -> dict:
         "author": "Changes linked to your identity will appear here.",
         "reviewer": "Changes appear here when someone requests your review.",
     }
-    return {
-        "scope": scope,
-        "scopes": SCOPES,
-        "identity_id": user_id,
-        "scope_empty_title": titles[scope],
-        "scope_empty_description": descriptions[scope],
-    }
+    return {"empty_title": titles[scope], "empty_description": descriptions[scope]}
 
 
 @router.get("/")
 def index(request: Request, conn: Conn, user: User, scope: str | None = None):
     if scope is not None:
         return RedirectResponse(f"/changes?scope={scope}" if scope in SCOPES else "/changes", 303)
-    scope_context = _landing_scope("all", user[0])
-    scope = scope_context["scope"]
-    projects = []
-    totals = Counter()
-    priority = {status: i for i, status in enumerate(STATUS_ORDER)}
-    for project in db.list_projects(conn):
-        reports = sorted(
-            db.list_reports(
-                conn, project, scope=scope, user_id=user[0], legacy_author=not _shared(request)
-            ),
-            key=lambda r: (r["updated_at"], r["id"]),
-            reverse=True,
+    ctx = {"active": "inbox", "first_run": not db.list_projects(conn)}
+    if not ctx["first_run"]:
+        legacy = not _shared(request)
+
+        def ids(scope: str) -> set[str]:
+            reports = db.list_reports(
+                conn, None, scope=scope, user_id=user[0], legacy_author=legacy
+            )
+            return {r["id"] for r in reports}
+
+        reports = db.list_reports(conn, None, user_id=user[0], legacy_author=legacy)
+        groups = rules.inbox(
+            _change_rows(conn, reports, user[0]),
+            user_id=user[0],
+            mine=ids("author"),
+            requested=ids("reviewer"),
         )
-        if not reports:
-            continue
-        rows = [
-            {"report": r, "status": _status(conn, r["id"], r["latest_version"])} for r in reports
-        ]
-        statuses = Counter(row["status"] for row in rows)
-        totals.update(statuses)
-        projects.append(
-            {
-                "name": project,
-                "counts": statuses,
-                "total": len(rows),
-                "preview": min(rows, key=lambda row: priority[row["status"]], default=None),
-                "updated_at": max((r["updated_at"] for r in reports), default=None),
-            }
-        )
-    projects.sort(
-        key=lambda p: (
-            not p["counts"]["awaiting_review"],
-            not (p["counts"]["unsigned"] or p["counts"]["changes_requested"]),
-            p["name"].casefold(),
-        )
-    )
-    return _page(
-        request,
-        conn,
-        user,
-        "index.html",
-        scope_context
-        | {
-            "projects": projects,
-            "totals": totals,
-            "total_changes": sum(totals.values()),
-            "tabs": STATUS_ORDER,
-        },
-    )
+        ctx |= {
+            "groups": groups,
+            "need_count": sum(len(groups[key]) for key in ("review", "sign", "returned")),
+        }
+    return _page(request, conn, user, "inbox.html", ctx)
 
 
 def _change_rows(conn: sqlite3.Connection, reports: list[sqlite3.Row], user_id: str) -> list[dict]:
@@ -546,13 +510,7 @@ def _list_page(
         "empty_action": "View all changes" if tab != "all" else None,
     }
     if not reports:
-        scope_context = _landing_scope(scope, user[0])
-        ctx.update(
-            empty_title=scope_context["scope_empty_title"],
-            empty_description=scope_context["scope_empty_description"],
-            empty_url="?scope=all&tab=all",
-            empty_action=None,
-        )
+        ctx.update(_scope_empty(scope), empty_url="?scope=all&tab=all", empty_action=None)
         if scope != "all":
             ctx.update(
                 empty_description=f"View everyone's changes{where}, or choose another scope.",

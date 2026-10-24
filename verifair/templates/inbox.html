@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_rows.html" import change_row %}
+{% block title %}Inbox · verifair{% endblock %}
+{% block crumbs %}<span class="cur">Inbox</span>{% endblock %}
+{% macro group(rows, svg, title, hint, waiting=False) %}
+{% if rows %}
+<section class="grp">
+  <h2 class="grp-h">{{ icon(svg) }}{{ title }}<span class="cnt">{{ rows|length }}</span><span class="hint">{{ hint }}</span></h2>
+  <div class="list">{% for row in rows %}{{ change_row(row, waiting=waiting) }}{% endfor %}</div>
+</section>
+{% endif %}
+{% endmacro %}
+{% block content %}
+<main class="app-page">
+{% if first_run %}
+  <div class="welcome">
+    <div class="hero">{{ icon("inbox") }}</div>
+    <h1>Welcome to verifair</h1>
+    <p>Your agents push change reports here. You read them, sign your own and review the rest.</p>
+    <ol class="steps panel">
+      {% if shared %}
+      <li class="step next"><span class="n">1</span><div><h3>Create an agent token</h3><p>One token per machine or CI job. You see the secret once.</p><a class="btn p" href="/access/tokens">{{ icon("key-round", "ic14") }}Create token</a></div></li>
+      {% else %}
+      <li class="step next"><span class="n">1</span><div><h3>Give your agent the server's <code>VERIFAIR_API_TOKEN</code></h3><p>It is the token this server was started with. Keep it out of shared files.</p></div></li>
+      {% endif %}
+      <li class="step"><span class="n">2</span><div><h3>Point your agent at this URL</h3><p>Set these in the agent's environment, then ask it to publish its change report.</p>
+        <div class="pre-wrap"><pre class="pre" id="vf_env">export VERIFAIR_URL={{ base_url }}
+export VERIFAIR_API_TOKEN={% if shared %}vf_…{% else %}&lt;your VERIFAIR_API_TOKEN&gt;{% endif %}</pre><button type="button" class="icon-btn" data-copy-target="vf_env" aria-label="Copy">{{ icon("copy", "ic14") }}</button><span data-copy-result role="status"></span></div></div></li>
+      <li class="step"><span class="n">3</span><div><h3>Your first report appears here</h3><p class="waiting">{{ icon("circle-dashed") }}Waiting for the first report…</p></div></li>
+    </ol>
+  </div>
+{% else %}
+  {% set waiting = groups.waiting|length %}
+  <div class="ph"><div><h1>Inbox</h1><div class="meta">{{ need_count }} need you · {{ waiting }} waiting on others</div></div></div>
+  {% if not need_count %}
+  <div class="blank caught-up">
+    <h2>You're all caught up</h2>
+    <p>Nothing needs your review, signature or changes right now.</p>
+    <a class="btn" href="/changes">All changes</a> <a class="btn" href="/changes?scope=author">My changes</a>
+  </div>
+  {% endif %}
+  {{ group(groups.review, "user-check", "Needs your review", "High risk first, then oldest", waiting=True) }}
+  {{ group(groups.sign, "pencil-line", "Needs your signature", "Sign before reviewers can approve") }}
+  {{ group(groups.returned, "circle-x", "Returned to you", "Changes requested") }}
+  {% if waiting %}
+  <details class="grp">
+    <summary class="grp-h">{{ icon("circle-dot") }}Waiting on others<span class="cnt">{{ waiting }}</span><span class="sp"></span><span class="show"><span class="when-closed">Show {{ waiting }}</span><span class="when-open">Hide</span>{{ icon("chevron-down", "ic14") }}</span></summary>
+    <div class="list">{% for row in groups.waiting %}{{ change_row(row) }}{% endfor %}</div>
+  </details>
+  {% endif %}
+{% endif %}
+</main>
+{% endblock %}

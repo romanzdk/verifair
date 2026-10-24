@@ -26,9 +26,22 @@ This is local mode. For a team, use shared mode. See [Roles and access](#roles-a
 
 ## Personal views
 
-Everyone sees all projects and changes by default. The landing pages also offer **My changes** (reports you own, including unsigned drafts) and **My reviews** (reports where your review was requested, including completed reviews). These scopes combine with project status filters. Project cards, previews and counts use the selected scope, and links between the landing pages preserve it.
+The sidebar has four views under **Your work**:
 
-Open **Your identity** on either landing page to copy the ID to give your agent. Set `author_id` to the owner's ID and `reviewers` to the requested reviewers' IDs when publishing. In shared mode the agent token sets the owner, so `author_id` can be left out. Display names do not determine ownership. Review requests help people find work; anyone with access can still read and review a report, and the existing signature and approval rules apply.
+- **Inbox** (the home page) shows what needs you, grouped by whose turn it is:
+  - **Needs your review**: changes where your review was requested, the author has signed, and you have not given a verdict on this version yet. High risk comes first, then the ones waiting longest. Your own changes never show here, even if you are on their reviewer list.
+  - **Needs your signature**: your unsigned changes.
+  - **Returned to you**: your changes where a reviewer requested changes.
+  - **Waiting on others**: your signed changes that wait for a review. This group starts closed.
+
+  When a new version is pushed, the change goes back to the author to sign, and then back to the reviewers. When nothing needs you, the Inbox says so. With no projects yet, it shows how to connect your first agent.
+- **My reviews** lists every change where your review was requested, including finished reviews.
+- **My changes** lists every change you own, including unsigned drafts.
+- **All changes** lists everyone's changes. Everyone sees all projects and changes.
+
+The lists and project pages have status tabs with counts.
+
+Your id is at the bottom of the sidebar, with a button to copy it. Give it to your agent. Set `author_id` to the owner's id and `reviewers` to the requested reviewers' ids when publishing. In shared mode the agent token sets the owner, so `author_id` can be left out. Display names do not decide ownership. Review requests help people find work. Anyone with access can still read and review a report, and the normal signing and approval rules apply.
 
 Local identities belong to a browser. With the auth proxy described under Deploying, the trusted identity header supplies the same ID across devices. Existing signed reports get their owner from their latest recorded signature when the database is upgraded. In local mode, signing a report without an owner records the signer as the owner, and **My changes** also lists unowned reports whose `author` equals your identity. In shared mode only `author_id` counts, and a report without an owner is frozen (see [Report ownership](#report-ownership)).
 

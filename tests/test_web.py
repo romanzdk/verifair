@@ -41,12 +41,13 @@ def api_threads(client, id="prorate"):
     return client.get(f"/api/reports/{id}/comments", headers=H).json()["threads"]
 
 
-def test_index_lists_projects_with_counts(client):
+def test_inbox_links_projects_and_changes_shows_counts(client):
     push(client)
     r = client.get("/")
-    assert r.status_code == 200
-    assert "billing-service" in r.text and "Awaiting review" in r.text
+    assert r.status_code == 200 and "<h1>Inbox</h1>" in r.text
     assert 'href="/p/billing-service"' in r.text
+    changes = client.get("/changes").text
+    assert "billing-service" in changes and 'aria-label="Unsigned · 1"' in changes
 
 
 def test_age_and_ago():
@@ -132,15 +133,43 @@ def test_unsigned_project_opens_with_its_changes_visible(client):
     assert 'href="?tab=all"' in filtered.text
 
 
-def test_project_cards_link_to_real_statuses_and_prioritize_reviewable_changes(client):
+def test_changes_tabs_link_to_real_statuses_and_inbox_shows_own_signed_work(client):
     push(client, title="Ready evidence")
     sign(client, "ready-evidence")
     push(client, title="Later unsigned report")
-    page = client.get("/")
-    assert 'href="/p/billing-service?tab=awaiting_review"' in page.text
-    assert 'href="/p/billing-service?tab=unsigned"' in page.text
-    assert 'href="/r/ready-evidence"' in page.text
-    assert 'href="/r/later-unsigned-report"' not in page.text
+    page = client.get("/changes").text
+    assert 'href="?tab=awaiting_review"' in page and 'href="?tab=unsigned"' in page
+    ready = client.get("/changes?tab=awaiting_review").text
+    assert 'href="/r/ready-evidence"' in ready
+    assert 'href="/r/later-unsigned-report"' not in ready
+    client.cookies.set("vf_id", "signer00")
+    waiting = client.get("/").text.split('<details class="grp"')[1]
+    assert 'href="/r/ready-evidence"' in waiting
+    assert 'href="/r/later-unsigned-report"' not in waiting
+
+
+def test_first_run_and_caught_up(client, shared_client, settings):
+    page = client.get("/").text
+    assert "Welcome to verifair" in page
+    assert "export VERIFAIR_URL=http://localhost:8000" in page
+    assert 'href="/access/tokens"' not in page
+    assert settings.api_token == "t"
+    assert "=t\n" not in page and ">t<" not in page
+    assert 'data-copy-target="vf_env"' in page and '<pre class="pre" id="vf_env">' in page
+    shared = shared_client.get("/").text
+    assert "Welcome to verifair" in shared and "Create an agent token" in shared
+    assert 'class="btn p" href="/access/tokens"' in shared
+
+    client.cookies.clear()
+    push(client)
+    sign(client)
+    client.cookies.set("vf_name", "Reviewer")
+    approved = client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"})
+    assert approved.status_code == 200
+    caught_up = client.get("/").text
+    assert "You're all caught up" in caught_up and "Welcome to verifair" not in caught_up
+    assert 'href="/changes"' in caught_up and 'href="/changes?scope=author"' in caught_up
+    assert "0 need you · 0 waiting on others" in caught_up
 
 
 def test_report_page_renders_sections_nav_links_and_sets_id_cookie(client):
@@ -987,13 +1016,13 @@ def test_header_shows_provenance_and_versions_show_commit(client):
     assert "Written by" not in client.get("/r/prorate").text
 
 
-def test_index_counts_unsigned(client):
+def test_changes_counts_unsigned(client):
     push(client)
     push(client, title="Other")
     sign(client)
-    page = client.get("/").text
-    assert page.count('aria-label="Unsigned: 1 change"') == 1
-    assert page.count('aria-label="Awaiting review: 1 change"') == 1
+    page = client.get("/changes").text
+    assert page.count('aria-label="Unsigned · 1"') == 1
+    assert page.count('aria-label="Awaiting review · 1"') == 1
 
 
 AUTHOR_COPY = "Only alice can sign this report."

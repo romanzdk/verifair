@@ -7,6 +7,7 @@ from verifair.rules import (
     can_moderate,
     can_request_changes,
     compute_status,
+    inbox,
     latest_verdicts,
     reviewers,
 )
@@ -212,3 +213,46 @@ def test_can_moderate_agent_thread_without_report_owner():
         root_author_id="agent",
         report_author_id=None,
     )
+
+
+def row(
+    id, status, risk="low", signed_at=None, updated_at="2026-10-01T00:00:00+00:00", reviewed_by=()
+):
+    return {
+        "report": {"id": id, "risk": risk, "updated_at": updated_at},
+        "status": status,
+        "signed_at": signed_at,
+        "reviewed_by": set(reviewed_by),
+    }
+
+
+def test_inbox_groups_and_order():
+    rows = [
+        row("low-new", "awaiting_review", signed_at="2026-10-03T00:00:00+00:00"),
+        row("high-new", "awaiting_review", "high", signed_at="2026-10-04T00:00:00+00:00"),
+        row("low-old", "awaiting_review", signed_at="2026-10-02T00:00:00+00:00"),
+        row("seen", "awaiting_review", signed_at="2026-10-01T00:00:00+00:00", reviewed_by=["me"]),
+        row("self", "awaiting_review", signed_at="2026-10-01T00:00:00+00:00"),
+        row("not-asked", "awaiting_review", signed_at="2026-10-01T00:00:00+00:00"),
+        row("returned", "changes_requested"),
+        row("draft-old", "unsigned", updated_at="2026-10-01T00:00:00+00:00"),
+        row("draft-new", "unsigned", updated_at="2026-10-05T00:00:00+00:00"),
+        row("approved", "approved"),
+    ]
+    mine = {"self", "returned", "draft-old", "draft-new", "approved"}
+    requested = {"low-new", "high-new", "low-old", "seen", "self"}
+    groups = inbox(rows, user_id="me", mine=mine, requested=requested)
+
+    def ids(key):
+        return [r["report"]["id"] for r in groups[key]]
+
+    assert ids("review") == ["high-new", "low-old", "low-new"]
+    assert ids("sign") == ["draft-new", "draft-old"]
+    assert ids("returned") == ["returned"]
+    assert ids("waiting") == ["self"]
+    assert inbox([], user_id="me", mine=set(), requested=set()) == {
+        "review": [],
+        "sign": [],
+        "returned": [],
+        "waiting": [],
+    }

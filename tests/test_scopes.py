@@ -261,3 +261,72 @@ def test_shared_my_changes_ignores_a_legacy_author_equal_to_the_user(team):
     conn.close()
     assert 'href="/r/legacy"' in team.get("/p/billing", headers=ALICE).text
     assert 'href="/r/legacy"' not in team.get("/changes?scope=author", headers=ALICE).text
+
+
+def sections(page):
+    body, _, waiting = main(page).partition('<details class="grp"')
+    found = {"Waiting on others": waiting} if waiting else {}
+    for part in body.split('<h2 class="grp-h"')[1:]:
+        found[part.split("</svg>", 1)[1].split("<", 1)[0]] = part
+    return found
+
+
+def inbox(client, who):
+    return sections(client.get("/", headers=who).text)
+
+
+def test_inbox_follows_whose_turn_it_is(team):
+    bob = "bob@example.com"
+    assert publish(team, "r1", by=bob, reviewers=["alice@example.com"]).status_code == 201
+    assert "Needs your review" not in inbox(team, ALICE)
+    assert 'href="/r/r1"' in inbox(team, BOB)["Needs your signature"]
+
+    assert team.post("/r/r1/sign", headers=BOB, data={"version": 1}).status_code == 200
+    review = inbox(team, ALICE)["Needs your review"]
+    assert 'href="/r/r1"' in review and "waiting" in review
+    waiting = inbox(team, BOB)["Waiting on others"]
+    assert 'href="/r/r1"' in waiting and "Waiting on others" in waiting
+
+    verdict = {"version": 1, "verdict": "request_changes", "summary": "Add a test."}
+    assert team.post("/r/r1/verdict", headers=ALICE, data=verdict).status_code == 200
+    assert 'href="/r/r1"' in inbox(team, BOB)["Returned to you"]
+    assert 'href="/r/r1"' not in main(team.get("/", headers=ALICE).text)
+
+    assert publish(team, "r1", by=bob).json()["version"] == 2
+    assert 'href="/r/r1"' in inbox(team, BOB)["Needs your signature"]
+    assert 'href="/r/r1"' not in main(team.get("/", headers=ALICE).text)
+    assert team.post("/r/r1/sign", headers=BOB, data={"version": 2}).status_code == 200
+    assert 'href="/r/r1"' in inbox(team, ALICE)["Needs your review"]
+
+
+def test_inbox_orders_high_risk_then_oldest(team):
+    bob = "bob@example.com"
+    signed = {
+        "low-old": ("low", "2026-10-01T00:00:00+00:00"),
+        "high-new": ("high", "2026-10-03T00:00:00+00:00"),
+        "low-new": ("low", "2026-10-02T00:00:00+00:00"),
+    }
+    for id, (risk, _) in signed.items():
+        assert (
+            publish(team, id, by=bob, risk=risk, reviewers=["alice@example.com"]).status_code == 201
+        )
+        assert team.post(f"/r/{id}/sign", headers=BOB, data={"version": 1}).status_code == 200
+    conn = db.connect(team.app.state.settings.db_path)
+    with conn:
+        for id, (_, at) in signed.items():
+            conn.execute("UPDATE signatures SET created_at=? WHERE report_id=?", (at, id))
+    conn.close()
+    review = inbox(team, ALICE)["Needs your review"]
+    order = [review.index(f'href="/r/{id}"') for id in ("high-new", "low-old", "low-new")]
+    assert order == sorted(order)
+
+
+def test_inbox_self_requested_author_is_not_asked_to_review(team):
+    alice = "alice@example.com"
+    assert publish(team, "self", by=alice, reviewers=[alice]).status_code == 201
+    assert team.post("/r/self/sign", headers=ALICE, data={"version": 1}).status_code == 200
+    page = team.get("/", headers=ALICE).text
+    groups = sections(page)
+    assert "Needs your review" not in groups
+    assert 'href="/r/self"' in groups["Waiting on others"]
+    assert "You're all caught up" in page
