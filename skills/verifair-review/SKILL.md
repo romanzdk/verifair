@@ -9,11 +9,11 @@ A verifair report is what a human reads and approves instead of the diff. You wr
 
 ## Setup
 
-`VERIFAIR_URL` (default `http://localhost:8000`) and `VERIFAIR_API_TOKEN` (your owner's agent token in shared mode, `vf_…`). Missing token → ask the user; never guess one. `$VERIFAIR_URL/docs` has the full API.
+`VERIFAIR_URL` (default `http://localhost:8000`) and `VERIFAIR_API_TOKEN` (your owner's agent token in shared mode, `vf_…`). Missing token → ask the user; never guess one. Everything you need is below; `$VERIFAIR_URL/docs` only opens for signed-in members in shared mode.
 
 ## The report
 
-Body = markdown with these H2 headings, in this order, spelled exactly:
+Body = markdown with these H2 headings, in this order, spelled exactly (the server only enforces some of them; reviewers expect all):
 
 | Section | What goes in it |
 |---|---|
@@ -53,7 +53,17 @@ EOF
 ```
 
 - Add `"ticket_url"` if there is a ticket. Local mode only: add `"author"` and `"author_id"` if the user told you their verifair id. Shared mode: leave them out; the token owner is the author.
-- 422 `missing sections` or field errors → fix and push again. Proofread first: every push is a new version, marks earlier comments stale and needs a new human signature.
+- Responses:
+
+  | Answer | Do |
+  |---|---|
+  | 422 `missing sections`, field errors | Fix the body or field, push again. |
+  | 422 `inactive reviewers` | Drop or correct the listed ids; ask the user if unsure. |
+  | 403 `belongs to another member` / `has no owner` | Your `id` is taken: pick a new slug and push as a new report. |
+  | 403 `author_id must be the token owner` | Leave `author_id` out. |
+  | 401 | Token wrong, revoked or owner deactivated: stop and tell the user. |
+  | 503 | Wait `Retry-After` seconds, `GET` the report first (the push may be stored), push only if it isn't. |
+- Proofread first: every push is a new version, marks earlier comments stale and needs a new human signature.
 - Then tell the user the URL and that **they must sign it** (again after every new version) before anyone can give a verdict. You never sign, approve or request changes.
 
 ## Wait and answer
@@ -63,12 +73,12 @@ curl -sS --fail-with-body --max-time 60 -G -H "Authorization: Bearer $VERIFAIR_A
   --data-urlencode "timeout=55" --data-urlencode "since=$SINCE" "$VERIFAIR_URL/api/reports/$ID/wait"
 ```
 
-1. Loop `/wait` until an event or the time the user allowed (default 30 min), then report back what is still open. Pass `next_since` as the next `since`. After you post a top-level comment, set `since` to its `created_at`, or `/wait` returns your own comment.
+1. Loop `/wait` until an event or the time the user allowed (default 30 min), then report back what is still open. A 401 ends the loop: tell the user. Pass `next_since` as the next `since`. After you post a top-level comment, set `since` to its `created_at`, or `/wait` returns your own comment.
 2. On any event read everything: `GET /api/reports/$ID` (status, signature, verdicts) and `GET /api/reports/$ID/comments?open=true`. `/wait` does not report replies, signatures or same-second events.
 3. Answer every open human thread once with a reply (`POST …/comments` with `parent_id`): the direct answer first, then what you changed and in which version. If you disagree, say why once and leave it to the human.
 4. Feedback that needs a change: change the code or report, re-run the affected checks, push a new version with the same `id` and the new `commit`.
 5. Leave human threads open; the reviewer resolves them (open blocking threads block approval, so say "resolve it if this answers it"). Resolve only threads you started.
-6. `request_changes` cannot be replied to: address its summary like a blocking thread, then post one top-level comment with `"blocking": false` saying what changed in which version. `approved` → tell the user; you are done.
+6. `request_changes` cannot be replied to: address its summary like a blocking thread, then post one top-level comment with `"blocking": false` saying what changed in which version. `approved` → tell the user; you are done. A reviewer can change their verdict; the latest one per reviewer counts (`current: true`).
 
 ## Common mistakes
 
