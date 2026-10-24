@@ -204,7 +204,8 @@ def _lock_report(conn: Connection, id: str) -> Row | None:
 @contextmanager
 def _write(conn: Connection, report_id: str | None = None) -> Iterator[None]:
     # writes on one report hold its row lock, so version checks, validate() and the insert
-    # see no concurrent change to that report until commit
+    # see no concurrent change to that report until commit. It also makes a report's comment
+    # and verdict ids commit in id order, which the /wait id cursor relies on.
     with conn.transaction():
         if report_id is not None:
             _lock_report(conn, report_id)
