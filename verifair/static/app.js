@@ -52,17 +52,32 @@ function placePopover(rect) {
   popover.style.left = `${left + window.scrollX}px`;
 }
 
+// A triple-click on the last block of a section ends the selection at the start of whatever
+// follows it, often the next section. Pull the end back when that adds no visible text; a drag
+// into the next section adds its heading, so it still spans two sections.
+function sectionRange(selection) {
+  const range = selection.getRangeAt(0);
+  const section = sectionOf(range.startContainer);
+  if (!section) return null;
+  const content = section.querySelector(".content");
+  if (content.contains(range.endContainer)) return { section, range: range.cloneRange() };
+  const clamped = range.cloneRange();
+  clamped.setEnd(content, content.childNodes.length);
+  const bare = (text) => text.replace(/\s/g, "");
+  return bare(selection.toString()) === bare(clamped.toString()) ? { section, range: clamped } : null;
+}
+
 document.addEventListener("mouseup", (event) => {
   if (!popover || popover.contains(event.target)) return;
   const selection = window.getSelection();
   const text = selection.toString().trim();
-  const section = selection.rangeCount && sectionOf(selection.anchorNode);
-  if (!text || !section || section !== sectionOf(selection.focusNode)) {
+  const within = text && selection.rangeCount ? sectionRange(selection) : null;
+  if (!within) {
     popover.hidden = true;
     return;
   }
-  pending = { section, text, range: selection.getRangeAt(0).cloneRange() };
-  placePopover(selection.getRangeAt(0).getBoundingClientRect());
+  pending = { section: within.section, text, range: within.range };
+  placePopover(within.range.getBoundingClientRect());
 });
 
 popover?.querySelector("button").addEventListener("click", () => {
