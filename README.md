@@ -323,7 +323,7 @@ For example `Assisted-by: claude:opus`. Agents do not add `Signed-off-by`. Only 
 [skills/verifair-review/SKILL.md](skills/verifair-review/SKILL.md) teaches a coding agent (Claude Code, or any agent that reads skills) to write the report in this template, push it, and wait for and answer review feedback. It never signs or gives verdicts. Install it for Claude Code with:
 
 ```bash
-ln -s "$PWD/skills/verifair-review" ~/.claude/skills/verifair-review
+mkdir -p ~/.claude/skills && ln -s "$PWD/skills/verifair-review" ~/.claude/skills/verifair-review
 ```
 
 The agent needs `VERIFAIR_URL` and `VERIFAIR_API_TOKEN` (your own agent token in shared mode).

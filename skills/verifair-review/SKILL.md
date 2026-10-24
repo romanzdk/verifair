@@ -62,7 +62,7 @@ EOF
   | 403 `belongs to another member` / `has no owner` | Your `id` is taken: pick a new slug and push as a new report. |
   | 403 `author_id must be the token owner` | Leave `author_id` out. |
   | 401 | Token wrong, revoked or owner deactivated: stop and tell the user. |
-  | 503 | Wait `Retry-After` seconds, `GET` the report first (the push may be stored), push only if it isn't. |
+  | 503 | Wait `Retry-After` seconds, then `GET` the report: if the last version already has this push's `commit` (or the version count went up), it is stored; push only if not. |
 - Proofread first: every push is a new version, marks earlier comments stale and needs a new human signature.
 - Then tell the user the URL and that **they must sign it** (again after every new version) before anyone can give a verdict. You never sign, approve or request changes.
 
@@ -70,10 +70,10 @@ EOF
 
 ```bash
 curl -sS --fail-with-body --max-time 60 -G -H "Authorization: Bearer $VERIFAIR_API_TOKEN" \
-  --data-urlencode "timeout=55" --data-urlencode "since=$SINCE" "$VERIFAIR_URL/api/reports/$ID/wait"
+  --data-urlencode "timeout=55" ${SINCE:+--data-urlencode "since=$SINCE"} "$VERIFAIR_URL/api/reports/$ID/wait"
 ```
 
-1. Loop `/wait` until an event or the time the user allowed (default 30 min), then report back what is still open. A 401 ends the loop: tell the user. Pass `next_since` as the next `since`. After you post a top-level comment, set `since` to its `created_at`, or `/wait` returns your own comment.
+1. Loop `/wait` until an event or the time the user allowed (default 30 min), then report back what is still open. A 401 ends the loop: tell the user. First call: leave `since` out (it then waits for anything new). After that pass `next_since` as `since`. Skip events whose `comment.author_type` is `agent` (your own comments).
 2. On any event read everything: `GET /api/reports/$ID` (status, signature, verdicts) and `GET /api/reports/$ID/comments?open=true`. `/wait` does not report replies, signatures or same-second events.
 3. Answer every open human thread once with a reply (`POST …/comments` with `parent_id`): the direct answer first, then what you changed and in which version. If you disagree, say why once and leave it to the human.
 4. Feedback that needs a change: change the code or report, re-run the affected checks, push a new version with the same `id` and the new `commit`.
