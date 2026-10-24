@@ -206,7 +206,7 @@ def test_bootstrap_admin_id_is_stored_lower_case(shared_settings, make_app):
 
 @pytest.mark.parametrize("value", ["Agent", "AGENT"])
 def test_bootstrap_admin_id_agent_is_refused_in_any_case(shared_settings, value):
-    with pytest.raises(RuntimeError, match="plain id"):
+    with pytest.raises(RuntimeError, match="must be the email"):
         create_app(replace(shared_settings, bootstrap_admin_id=value))
 
 
@@ -246,13 +246,15 @@ def test_bootstrap_admin_id_is_stripped(monkeypatch, new_database_url, make_app)
 
 
 @pytest.mark.parametrize(
-    "value", ["jane doe@example.com", "a/b", "a\\b", ".", "..", "a\nb", "agent"]
+    "value",
+    ["jane doe@example.com", "a/b@x", "a\\b@x", ".", "..", "a\nb@x", "agent", "boss", "jän@x.cz"],
 )
-def test_bootstrap_admin_id_must_be_plain(shared_settings, value):
+def test_bootstrap_admin_id_must_be_an_email(shared_settings, value):
     with pytest.raises(RuntimeError) as error:
         create_app(replace(shared_settings, bootstrap_admin_id=value))
     assert str(error.value) == (
-        "VERIFAIR_BOOTSTRAP_ADMIN_ID must be a plain id such as jane@example.com"
+        "VERIFAIR_BOOTSTRAP_ADMIN_ID must be the email the admin signs in with,"
+        " such as jane@example.com"
     )
 
 

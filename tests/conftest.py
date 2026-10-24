@@ -62,7 +62,6 @@ class FakeProvider:
         self.claims: dict = {}
         self.challenges: dict[str, tuple[str, str]] = {}
         self.calls: list[httpx.Request] = []
-        self.token_status = 200
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(request)
@@ -86,7 +85,7 @@ class FakeProvider:
         } | self.claims
         claims = {k: v for k, v in claims.items() if v is not None}
         id_token = f"{_b64({'alg': 'RS256'})}.{_b64(claims)}.{_b64(b'signature')}"
-        return httpx.Response(self.token_status, json={"id_token": id_token, "access_token": "a"})
+        return httpx.Response(200, json={"id_token": id_token, "access_token": "a"})
 
     def authorize(self, client, next: str = "/") -> dict:
         r = client.get("/login", params={"next": next}, follow_redirects=False)

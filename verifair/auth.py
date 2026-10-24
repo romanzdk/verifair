@@ -12,8 +12,9 @@ import httpx
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import RedirectResponse
 
-from verifair import web
-from verifair.config import Settings, https_or_local
+from verifair import db, web
+from verifair.config import GOOGLE, Settings, https_or_local
+from verifair.deps import run_with_conn
 
 SESSION_COOKIE = "vf_session"
 FLOW_COOKIE = "vf_signin"
@@ -21,14 +22,32 @@ SESSION_AGE = 7 * 24 * 3600
 FLOW_AGE = 600
 SKEW = 120
 NEXT_LIMIT = 2000
-GOOGLE = "https://accounts.google.com"
-FAILED = "Sign-in failed. Try again, or ask an admin if it keeps failing."
+DISCOVERY_RETRY = 30
+FAILED = "Try again, or ask an admin if it keeps failing."
+UNREACHABLE = "We could not reach your sign-in provider. Try again in a moment."
+REFUSED = {
+    "email": "Your account has no verified email address that verifair can use."
+    " Trying again will not help, so ask an admin.",
+    "domain": "Your email address is not from an allowed domain."
+    " Trying again will not help, so ask an admin.",
+    "account": "This email is linked to a different account. Ask an admin to reset your sign-in.",
+}
 log = logging.getLogger("verifair")
 router = APIRouter()
 
 
 class SignInError(Exception):
     pass
+
+
+class Unreachable(SignInError):
+    pass
+
+
+def cookie_name(settings: Settings, name: str) -> str:
+    # __Host- makes browsers refuse the cookie unless it is Secure, for Path=/ and without a
+    # Domain, so a sibling subdomain or a plain-http page cannot plant or overwrite it
+    return f"__Host-{name}" if settings.base_url.startswith("https") else name
 
 
 def _b64(data: bytes) -> str:
@@ -66,11 +85,12 @@ def _instant(value) -> bool:
 
 
 def make_session(secret: str, member_id: str, now: float | None = None) -> str:
-    issued = int(time.time() if now is None else now)
+    # a fractional iat, so a session issued just after a reset in the same second still counts
+    issued = time.time() if now is None else now
     return sign(secret, "session", {"sub": member_id, "iat": issued, "exp": issued + SESSION_AGE})
 
 
-def read_session(secret: str, value: str, now: float | None = None) -> str | None:
+def read_session(secret: str, value: str, now: float | None = None) -> tuple[str, float] | None:
     now = time.time() if now is None else now
     data = unsign(secret, "session", value)
     if data is None:
@@ -78,7 +98,7 @@ def read_session(secret: str, value: str, now: float | None = None) -> str | Non
     sub, iat, exp = data.get("sub"), data.get("iat"), data.get("exp")
     if not (isinstance(sub, str) and sub and _instant(iat) and _instant(exp)):
         return None
-    return sub if iat <= now + SKEW and now < exp else None
+    return (sub, iat) if iat <= now + SKEW and now < exp else None
 
 
 def safe_next(value: str) -> str:
@@ -98,7 +118,13 @@ def _same_issuer(value, issuer: str) -> bool:
     return isinstance(value, str) and value.removesuffix("/") == issuer.removesuffix("/")
 
 
-def check_id_token(id_token: str, settings: Settings, nonce: str, now: float) -> str:
+def _token_issuer(value, issuer: str) -> bool:
+    # Google may put its issuer in ID tokens without the scheme
+    google = issuer.removesuffix("/") == GOOGLE and value == "accounts.google.com"
+    return google or _same_issuer(value, issuer)
+
+
+def check_id_token(id_token: str, settings: Settings, nonce: str, now: float) -> tuple[str, str]:
     parts = id_token.split(".")
     try:
         claims = json.loads(_unb64(parts[1])) if len(parts) == 3 else None
@@ -106,8 +132,11 @@ def check_id_token(id_token: str, settings: Settings, nonce: str, now: float) ->
         claims = None
     if not isinstance(claims, dict):
         raise SignInError("id-token")
-    if not _same_issuer(claims.get("iss"), settings.oidc_issuer):
+    if not _token_issuer(claims.get("iss"), settings.oidc_issuer):
         raise SignInError("iss")
+    sub = claims.get("sub")
+    if not (isinstance(sub, str) and sub):
+        raise SignInError("id-token", "no sub")
     client_id, aud, azp = settings.oidc_client_id, claims.get("aud"), claims.get("azp")
     audiences = [aud] if isinstance(aud, str) else aud if isinstance(aud, list) else []
     if client_id not in audiences or ((azp is not None or len(audiences) > 1) and azp != client_id):
@@ -122,10 +151,7 @@ def check_id_token(id_token: str, settings: Settings, nonce: str, now: float) ->
         raise SignInError("nonce")
     email = claims.get("email")
     if not (
-        isinstance(email, str)
-        and claims.get("email_verified") is True
-        and "@" in email
-        and web.plain_id(email)
+        isinstance(email, str) and claims.get("email_verified") is True and web.email_id(email)
     ):
         raise SignInError("email")
     member_id = email.lower()
@@ -138,7 +164,7 @@ def check_id_token(id_token: str, settings: Settings, nonce: str, now: float) ->
             hd_needed and not (isinstance(hd, str) and hd.lower() in domains)
         ):
             raise SignInError("domain")
-    return member_id
+    return member_id, sub
 
 
 def _client(app: FastAPI) -> httpx.AsyncClient:
@@ -147,25 +173,37 @@ def _client(app: FastAPI) -> httpx.AsyncClient:
 
 async def _discover(app: FastAPI) -> dict:
     if app.state.oidc_config is None:
-        issuer = app.state.settings.oidc_issuer
+        failure = app.state.oidc_failure
+        # a provider that is down would otherwise make every sign-in wait for the timeout
+        if failure is not None and time.monotonic() < failure[0]:
+            raise Unreachable("discovery", failure[1], "(cached)")
         try:
-            async with _client(app) as client:
-                response = await client.get(
-                    f"{issuer.removesuffix('/')}/.well-known/openid-configuration"
-                )
-            response.raise_for_status()
-            doc = response.json()
-        except (httpx.HTTPError, ValueError) as error:
-            raise SignInError("discovery", type(error).__name__) from error
-        endpoints = ("authorization_endpoint", "token_endpoint")
-        if not (
-            isinstance(doc, dict)
-            and _same_issuer(doc.get("issuer"), issuer)
-            and all(https_or_local(doc.get(key)) for key in endpoints)
-        ):
-            raise SignInError("discovery", "issuer or endpoints do not match")
-        app.state.oidc_config = doc
+            app.state.oidc_config = await _fetch_config(app)
+        except SignInError as error:
+            app.state.oidc_failure = (time.monotonic() + DISCOVERY_RETRY, error.args[1])
+            raise
     return app.state.oidc_config
+
+
+async def _fetch_config(app: FastAPI) -> dict:
+    issuer = app.state.settings.oidc_issuer
+    try:
+        async with _client(app) as client:
+            response = await client.get(
+                f"{issuer.removesuffix('/')}/.well-known/openid-configuration"
+            )
+        response.raise_for_status()
+        doc = response.json()
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError) as error:
+        raise Unreachable("discovery", type(error).__name__) from error
+    endpoints = ("authorization_endpoint", "token_endpoint")
+    if not (
+        isinstance(doc, dict)
+        and _same_issuer(doc.get("issuer"), issuer)
+        and all(https_or_local(doc.get(key)) for key in endpoints)
+    ):
+        raise Unreachable("discovery", "issuer or endpoints do not match")
+    return doc
 
 
 def _redirect_uri(settings: Settings) -> str:
@@ -196,17 +234,27 @@ async def _exchange(app: FastAPI, config: dict, code: str, verifier: str) -> str
                 auth=auth,
                 headers={"Accept": "application/json"},
             )
-        body = response.json() if response.status_code == 200 else None
-    except (httpx.HTTPError, ValueError) as error:
-        raise SignInError("token-endpoint", type(error).__name__) from error
-    if not (isinstance(body, dict) and isinstance(body.get("id_token"), str)):
-        raise SignInError("token-endpoint", f"status {response.status_code}")
+    except (httpx.HTTPError, httpx.InvalidURL) as error:
+        raise Unreachable("token-endpoint", type(error).__name__) from error
+    status = response.status_code
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    if status >= 500 or (status == 200 and body is None):
+        raise Unreachable(
+            "token-endpoint", f"status {status}" + (" not JSON" if body is None else "")
+        )
+    if status != 200 or not (isinstance(body, dict) and isinstance(body.get("id_token"), str)):
+        error = body.get("error") if isinstance(body, dict) else None
+        detail = f" error={str(error)[:100]!r}" if error is not None else ""
+        raise SignInError("token-endpoint", f"status {status}{detail}")
     return body["id_token"]
 
 
 def _set_cookie(request: Request, response, name: str, value: str, max_age: int):
     response.set_cookie(
-        name,
+        cookie_name(request.app.state.settings, name),
         value,
         max_age=max_age,
         path="/",
@@ -216,9 +264,19 @@ def _set_cookie(request: Request, response, name: str, value: str, max_age: int)
     )
 
 
-def _clear_cookie(request: Request, response, name: str):
-    secure = request.app.state.settings.base_url.startswith("https")
-    response.delete_cookie(name, path="/", httponly=True, samesite="lax", secure=secure)
+def clear_cookie(request: Request, response, name: str):
+    settings = request.app.state.settings
+    response.delete_cookie(
+        cookie_name(settings, name),
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.base_url.startswith("https"),
+    )
+
+
+def _cookie(request: Request, name: str) -> str:
+    return request.cookies.get(cookie_name(request.app.state.settings, name), "")
 
 
 def page(request: Request, title: str, message: str, status: int, **ctx):
@@ -226,9 +284,14 @@ def page(request: Request, title: str, message: str, status: int, **ctx):
     return web.templates.TemplateResponse(request, "denied.html", ctx, status_code=status)
 
 
-def _failed(request: Request, error: SignInError, status: int):
+def _failed(request: Request, error: SignInError):
     log.info("sign-in failed reason=%s", " ".join(map(str, error.args)))
-    return page(request, "Sign-in failed", FAILED, status, signin=True)
+    if isinstance(error, Unreachable):
+        return page(request, "Sign-in failed", UNREACHABLE, 502, signin=True)
+    if error.args[0] == "not-member":
+        return page(request, "No access", web.NOT_MEMBER.format(id=error.args[1]), 403, signin=True)
+    message = REFUSED.get(error.args[0], FAILED)
+    return page(request, "Sign-in failed", message, 400, signin=True)
 
 
 @router.get("/login")
@@ -237,7 +300,7 @@ async def login(request: Request, next: str = "/"):
     try:
         config = await _discover(request.app)
     except SignInError as error:
-        return _failed(request, error, 502)
+        return _failed(request, error)
     state, nonce, verifier = (secrets.token_urlsafe(32) for _ in range(3))
     query = urlencode(
         {
@@ -269,36 +332,51 @@ async def login(request: Request, next: str = "/"):
 @router.get("/auth/callback")
 async def callback(request: Request, code: str = "", state: str = "", error: str = ""):
     settings = request.app.state.settings
-    flow = unsign(settings.session_secret, "flow", request.cookies.get(FLOW_COOKIE, ""))
+    flow = unsign(settings.session_secret, "flow", _cookie(request, FLOW_COOKIE))
+    if flow is not None and not (_instant(flow.get("exp")) and time.time() < flow["exp"]):
+        flow = None
     try:
-        if flow is None or not (_instant(flow.get("exp")) and time.time() < flow["exp"]):
+        if flow is None:
             raise SignInError("no-flow")
         if not hmac.compare_digest(state.encode(), str(flow.get("state")).encode()):
             raise SignInError("state")
         if error:
-            raise SignInError("provider-error")
+            raise SignInError("provider-error", f"error={error[:100]!r}")
         if not code:
             raise SignInError("no-code")
         id_token = await _exchange(
             request.app, await _discover(request.app), code, flow["verifier"]
         )
-        member_id = check_id_token(id_token, settings, flow["nonce"], time.time())
+        member_id, sub = check_id_token(id_token, settings, flow["nonce"], time.time())
+        # no session for someone who is not a member yet: it would carry no linked account
+        linked = await run_with_conn(request.app, db.link_account, member_id, sub)
+        if linked is None:
+            raise SignInError("not-member", member_id)
+        if not linked:
+            raise SignInError("account")
     except SignInError as failure:
-        response = _failed(request, failure, 400)
-        _clear_cookie(request, response, FLOW_COOKIE)
+        # another tab may have signed in already, or still be signing in with the newer flow
+        next = safe_next(str(flow.get("next"))) if flow else "/"
+        if read_session(settings.session_secret, _cookie(request, SESSION_COOKIE)):
+            log.info("sign-in failed reason=%s, kept the session", " ".join(map(str, failure.args)))
+            response = RedirectResponse(next, 303)
+        else:
+            response = _failed(request, failure)
+        if failure.args[0] != "state":
+            clear_cookie(request, response, FLOW_COOKIE)
         return response
     log.info("signed in id=%s", member_id)
     response = RedirectResponse(flow["next"], 303)
     session = make_session(settings.session_secret, member_id)
     _set_cookie(request, response, SESSION_COOKIE, session, SESSION_AGE)
-    _clear_cookie(request, response, FLOW_COOKIE)
+    clear_cookie(request, response, FLOW_COOKIE)
     return response
 
 
 @router.post("/logout")
 def logout(request: Request):
     response = RedirectResponse("/signed-out", 303)
-    _clear_cookie(request, response, SESSION_COOKIE)
+    clear_cookie(request, response, SESSION_COOKIE)
     return response
 
 

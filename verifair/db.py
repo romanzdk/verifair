@@ -212,6 +212,10 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def _now_exact() -> str:
+    return datetime.now(UTC).isoformat()
+
+
 def connect(url: str) -> Connection:
     return psycopg.connect(url, **CONNECT_KWARGS)
 
@@ -332,6 +336,9 @@ def init_schema(conn: Connection) -> None:
                 "ALTER TABLE versions ADD COLUMN trace TEXT,"
                 " ADD CONSTRAINT versions_trace_body CHECK (trace IS NULL OR body IS NOT NULL)"
             )
+        for column in ("oidc_sub", "sessions_valid_after"):
+            if ("users", column) not in columns:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {column} TEXT")
 
 
 def target_document(
@@ -1028,6 +1035,7 @@ def update_user(
             (role, int(active), now, id),
         )
         if not active:
+            conn.execute("UPDATE users SET sessions_valid_after=%s WHERE id=%s", (_now_exact(), id))
             revoked = conn.execute(
                 "UPDATE api_tokens SET revoked_at=%s WHERE owner_id=%s AND revoked_at IS NULL",
                 (now, id),
@@ -1046,8 +1054,8 @@ HUMAN_ID_COLUMNS = (
 
 
 def lowercase_human_ids(conn: Connection) -> int:
-    # local mode stores ids as sent, shared mode matches them to the lower-cased identity
-    # header. Python's lower() is how the header is read, and Postgres lower() differs from
+    # local mode stores ids as sent, shared mode matches them to the lower-cased sign-in
+    # email. Python's lower() is how the email is read, and Postgres lower() differs from
     # it outside ASCII, so Python maps the ids and one statement per column applies the map.
     # An old human id such as "Agent" stays as it is so it does not turn into the agent.
     changed = 0
@@ -1075,6 +1083,28 @@ def lowercase_human_ids(conn: Connection) -> int:
                 )
             changed += conn.execute(sql, params).rowcount
     return changed
+
+
+def link_account(conn: Connection, id: str, sub: str) -> bool | None:
+    """Link a member to their provider account on first sign-in. None when not a member."""
+    with _write(conn):
+        row = conn.execute(
+            "UPDATE users SET oidc_sub = COALESCE(oidc_sub, %s) WHERE id=%s RETURNING oidc_sub",
+            (sub, id),
+        ).fetchone()
+    return None if row is None else row["oidc_sub"] == sub
+
+
+def reset_sign_in(conn: Connection, id: str) -> bool:
+    with _write(conn):
+        return (
+            conn.execute(
+                "UPDATE users SET oidc_sub=NULL, sessions_valid_after=%s, updated_at=%s"
+                " WHERE id=%s",
+                (_now_exact(), _now(), id),
+            ).rowcount
+            > 0
+        )
 
 
 def bootstrap_admin(conn: Connection, admin_id: str) -> bool:

@@ -12,8 +12,8 @@
   <h1>{{ title or "No access" }}</h1>
   <p>{{ message }}</p>
   {% if back or home %}<p>{% if back %}<a href="{{ back }}">Back to Agent tokens</a>{% if home %} · {% endif %}{% endif %}{% if home %}<a href="/">Go to Inbox</a>{% endif %}</p>{% endif %}
-  {% if signin %}<p><a class="btn p" href="/login">Sign in</a></p>{% endif %}
-  {% if signout %}<form method="post" action="/logout"><button class="btn">Sign out</button></form>{% endif %}
+  {% if signin %}<p><a class="btn p" href="/login{% if next and next != "/" %}?next={{ next|urlencode|replace("/", "%2F") }}{% endif %}">Sign in</a></p>{% endif %}
+  {% if signout %}<form method="post" action="/logout" aria-label="Sign out"><button class="btn">Sign out</button></form>{% endif %}
 </main>
 </body>
 </html>

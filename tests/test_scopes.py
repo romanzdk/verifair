@@ -15,7 +15,7 @@ BOB = signed_in("bob@example.com")
 
 @pytest.fixture
 def team(settings, make_app, monkeypatch):
-    shared = replace(settings, **OIDC, bootstrap_admin_id="boss")
+    shared = replace(settings, **OIDC, bootstrap_admin_id="boss@example.com")
     app = make_app(shared)
     conn = db.connect(shared.database_url)
     for id in ("alice@example.com", "bob@example.com", "carol@example.com"):

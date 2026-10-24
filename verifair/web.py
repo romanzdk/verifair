@@ -152,6 +152,11 @@ def plain_id(value: str) -> bool:
     return PLAIN_ID.fullmatch(value) is not None and value.lower() not in (".", "..", "agent")
 
 
+def email_id(value: str) -> bool:
+    # sign-in emails must be ASCII, so a member id that is not could never sign in
+    return "@" in value and value.isascii() and plain_id(value)
+
+
 def _shared(request: Request) -> bool:
     return request.app.state.settings.shared
 
@@ -1532,9 +1537,15 @@ def update_member(
     member: Member,
     role: Annotated[Literal["admin", "member"] | None, Form()] = None,
     active: Annotated[Literal["0", "1"] | None, Form()] = None,
+    reset: Annotated[Literal["1"] | None, Form()] = None,
 ):
     if member["role"] != "admin":
         return _denied(request, ADMIN_ONLY)
+    if reset:
+        if not db.reset_sign_in(conn, id):
+            raise HTTPException(404, "member not found")
+        log.info("access action=reset_sign_in actor=%s target=%s", user[0], id)
+        return RedirectResponse("/access/members", 303)
     try:
         row, revoked = db.update_user(
             conn, id, role=role, active=None if active is None else active == "1"

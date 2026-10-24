@@ -1409,7 +1409,7 @@ def proxied(settings, make_app, monkeypatch):
 
     from verifair import db
 
-    shared = replace(settings, **OIDC, bootstrap_admin_id="boss")
+    shared = replace(settings, **OIDC, bootstrap_admin_id="boss@example.com")
     app = make_app(shared)
     conn = db.connect(shared.database_url)
     for id in ("alice@example.com", "bob@example.com"):
@@ -1462,13 +1462,14 @@ def test_shared_mode_without_a_valid_session_cannot_act(proxied, session):
         headers = {"Cookie": f"vf_session={session}"}
     page = proxied.get("/r/prorate", headers=headers, follow_redirects=False)
     assert page.status_code == (403 if session == "agent" else 303)
-    assert proxied.post("/me", data={"name": "Bob"}, headers=headers).status_code in (401, 403)
+    refused = 403 if session == "agent" else 401
+    assert proxied.post("/me", data={"name": "Bob"}, headers=headers).status_code == refused
     r = proxied.post(
         "/r/prorate/comments",
         data={"version": 1, "section": "Intent", "body": "Why?"},
         headers=headers,
     )
-    assert r.status_code in (401, 403)
+    assert r.status_code == refused
     assert api_threads(proxied) == []
 
 

@@ -1,24 +1,24 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from email.utils import getaddresses
 from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True)
 class Settings:
-    api_token: str | None
+    api_token: str | None = field(repr=False)
     database_url: str
     base_url: str
     slack_webhook_url: str | None
     required_sections: tuple[str, ...] = ()
     bootstrap_admin_id: str | None = None
     db_pool_size: int = 10
-    smtp_url: str | None = None
+    smtp_url: str | None = field(default=None, repr=False)
     email_from: str | None = None
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
-    oidc_client_secret: str | None = None
-    session_secret: str | None = None
+    oidc_client_secret: str | None = field(default=None, repr=False)
+    session_secret: str | None = field(default=None, repr=False)
     oidc_allowed_domains: tuple[str, ...] = ()
 
     @property
@@ -26,6 +26,7 @@ class Settings:
         return self.oidc_issuer is not None
 
 
+GOOGLE = "https://accounts.google.com"
 DEFAULT_REQUIRED_SECTIONS = "Verification,Rollback,Security impact"
 
 
@@ -71,6 +72,12 @@ def check_oidc(settings: Settings) -> None:
     if not https_or_local(settings.oidc_issuer):
         raise RuntimeError(
             "VERIFAIR_OIDC_ISSUER must be an https URL such as https://accounts.google.com"
+        )
+    if settings.oidc_issuer.removesuffix("/") == GOOGLE and not settings.oidc_allowed_domains:
+        raise RuntimeError(
+            "VERIFAIR_OIDC_ALLOWED_DOMAINS is required with Google sign-in. Without it a"
+            " personal Google account made for a member's email could sign in as them."
+            " Set it to your Google Workspace domain, such as example.com."
         )
     if not https_or_local(settings.base_url):
         raise RuntimeError(

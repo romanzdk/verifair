@@ -31,11 +31,14 @@
           <button class="btn sm" aria-label="Save role for {{ u.id }}">Save</button>
         </form>{% endif %}</td>
         <td data-label="Status">{% if u.active %}<span class="badge b-approved">Active</span>{% else %}<span class="badge b-unsigned">Deactivated</span>{% endif %}</td>
-        <td class="r">{% if u.id == me %}<span class="you">You</span>{% else %}<form method="post" action="{{ action }}">
+        <td class="r">{% if u.id == me %}<span class="you">You</span>{% else %}<div class="acts"><form method="post" action="{{ action }}">
+          <input type="hidden" name="reset" value="1">
+          <button class="btn sm" aria-label="Reset sign-in for {{ u.id }}" data-confirm="Reset sign-in for {{ u.id }}? They are signed out everywhere, and their next sign-in links their account again.">Reset sign-in</button>
+        </form><form method="post" action="{{ action }}">
           <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
-          {% if u.active %}<button class="btn sm danger" aria-label="Deactivate {{ u.id }}" data-confirm="Deactivate {{ u.id }}? Their agent tokens will be revoked.">Deactivate</button>
+          {% if u.active %}<button class="btn sm danger" aria-label="Deactivate {{ u.id }}" data-confirm="Deactivate {{ u.id }}? They are signed out and their agent tokens are revoked.">Deactivate</button>
           {% else %}<button class="btn sm" aria-label="Reactivate {{ u.id }}">Reactivate</button>{% endif %}
-        </form>{% endif %}</td>
+        </form></div>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

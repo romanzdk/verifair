@@ -34,7 +34,7 @@ def test_requires_token(client):
 
 
 def test_missing_shared_token_never_authenticates(settings, make_app):
-    shared = replace(settings, api_token=None, **OIDC, bootstrap_admin_id="boss")
+    shared = replace(settings, api_token=None, **OIDC, bootstrap_admin_id="boss@example.com")
     client = TestClient(make_app(shared))
     for headers, detail in [
         ({"Authorization": "Bearer None"}, SHARED_TOKEN),

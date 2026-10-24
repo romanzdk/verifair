@@ -117,9 +117,16 @@ def test_admin_adds_promotes_deactivates_and_reactivates(shared_client, conn, ca
     assert update(role="admin")["role"] == "admin"
     assert update(role="member")["role"] == "member"
     assert update(active="0")["active"] == 0
-    assert shared_client.get("/access/tokens", headers=who).status_code == 403
+    ended = shared_client.get("/access/tokens", headers=who, follow_redirects=False)
+    assert (ended.status_code, ended.headers["location"]) == (303, "/login?next=%2Faccess%2Ftokens")
+    assert (
+        shared_client.get("/access/tokens", headers=signed_in("carol@example.com")).status_code
+        == 403
+    )
     assert db.get_token(conn, old["id"])["revoked_at"] is not None
     assert update(active="1")["active"] == 1
+    assert shared_client.get("/", headers=who, follow_redirects=False).status_code == 303
+    who = signed_in("carol@example.com")
     assert shared_client.get("/access/tokens", headers=who).status_code == 200
     assert db.get_token(conn, old["id"])["revoked_at"] is not None
     api = shared_client.get("/api/reports/x", headers={"Authorization": f"Bearer {token}"})
@@ -189,7 +196,10 @@ def test_admin_may_deactivate_themselves_when_another_admin_exists(shared_client
         follow_redirects=False,
     )
     assert r.status_code == 303
-    assert shared_client.get("/access/tokens", headers=ADMIN).status_code == 403
+    after = shared_client.get("/access/tokens", headers=ADMIN, follow_redirects=False)
+    assert after.status_code == 303
+    again = signed_in("admin@example.com")
+    assert shared_client.get("/access/tokens", headers=again).status_code == 403
 
 
 def test_new_token_is_shown_once_and_never_logged(shared_client, conn, as_user, caplog):
@@ -385,7 +395,7 @@ def test_member_id_with_plus_and_at_round_trips_through_row_actions(shared_clien
     r = shared_client.post("/access/users", data={"id": id, "name": "Jane"}, headers=ADMIN)
     assert r.status_code == 200 and id in r.text
     action = "/access/users/jane%2Bci%40example.com"
-    assert r.text.count(f'action="{action}"') == 2
+    assert r.text.count(f'action="{action}"') == 3
     for data, expected in (({"role": "admin"}, ("admin", 1)), ({"active": "0"}, ("admin", 0))):
         r = shared_client.post(action, data=data, headers=ADMIN, follow_redirects=False)
         assert r.status_code == 303
@@ -396,7 +406,7 @@ def test_member_id_with_plus_and_at_round_trips_through_row_actions(shared_clien
 def test_existing_id_with_a_slash_is_encoded_in_row_actions(shared_client, conn):
     db.add_user(conn, id="team/ops", name="Ops", role="member")
     page = shared_client.get("/access/members", headers=ADMIN).text
-    assert page.count('action="/access/users/team%2Fops"') == 2
+    assert page.count('action="/access/users/team%2Fops"') == 3
     r = shared_client.post(
         "/access/users/team%2Fops", data={"role": "admin"}, headers=ADMIN, follow_redirects=False
     )
@@ -448,7 +458,8 @@ def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, con
     assert '<button class="btn sm" aria-label="Save role for bob@example.com">Save</button>' in page
     assert (
         '<button class="btn sm danger" aria-label="Deactivate bob@example.com"'
-        ' data-confirm="Deactivate bob@example.com? Their agent tokens will be revoked.">'
+        ' data-confirm="Deactivate bob@example.com?'
+        ' They are signed out and their agent tokens are revoked.">'
         "Deactivate</button>"
     ) in page
     assert (
@@ -660,3 +671,41 @@ def test_access_form_with_a_nul_character_is_422(shared_client, conn, path, data
 def test_nul_character_in_an_access_path_is_404(shared_client):
     for path in ("/access/users/admin%00@example.com", "/access/tokens/x%00/revoke"):
         assert shared_client.post(path, headers=ADMIN).status_code == 404, path
+
+
+def test_admin_resets_a_members_sign_in(shared_client, conn, as_user, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    bob = as_user("bob@example.com")
+    carol = as_user("carol@example.com")
+    assert db.link_account(conn, "bob@example.com", "bob-sub") is True
+    page = shared_client.get("/access/members", headers=ADMIN)
+    assert 'aria-label="Reset sign-in for bob@example.com"' in page.text
+    assert 'aria-label="Reset sign-in for admin@example.com"' not in page.text
+    for headers, status in [
+        (carol, 403),
+        (ADMIN | {"Sec-Fetch-Site": "cross-site"}, 403),
+    ]:
+        r = shared_client.post(
+            "/access/users/bob@example.com", data={"reset": "1"}, headers=headers
+        )
+        assert r.status_code == status
+    assert db.get_user(conn, "bob@example.com")["oidc_sub"] == "bob-sub"
+    assert shared_client.get("/", headers=bob).status_code == 200
+    r = shared_client.post(
+        "/access/users/bob@example.com",
+        data={"reset": "1"},
+        headers=ADMIN,
+        follow_redirects=False,
+    )
+    assert (r.status_code, r.headers["location"]) == (303, "/access/members")
+    user = db.get_user(conn, "bob@example.com")
+    assert (user["oidc_sub"], user["active"], user["role"]) == (None, 1, "member")
+    assert shared_client.get("/", headers=bob, follow_redirects=False).status_code == 303
+    assert shared_client.get("/", headers=signed_in("bob@example.com")).status_code == 200
+    assert shared_client.get("/", headers=carol).status_code == 200
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("access ")]
+    assert lines == ["access action=reset_sign_in actor=admin@example.com target=bob@example.com"]
+    missing = shared_client.post(
+        "/access/users/nobody@example.com", data={"reset": "1"}, headers=ADMIN
+    )
+    assert missing.status_code == 404

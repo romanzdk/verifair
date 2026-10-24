@@ -2,8 +2,9 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import psycopg
 from fastapi import FastAPI, Request
@@ -36,22 +37,39 @@ STARTUP_LOCKED = (
 )
 
 
+def _sign_in_again(request: Request, reason: str, cookie: str | None):
+    log.info("membership denied reason=%s path=%r", reason, request.url.path)
+    # raw_path keeps an encoded slash in a project name encoded
+    raw = request.scope.get("raw_path", b"").decode("latin-1") or request.url.path
+    target = raw + (f"?{request.url.query}" if request.url.query else "")
+    if request.method in ("GET", "HEAD") and "HX-Request" not in request.headers:
+        response = RedirectResponse(f"/login?next={quote(target, safe='')}", 303)
+    else:
+        # the page the person is on, not the htmx or form URL that answered 401
+        page = request.headers.get("HX-Current-URL") or request.headers.get("Referer")
+        if page:
+            parts = urlsplit(page)
+            target = parts.path + (f"?{parts.query}" if parts.query else "")
+        elif request.method not in ("GET", "HEAD"):
+            target = "/"
+        next = auth.safe_next(target)
+        response = auth.page(request, "No access", SIGN_IN, 401, signin=True, next=next)
+    if cookie:
+        # a refused cookie that stays would send a failed sign-in back here in a loop
+        auth.clear_cookie(request, response, auth.SESSION_COOKIE)
+    return response
+
+
 async def _membership_denial(request: Request, settings: Settings):
-    cookie = request.cookies.get(auth.SESSION_COOKIE)
-    user_id = auth.read_session(settings.session_secret, cookie) if cookie else None
-    if user_id is None:
-        log.info(
-            "membership denied reason=%s path=%r",
-            "bad-session" if cookie else "no-session",
-            request.url.path,
-        )
-        if request.method in ("GET", "HEAD") and "HX-Request" not in request.headers:
-            # raw_path keeps an encoded slash in a project name encoded
-            raw = request.scope.get("raw_path", b"").decode("latin-1") or request.url.path
-            target = raw + (f"?{request.url.query}" if request.url.query else "")
-            return RedirectResponse(f"/login?next={quote(target, safe='')}", 303)
-        return auth.page(request, "No access", SIGN_IN, 401, signin=True)
+    cookie = request.cookies.get(auth.cookie_name(settings, auth.SESSION_COOKIE))
+    session = auth.read_session(settings.session_secret, cookie) if cookie else None
+    if session is None:
+        return _sign_in_again(request, "bad-session" if cookie else "no-session", cookie)
+    user_id, issued = session
     user = await run_with_conn(request.app, db.get_user, user_id)
+    valid_after = user and user["sessions_valid_after"]
+    if valid_after and issued < datetime.fromisoformat(valid_after).timestamp():
+        return _sign_in_again(request, "signed-out", cookie)
     if user is not None and user["active"]:
         request.state.member = user
         return None
@@ -111,9 +129,10 @@ def create_app(settings: Settings) -> FastAPI:
             "VERIFAIR_BOOTSTRAP_ADMIN_ID is set but VERIFAIR_OIDC_ISSUER is not."
             " Set up sign-in to run in shared mode."
         )
-    if admin_id and not web.plain_id(admin_id):
+    if admin_id and not web.email_id(admin_id):
         raise RuntimeError(
-            "VERIFAIR_BOOTSTRAP_ADMIN_ID must be a plain id such as jane@example.com"
+            "VERIFAIR_BOOTSTRAP_ADMIN_ID must be the email the admin signs in with,"
+            " such as jane@example.com"
         )
     if settings.shared and settings.api_token:
         log.warning("VERIFAIR_API_TOKEN is ignored in shared mode. Agents need member tokens.")
@@ -159,6 +178,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.pool_slots = asyncio.Semaphore(settings.db_pool_size)
     app.state.oidc_transport = None
     app.state.oidc_config = None
+    app.state.oidc_failure = None
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.include_router(api.router)
     app.include_router(web.router)

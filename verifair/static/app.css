@@ -308,6 +308,7 @@ table.t form { margin: 0; }
 }
 .sel:disabled { color: var(--text-subtle); border-color: var(--border); cursor: not-allowed; }
 .you { font-size: 12px; color: var(--text-muted); }
+.acts { display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .inp {
   height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg);
   color: var(--text); font: 400 13px/20px var(--font); min-width: 0;

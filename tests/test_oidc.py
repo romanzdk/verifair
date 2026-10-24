@@ -12,7 +12,7 @@ from verifair import auth, db
 from verifair.app import create_app
 from verifair.config import load_settings
 
-FAILED = "Sign-in failed."
+FAILED = "<h1>Sign-in failed</h1>"
 WEEK = 7 * 24 * 3600
 
 
@@ -218,7 +218,7 @@ def test_google_with_allowed_domains_needs_hd(domain_client, provider, caplog):
 def test_without_allowed_domains_any_domain_signs_in(domain_client, provider):
     client = domain_client(domains=())
     r = provider.sign_in(client, email="x@other.org", hd="other.org", follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 403 and "Ask an admin to add x@other.org." in r.text
 
 
 @pytest.mark.parametrize(
@@ -272,7 +272,7 @@ def test_https_base_url_marks_cookies_secure(shared_settings, make_app, provider
     app.state.oidc_transport = httpx.MockTransport(provider.handler)
     client = TestClient(app, base_url="https://verifair.example.com")
     r = provider.sign_in(client, follow_redirects=False)
-    assert "secure" in _set_cookies(r)[auth.SESSION_COOKIE].lower()
+    assert "secure" in _set_cookies(r)["__Host-vf_session"].lower()
     query = parse_qs(
         urlsplit(client.get("/login", follow_redirects=False).headers["location"]).query
     )
@@ -315,9 +315,9 @@ def test_session_cookie_checks(anonymous):
         cookie = {"Cookie": f"{auth.SESSION_COOKIE}={value}"}
         r = anonymous.get("/", headers=cookie, follow_redirects=False)
         assert (r.status_code, r.headers["location"]) == (303, "/login?next=%2F"), value
-    assert auth.read_session(SESSION_SECRET, good) == "admin@example.com"
+    assert auth.read_session(SESSION_SECRET, good)[0] == "admin@example.com"
     old = auth.make_session(SESSION_SECRET, "admin@example.com", now=now - WEEK + 60)
-    assert auth.read_session(SESSION_SECRET, old) == "admin@example.com"
+    assert auth.read_session(SESSION_SECRET, old)[0] == "admin@example.com"
 
 
 def test_session_denials_are_logged(anonymous, caplog):
@@ -337,7 +337,7 @@ def test_non_member_and_deactivated_member_see_403_with_sign_out(
     for who in ("stranger@example.com", "gone@example.com"):
         r = shared_client.get("/", headers=signed_in(who))
         assert r.status_code == 403 and who in r.text
-        assert '<form method="post" action="/logout">' in r.text
+        assert '<form method="post" action="/logout" aria-label="Sign out">' in r.text
         assert "<button" in r.text and "Sign out" in r.text
 
 
@@ -448,3 +448,250 @@ def test_incomplete_oidc_settings_refuse_to_start(shared_settings, change, messa
 @pytest.mark.parametrize("issuer", ["http://localhost:8080/realms/x", "http://127.0.0.1:9000"])
 def test_local_http_issuer_is_allowed(shared_settings, make_app, issuer):
     make_app(replace(shared_settings, oidc_issuer=issuer))
+
+
+def _https_client(shared_settings, make_app, provider):
+    app = make_app(replace(shared_settings, base_url="https://verifair.example.com"))
+    app.state.oidc_transport = httpx.MockTransport(provider.handler)
+    return TestClient(
+        app, base_url="https://verifair.example.com", headers={"Sec-Fetch-Site": "same-origin"}
+    )
+
+
+def test_https_cookies_use_the_host_prefix(shared_settings, make_app, provider):
+    client = _https_client(shared_settings, make_app, provider)
+    login = client.get("/login", follow_redirects=False)
+    flow = _set_cookies(login)["__Host-vf_signin"].lower()
+    assert "secure" in flow and "path=/;" in flow + ";" and "domain" not in flow
+    client.cookies.clear()
+    r = provider.sign_in(client, follow_redirects=False)
+    session = _set_cookies(r)["__Host-vf_session"].lower()
+    assert "secure" in session and "path=/" in session and "domain" not in session
+    assert "max-age=0" in _set_cookies(r)["__Host-vf_signin"].lower()
+    assert client.get("/", follow_redirects=False).status_code == 200
+    plain = {"Cookie": f"vf_session={auth.make_session(SESSION_SECRET, 'admin@example.com')}"}
+    fresh = TestClient(client.app, base_url="https://verifair.example.com")
+    assert fresh.get("/", headers=plain, follow_redirects=False).status_code == 303
+    out = client.post("/logout", follow_redirects=False)
+    assert "max-age=0" in _set_cookies(out)["__Host-vf_session"].lower()
+
+
+def test_google_without_allowed_domains_refuses_to_start(shared_settings):
+    for issuer in ("https://accounts.google.com", "https://accounts.google.com/"):
+        with pytest.raises(RuntimeError) as error:
+            create_app(replace(shared_settings, oidc_issuer=issuer))
+        assert "VERIFAIR_OIDC_ALLOWED_DOMAINS is required" in str(error.value)
+
+
+def test_google_accepts_the_issuer_without_https(domain_client, provider):
+    google = "https://accounts.google.com"
+    client = domain_client(issuer=google)
+    for iss in ("accounts.google.com", google):
+        r = provider.sign_in(client, iss=iss, hd="example.com", follow_redirects=False)
+        assert r.status_code == 303, iss
+
+
+def test_other_issuers_do_not_accept_a_bare_host(anonymous, provider, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    _fails(provider.sign_in(anonymous, iss="idp.example.com"), "iss", caplog)
+
+
+def test_non_ascii_email_fails(anonymous, provider, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    _fails(provider.sign_in(anonymous, email="admín@example.com"), "email", caplog)
+
+
+def test_settings_repr_hides_secrets(shared_settings):
+    settings = replace(shared_settings, api_token="tok-secret", smtp_url="smtp://u:pw-secret@h:587")
+    text = repr(settings)
+    for secret in ("client-secret", SESSION_SECRET, "tok-secret", "pw-secret"):
+        assert secret not in text
+    assert ISSUER in text
+
+
+ACCOUNT = "This email is linked to a different account. Ask an admin to reset your sign-in."
+
+
+def _user(app, id):
+    with closing(db.connect(app.state.settings.database_url)) as conn:
+        return db.get_user(conn, id)
+
+
+def test_first_sign_in_links_the_account_and_another_account_is_refused(
+    anonymous, provider, caplog
+):
+    caplog.set_level("INFO", logger="verifair")
+    assert provider.sign_in(anonymous, follow_redirects=False).status_code == 303
+    assert _user(anonymous.app, "admin@example.com")["oidc_sub"] == "123"
+    assert provider.sign_in(anonymous, follow_redirects=False).status_code == 303
+    anonymous.cookies.clear()
+    r = provider.sign_in(anonymous, sub="456", email="Admin@example.com")
+    _fails(r, "account", caplog)
+    assert ACCOUNT in r.text
+    assert _user(anonymous.app, "admin@example.com")["oidc_sub"] == "123"
+
+
+def test_sign_in_without_a_sub_fails(anonymous, provider, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    _fails(provider.sign_in(anonymous, sub=None), "id-token", caplog)
+
+
+def test_non_member_gets_no_session_and_signs_in_once_added(anonymous, shared_client, provider):
+    r = provider.sign_in(anonymous, email="Eve@example.com", sub="eve-1", follow_redirects=False)
+    assert r.status_code == 403 and "Ask an admin to add eve@example.com." in r.text
+    assert auth.SESSION_COOKIE not in _set_cookies(r) and 'href="/login"' in r.text
+    shared_client.post("/access/users", data={"id": "eve@example.com", "name": "Eve"})
+    assert _user(anonymous.app, "eve@example.com")["oidc_sub"] is None
+    provider.sign_in(anonymous, email="eve@example.com", sub="eve-2")
+    assert anonymous.get("/", follow_redirects=False).status_code == 200
+    assert _user(anonymous.app, "eve@example.com")["oidc_sub"] == "eve-2"
+
+
+def test_sessions_issued_before_sessions_valid_after_are_refused(anonymous, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    old = signed_in("admin@example.com")
+    with closing(db.connect(anonymous.app.state.settings.database_url)) as conn:
+        assert db.reset_sign_in(conn, "admin@example.com")
+    r = anonymous.get("/r/x", headers=old, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/login?next=%2Fr%2Fx")
+    assert "membership denied reason=signed-out path='/r/x'" in caplog.text
+    assert anonymous.get("/", headers=signed_in("admin@example.com")).status_code == 200
+
+
+def test_discovery_failure_is_cached_briefly(anonymous, provider, monkeypatch):
+    calls = []
+
+    def down(request):
+        calls.append(request)
+        raise httpx.ConnectError("refused")
+
+    anonymous.app.state.oidc_transport = httpx.MockTransport(down)
+    assert anonymous.get("/login", follow_redirects=False).status_code == 502
+    assert anonymous.get("/login", follow_redirects=False).status_code == 502
+    assert len(calls) == 1
+    later = time.monotonic() + 31
+    monkeypatch.setattr(auth.time, "monotonic", lambda: later)
+    anonymous.app.state.oidc_transport = httpx.MockTransport(provider.handler)
+    assert anonymous.get("/login", follow_redirects=False).status_code == 303
+
+
+def test_invalid_provider_urls_fail_cleanly(shared_settings, make_app, provider, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    app = make_app(replace(shared_settings, oidc_issuer="https://idp.example.com/\x7f"))
+    assert TestClient(app).get("/login", follow_redirects=False).status_code == 502
+    assert "sign-in failed reason=discovery InvalidURL" in caplog.text
+    client = TestClient(make_app(shared_settings))
+    client.app.state.oidc_transport = httpx.MockTransport(provider.handler)
+    provider.discovery["token_endpoint"] = "https://idp.example.com/\x7f"
+    assert provider.sign_in(client).status_code == 502
+    assert "sign-in failed reason=token-endpoint InvalidURL" in caplog.text
+
+
+UNREACHABLE = "We could not reach your sign-in provider. Try again in a moment."
+
+
+def _token_response(anonymous, provider, respond):
+    handler = provider.handler
+
+    def transport(request):
+        if request.url.path == "/token":
+            return respond(request)
+        return handler(request)
+
+    anonymous.app.state.oidc_transport = httpx.MockTransport(transport)
+    return provider.sign_in(anonymous)
+
+
+def _timeout(request):
+    raise httpx.ReadTimeout("slow")
+
+
+@pytest.mark.parametrize(
+    ("respond", "detail"),
+    [
+        (lambda r: httpx.Response(503, text="down"), "status 503"),
+        (lambda r: httpx.Response(200, text="<html>"), "status 200 not JSON"),
+        (_timeout, "ReadTimeout"),
+    ],
+)
+def test_broken_token_endpoint_says_the_provider_is_unreachable(
+    anonymous, provider, caplog, respond, detail
+):
+    caplog.set_level("INFO", logger="verifair")
+    r = _token_response(anonymous, provider, respond)
+    assert r.status_code == 502 and UNREACHABLE in r.text
+    assert f"sign-in failed reason=token-endpoint {detail}" in caplog.text
+
+
+def test_token_endpoint_error_value_is_logged(anonymous, provider, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    error = {"error": "invalid_client", "error_description": "secret-ish detail"}
+    r = _token_response(anonymous, provider, lambda r: httpx.Response(401, json=error))
+    assert r.status_code == 400 and UNREACHABLE not in r.text
+    assert "sign-in failed reason=token-endpoint status 401 error='invalid_client'" in caplog.text
+    assert "secret-ish" not in caplog.text
+
+
+def test_provider_redirect_error_value_is_logged(anonymous, provider, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    params = provider.authorize(anonymous)
+    anonymous.get(
+        "/auth/callback",
+        params={"state": params["state"], "error": "access_denied\nx", "error_description": "d"},
+    )
+    assert "sign-in failed reason=provider-error error='access_denied\\nx'" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("claims", "message"),
+    [
+        (
+            {"email_verified": False},
+            "Your account has no verified email address that verifair can use."
+            " Trying again will not help, so ask an admin.",
+        ),
+        (
+            {"email": "x@other.org"},
+            "Your email address is not from an allowed domain."
+            " Trying again will not help, so ask an admin.",
+        ),
+        ({"nonce": "other"}, "Try again, or ask an admin if it keeps failing."),
+    ],
+)
+def test_failure_page_wording_depends_on_the_reason(domain_client, provider, claims, message):
+    r = provider.sign_in(domain_client(), **claims)
+    assert message in r.text
+    assert r.text.count("Sign-in failed") == 2
+
+
+def test_second_tab_sign_in_keeps_the_newer_flow(anonymous, provider):
+    first = provider.authorize(anonymous)
+    second = provider.authorize(anonymous)
+    r = anonymous.get("/auth/callback", params=first, follow_redirects=False)
+    assert r.status_code == 400 and auth.FLOW_COOKIE not in _set_cookies(r)
+    ok = anonymous.get("/auth/callback", params=second, follow_redirects=False)
+    assert ok.status_code == 303
+
+
+def test_failure_with_a_valid_session_returns_to_the_page(anonymous, provider):
+    first = provider.authorize(anonymous, next="/changes")
+    provider.claims = {}
+    second = provider.authorize(anonymous, next="/r/x")
+    assert anonymous.get("/auth/callback", params=second, follow_redirects=False).status_code == 303
+    late = anonymous.get("/auth/callback", params=first, follow_redirects=False)
+    assert (late.status_code, late.headers["location"]) == (303, "/")
+    flow = provider.authorize(anonymous, next="/changes")
+    r = anonymous.get("/auth/callback", params=flow | {"code": "unknown"}, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/changes")
+
+
+def test_sign_in_link_on_the_401_page_keeps_the_page(anonymous):
+    r = anonymous.get(
+        "/r/x/partial",
+        headers={"HX-Request": "true", "HX-Current-URL": "http://localhost:8000/r/x?tab=a"},
+    )
+    assert r.status_code == 401 and 'href="/login?next=%2Fr%2Fx%3Ftab%3Da"' in r.text
+    post = anonymous.post(
+        "/r/x/comments", data={"body": "x"}, headers={"Referer": "https://evil.com//x"}
+    )
+    assert post.status_code == 401 and 'href="/login?next=%2F%2Fx"' not in post.text
