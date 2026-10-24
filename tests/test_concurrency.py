@@ -205,18 +205,20 @@ def _report(client, id="r1"):
 
 def test_wait_does_not_hold_a_connection_between_ticks(client):
     assert client.app.state.settings.db_pool_size == 1
-    _report(client)
-    waiting = threading.Thread(
-        target=client.get,
-        args=("/api/reports/r1/wait?timeout=2",),
-        kwargs={"headers": {"Authorization": "Bearer t"}},
-    )
-    waiting.start()
-    time.sleep(0.3)
-    started = time.monotonic()
-    second_push = _report(client)
-    push_seconds = time.monotonic() - started
-    waiting.join()
+    # one event loop for both threads: the pool semaphore binds to the first loop that waits
+    with client:
+        _report(client)
+        waiting = threading.Thread(
+            target=client.get,
+            args=("/api/reports/r1/wait?timeout=2",),
+            kwargs={"headers": {"Authorization": "Bearer t"}},
+        )
+        waiting.start()
+        time.sleep(0.3)
+        started = time.monotonic()
+        second_push = _report(client)
+        push_seconds = time.monotonic() - started
+        waiting.join()
     assert second_push.status_code == 201
     assert push_seconds < 1.5
 
