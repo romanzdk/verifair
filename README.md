@@ -194,7 +194,7 @@ Full reference: [docs/api.md](docs/api.md) (push, read, comments, wait, errors).
 | `VERIFAIR_OIDC_CLIENT_ID` | unset | Shared mode: OAuth client ID |
 | `VERIFAIR_OIDC_CLIENT_SECRET` | unset | Shared mode: OAuth client secret |
 | `VERIFAIR_SESSION_SECRET` | unset | Shared mode: signs the session cookie, at least 32 characters, same on every replica |
-| `VERIFAIR_OIDC_ALLOWED_DOMAINS` | unset | Shared mode: email domains that may sign in, for example `example.com` |
+| `VERIFAIR_OIDC_ALLOWED_DOMAINS` | unset | Shared mode: email domains that may sign in, for example `example.com`. Required with Google |
 | `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: email of the first admin |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | H2 headings every report must have |
 | `VERIFAIR_DB_POOL_SIZE` | `10` | Database connections per process |

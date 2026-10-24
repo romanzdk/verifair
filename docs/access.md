@@ -3,9 +3,11 @@
 verifair has two modes. `VERIFAIR_OIDC_ISSUER` switches between them.
 
 - **Local mode** (no issuer set): no sign-in. People set a name, kept in a cookie. Agents share one `VERIFAIR_API_TOKEN`. Anyone can resolve any thread. Use it on your own machine or in a small trusted group. The settings pages (`/access/tokens` and `/access/members`) only show a note.
-- **Shared mode** (issuer set): people sign in with your company login (Google, Microsoft Entra, Okta, Keycloak or any other OpenID Connect provider), and verifair checks that they are members. Each agent uses a token owned by one member. This is the mode for a team.
+- **Shared mode** (issuer set): people sign in with your company login (Google, Okta, Keycloak or another OpenID Connect provider), and verifair checks that they are members. Each agent uses a token owned by one member. This is the mode for a team.
 
 verifair does the sign-in itself. You do not need an auth proxy in front of it.
+
+Microsoft Entra ID is not supported yet: it does not tell verifair whether an email is verified, and verifair needs that.
 
 ## Set up shared mode
 
@@ -23,7 +25,7 @@ Then set:
 | `VERIFAIR_OIDC_CLIENT_ID` | The client ID from your provider |
 | `VERIFAIR_OIDC_CLIENT_SECRET` | The client secret from your provider |
 | `VERIFAIR_SESSION_SECRET` | The session secret. Use the same value on every replica |
-| `VERIFAIR_OIDC_ALLOWED_DOMAINS` | Optional. Comma-separated email domains that may sign in, for example `example.com` |
+| `VERIFAIR_OIDC_ALLOWED_DOMAINS` | Comma-separated email domains that may sign in, for example `example.com`. Required with Google, optional with other providers |
 | `VERIFAIR_BOOTSTRAP_ADMIN_ID` | Your own email, for example `jane@example.com`. On a database with no members, startup makes it the first admin. Once members exist, it adds no one. Case does not matter |
 | `VERIFAIR_BASE_URL` | The HTTPS URL of verifair |
 
@@ -65,7 +67,7 @@ Compose only starts verifair on `127.0.0.1:8000`. Put an HTTPS reverse proxy (or
 3. Go to **APIs & Services > Credentials > Create credentials > OAuth client ID**. Pick the application type **Web application**.
 4. Under **Authorised redirect URIs**, add `https://<your host>/auth/callback`, for example `https://verifair.example.com/auth/callback`. It must match `VERIFAIR_BASE_URL` exactly. You do not need JavaScript origins.
 5. Create the client. Copy the **Client ID** into `VERIFAIR_OIDC_CLIENT_ID` and the **Client secret** into `VERIFAIR_OIDC_CLIENT_SECRET`. Set `VERIFAIR_OIDC_ISSUER=https://accounts.google.com`.
-6. Set `VERIFAIR_OIDC_ALLOWED_DOMAINS` to your Workspace domain, for example `example.com`. verifair then accepts only emails in that domain, and only accounts that Google marks as belonging to that Workspace (the `hd` claim). Personal Gmail accounts are refused.
+6. Set `VERIFAIR_OIDC_ALLOWED_DOMAINS` to your Workspace domain, for example `example.com`. It is required with Google: without it startup fails, because anyone can make a personal Google account for a work email address. verifair accepts only emails in that domain, and only accounts that Google marks as belonging to that Workspace (the `hd` claim). Personal Google accounts are refused.
 
 ### Other providers
 
@@ -74,33 +76,38 @@ Any provider that supports OpenID Connect with the authorization code flow works
 | Provider | `VERIFAIR_OIDC_ISSUER` |
 | --- | --- |
 | Google | `https://accounts.google.com` |
-| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant id>/v2.0` |
+| Microsoft Entra ID | Not supported yet (no `email_verified` claim) |
 | Okta | `https://<your org>.okta.com` or `https://<your org>.okta.com/oauth2/default` |
 | Keycloak | `https://<keycloak host>/realms/<realm>` |
 
 verifair reads `<issuer>/.well-known/openid-configuration` on the first sign-in, so the issuer must be the exact value the provider puts in its tokens. It asks for the scopes `openid email profile`.
 
-verifair only accepts an email that the provider marks as verified (the `email_verified` claim must be `true`). Google, Okta and Keycloak send it. Microsoft Entra ID does not send `email_verified`, so sign-in through Entra fails with `sign-in failed reason=email` today.
+verifair only accepts an email that the provider marks as verified (the `email_verified` claim must be `true`), and only an email in plain ASCII. Google, Okta and Keycloak send `email_verified`. Microsoft Entra ID does not, so sign-in through Entra fails with `sign-in failed reason=email`.
 
 ### How sign-in works
 
 - Opening any page without a session sends you to `/login`, which sends you to the provider. After sign-in you come back to the page you opened.
 - Your member id is your email in lower case.
-- verifair keeps you signed in for 7 days with a cookie signed by `VERIFAIR_SESSION_SECRET`. After that you sign in again. Changing the secret signs everyone out. Every replica must use the same secret, or people are signed out when a request reaches another replica.
-- **Sign out** is at the bottom of the sidebar. It ends the verifair session only, not your session at the provider.
+- Only members get a session. Someone who signs in but was never added sees a 403 page with the email to add.
+- A member's first sign-in links them to their account at the provider (the `sub` claim). Later sign-ins with the same email from a different account are refused with `This email is linked to a different account. Ask an admin to reset your sign-in.` An admin fixes that with **Reset sign-in** on the Members page.
+- verifair keeps you signed in for 7 days with a cookie signed by `VERIFAIR_SESSION_SECRET`. After that you sign in again. Changing the secret signs everyone out. Every replica must use the same secret, or people are signed out when a request reaches another replica. On HTTPS the cookies are named `__Host-vf_session` and `__Host-vf_signin`, so other subdomains cannot set them.
+- **Sign out** is at the bottom of the sidebar. It ends the session in that browser only, not in other browsers and not your session at the provider. **Reset sign-in** and deactivation end all of a member's sessions.
 - verifair checks membership on every request. A deactivated member is refused on their next request, even with a valid session cookie.
+- If the provider cannot be reached, verifair waits 30 seconds before it tries again, so sign-in pages fail fast meanwhile. People who are already signed in keep working.
+- If you move to a different provider (a new `VERIFAIR_OIDC_ISSUER`), the old links no longer match, so clear them once: `psql "$VERIFAIR_DATABASE_URL" -c "UPDATE users SET oidc_sub=NULL"`. Each member's next sign-in links them again.
 - verifair checks the ID token it gets straight from the provider over HTTPS: issuer, audience, expiry, nonce, verified email and allowed domains. The sign-in uses `state` and PKCE, so a sign-in started on one browser cannot be finished on another.
 
 ### Startup checks
 
-Startup fails with a clear message when:
+Startup prints one line with the reason and exits with code 1 when:
 
 - `VERIFAIR_OIDC_ISSUER` is set without `VERIFAIR_OIDC_CLIENT_ID`, `VERIFAIR_OIDC_CLIENT_SECRET` or `VERIFAIR_SESSION_SECRET`, or the session secret is shorter than 32 characters.
 - The issuer or `VERIFAIR_BASE_URL` is not HTTPS (plain HTTP is only allowed for `localhost` and `127.0.0.1`).
+- The issuer is Google and `VERIFAIR_OIDC_ALLOWED_DOMAINS` is not set.
 - `VERIFAIR_IDENTITY_HEADER` is set. The trusted-header mode was removed. See [Moving from the identity header](#moving-from-the-identity-header).
 - The database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set.
 - `VERIFAIR_BOOTSTRAP_ADMIN_ID` is set without `VERIFAIR_OIDC_ISSUER`, so a missing issuer does not quietly start local mode.
-- The bootstrap id is not a plain id (no spaces, `/` or `\`, and not `agent`).
+- The bootstrap id is not an email (it needs an `@`, plain ASCII, no spaces, `/` or `\`).
 
 Startup logs `bootstrap admin created id=...` or `bootstrap skipped: members exist`. Secret values are never printed.
 
@@ -108,10 +115,11 @@ Once a database has members, it stays in shared mode. Starting it without `VERIF
 
 ### Refusals
 
-- A page opened without a valid session goes to sign-in. An htmx request or a form post without one gets 401 `Sign in to use verifair.`
-- A signed-in person who was never added gets 403 with a note to ask an admin to add their email, and a **Sign out** button. A deactivated member gets 403 `Your access to this workspace was turned off. Ask an admin to reactivate {id}.`
-- Each refusal is logged at INFO as `membership denied reason=... path=...`. The reason is `no-session`, `bad-session` (a changed, expired or foreign cookie), `not-member` or `inactive`.
-- A failed sign-in shows **Sign-in failed** with a link to try again, and logs `sign-in failed reason=...`. The reason is `no-flow` (the sign-in took longer than 10 minutes or the cookie is missing), `state`, `provider-error`, `no-code`, `discovery`, `token-endpoint`, `id-token`, `iss`, `aud`, `exp`, `iat`, `nonce`, `email` (missing or not verified) or `domain`.
+- A page opened without a valid session goes to sign-in. An htmx request or a form post without one gets 401 `Sign in to use verifair.`, with a **Sign in** link that comes back to the page.
+- Someone who signs in but was never added gets 403 with a note to ask an admin to add their email, and no session. A deactivated member gets 403 `Your access to this workspace was turned off. Ask an admin to reactivate {id}.`
+- Each refusal is logged at INFO as `membership denied reason=... path=...`. The reason is `no-session`, `bad-session` (a changed, expired or foreign cookie), `signed-out` (the session was ended by **Reset sign-in** or deactivation), `not-member` or `inactive`.
+- A failed sign-in shows **Sign-in failed** with a link to try again, and logs `sign-in failed reason=...`. The reason is `no-flow` (the sign-in took longer than 10 minutes or the cookie is missing), `state`, `provider-error` (with the provider's `error` value), `no-code`, `discovery`, `token-endpoint` (with the HTTP status and the provider's `error` value), `id-token`, `iss`, `aud`, `exp`, `iat`, `nonce`, `email` (missing, not verified or not ASCII), `domain`, `account` (the email is linked to a different account) or `not-member`. When the provider cannot be reached the page says so and answers 502. When the email, domain or linked account is the problem, the page says that trying again will not help.
+- If a sign-in fails in one tab while the browser already has a valid session (for example from another tab), verifair goes back to the page instead of showing the error.
 - `/healthz`, `/readyz`, `/static/`, `/login`, `/auth/callback`, `/logout` and `/signed-out` stay public. `/api/` uses tokens. Every other page, including `/docs` and `/openapi.json`, needs membership.
 
 ## What members and admins can do
@@ -126,17 +134,19 @@ Once a database has members, it stays in shared mode. Starting it without `VERIF
 | Approve or request changes | Reports someone else signed | Same as a member | No |
 | Resolve a thread or change its blocking flag | Threads they started, and agent threads on their own reports | Any thread | Resolve agent threads on the owner's reports |
 | Create and revoke agent tokens | Own tokens | Own tokens, and revoke anyone's | No |
-| Add members, change roles, deactivate | No | Yes | No |
+| Add members, change roles, deactivate, reset sign-in | No | Yes | No |
 
 ## Members and roles
 
 Admins manage members on the **Members** page (`/access/members`, under **Settings** in the sidebar). Other members cannot open it. To add a member, enter their email, a display name, and a role: `admin` or `member`. Ids are matched without regard to case: verifair stores them in lower case and turns the email from sign-in into lower case too, so `Jane@Example.com` and `jane@example.com` are the same member. The members table changes roles and deactivates or reactivates people. Members are never deleted, so their history stays.
 
-A deactivated member is refused on their next request, and all their tokens are revoked. Reactivating them does not bring old tokens back.
+A deactivated member is refused on their next request, is signed out in every browser, and all their tokens are revoked. Reactivating them does not bring old tokens or sessions back.
+
+**Reset sign-in** forgets which provider account a member is linked to and signs them out in every browser. Use it when someone's account at the provider changed, or when you think someone else signed in as them. Their next sign-in links them again.
 
 There must always be at least one active admin. verifair refuses to demote or deactivate the last one: `There must be at least one active admin.`
 
-Admin and token actions, and added or removed review requests (`action=add_reviewer` and `action=remove_reviewer`, with `report=<id>`), are written to the app log as `access action=... actor=... target=...`. A member change also logs `tokens_revoked=N`, the number of tokens a deactivation revoked. The token secret is never logged.
+Admin and token actions (a reset logs `action=reset_sign_in`), and added or removed review requests (`action=add_reviewer` and `action=remove_reviewer`, with `report=<id>`), are written to the app log as `access action=... actor=... target=...`. A member change also logs `tokens_revoked=N`, the number of tokens a deactivation revoked. The token secret is never logged.
 
 ## Agent tokens
 
@@ -197,10 +207,16 @@ After the switch:
 
 Older versions trusted a header from an auth proxy (`VERIFAIR_IDENTITY_HEADER`, often with oauth2-proxy). That mode was removed, and startup now fails while the variable is set.
 
-1. Set up sign-in as in [Set up shared mode](#set-up-shared-mode). You can reuse the OAuth client the proxy used: add the redirect URI `https://<your host>/auth/callback` to it.
-2. Remove `VERIFAIR_IDENTITY_HEADER` and take the auth proxy out. Keep your HTTPS reverse proxy or ingress.
-3. Member ids stay the same when the proxy sent the email (for example `X-Forwarded-Email`). If it sent something else, such as a user name, add each person again under their email; the old member cannot be renamed.
-4. Probes and `/api/` no longer need proxy skip rules.
+1. Make sure an active admin's member id is the email they sign in with. Sign-in only knows emails, and `VERIFAIR_BOOTSTRAP_ADMIN_ID` adds no one once members exist, so otherwise nobody can sign in as admin. To add such an admin, or to make an existing member one, run (with the email in lower case):
+
+   ```bash
+   psql "$VERIFAIR_DATABASE_URL" -c "INSERT INTO users (id, name, role, created_at, updated_at) VALUES ('jane@example.com', 'Jane', 'admin', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS+00:00'), to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS+00:00')) ON CONFLICT (id) DO UPDATE SET role='admin', active=1"
+   ```
+
+2. Set up sign-in as in [Set up shared mode](#set-up-shared-mode). You can reuse the OAuth client the proxy used: add the redirect URI `https://<your host>/auth/callback` to it.
+3. Remove `VERIFAIR_IDENTITY_HEADER` and take the auth proxy out. Keep your HTTPS reverse proxy or ingress.
+4. Member ids stay the same when the proxy sent the email (for example `X-Forwarded-Email`). If it sent something else, such as a user name, add each person again under their email; the old member cannot be renamed.
+5. Probes and `/api/` no longer need proxy skip rules.
 
 ## Not built yet
 
