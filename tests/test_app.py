@@ -250,7 +250,18 @@ def test_bootstrap_admin_id_is_stripped(monkeypatch, new_database_url, make_app)
 
 @pytest.mark.parametrize(
     "value",
-    ["jane doe@example.com", "a/b@x", "a\\b@x", ".", "..", "a\nb@x", "agent", "boss", "jän@x.cz"],
+    [
+        "jane doe@example.com",
+        "a/b@x",
+        "a\\b@x",
+        ".",
+        "..",
+        "a\nb@x",
+        "agent",
+        "boss",
+        "jän@x.cz",
+        "\u212aate@x.cz",
+    ],
 )
 def test_bootstrap_admin_id_must_be_an_email(shared_settings, value):
     with pytest.raises(RuntimeError) as error:
@@ -320,9 +331,15 @@ def test_api_post_is_exempt_from_origin_check(client):
 
 
 def test_cookies_are_secure_only_behind_https(new_database_url, make_app):
-    for base_url, secure in [("https://review.example.com", True), ("http://localhost", False)]:
+    for base_url, secure in [
+        ("https://review.example.com", True),
+        ("HTTPS://review.example.com", True),
+        ("http://localhost", False),
+    ]:
         app = make_app(Settings("t", new_database_url(), base_url, None))
-        client = TestClient(app, base_url=base_url, headers={"Sec-Fetch-Site": "same-origin"})
+        client = TestClient(
+            app, base_url=base_url.lower(), headers={"Sec-Fetch-Site": "same-origin"}
+        )
         client.post("/api/reports", json=REPORT, headers=H)
         page = client.get("/r/t").headers["set-cookie"]
         name = client.post("/me", data={"name": "A"}, follow_redirects=False).headers["set-cookie"]

@@ -1085,14 +1085,15 @@ def lowercase_human_ids(conn: Connection) -> int:
     return changed
 
 
-def link_account(conn: Connection, id: str, sub: str) -> bool | None:
+def link_account(conn: Connection, id: str, sub: str) -> Row | None:
     """Link a member to their provider account on first sign-in. None when not a member."""
     with _write(conn):
-        row = conn.execute(
-            "UPDATE users SET oidc_sub = COALESCE(oidc_sub, %s) WHERE id=%s RETURNING oidc_sub",
+        # a deactivated member is never linked, so whoever signs in after a reset cannot claim them
+        return conn.execute(
+            "UPDATE users SET oidc_sub = CASE WHEN active=1 THEN COALESCE(oidc_sub, %s)"
+            " ELSE oidc_sub END WHERE id=%s RETURNING oidc_sub, active",
             (sub, id),
         ).fetchone()
-    return None if row is None else row["oidc_sub"] == sub
 
 
 def reset_sign_in(conn: Connection, id: str) -> bool:

@@ -458,16 +458,19 @@ def test_local_http_issuer_is_allowed(shared_settings, make_app, issuer):
     make_app(replace(shared_settings, oidc_issuer=issuer))
 
 
-def _https_client(shared_settings, make_app, provider):
-    app = make_app(replace(shared_settings, base_url="https://verifair.example.com"))
+def _https_client(shared_settings, make_app, provider, base_url="https://verifair.example.com"):
+    app = make_app(replace(shared_settings, base_url=base_url))
     app.state.oidc_transport = httpx.MockTransport(provider.handler)
     return TestClient(
         app, base_url="https://verifair.example.com", headers={"Sec-Fetch-Site": "same-origin"}
     )
 
 
-def test_https_cookies_use_the_host_prefix(shared_settings, make_app, provider):
-    client = _https_client(shared_settings, make_app, provider)
+@pytest.mark.parametrize(
+    "base_url", ["https://verifair.example.com", "HTTPS://verifair.example.com"]
+)
+def test_https_cookies_use_the_host_prefix(shared_settings, make_app, provider, base_url):
+    client = _https_client(shared_settings, make_app, provider, base_url)
     login = client.get("/login", follow_redirects=False)
     flow = _set_cookies(login)["__Host-vf_signin"].lower()
     assert "secure" in flow and "path=/;" in flow + ";" and "domain" not in flow
@@ -537,6 +540,40 @@ def test_first_sign_in_links_the_account_and_another_account_is_refused(
     _fails(r, "account", caplog)
     assert ACCOUNT in r.text
     assert _user(anonymous.app, "admin@example.com")["oidc_sub"] == "123"
+
+
+def test_deactivated_member_is_never_linked_or_signed_in(anonymous, provider, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    url = anonymous.app.state.settings.database_url
+    with closing(db.connect(url)) as conn:
+        db.add_user(conn, id="bob@example.com", name="Bob", role="member")
+        assert db.link_account(conn, "bob@example.com", "bob-sub")["oidc_sub"] == "bob-sub"
+        db.update_user(conn, "bob@example.com", active=False)
+        assert db.reset_sign_in(conn, "bob@example.com")
+    r = provider.sign_in(anonymous, email="bob@example.com", sub="evil", follow_redirects=False)
+    assert r.status_code == 403 and "turned off" in r.text and "bob@example.com" in r.text
+    assert auth.SESSION_COOKIE not in _set_cookies(r)
+    assert "sign-in failed reason=inactive bob@example.com" in caplog.text
+    assert _user(anonymous.app, "bob@example.com")["oidc_sub"] is None
+    with closing(db.connect(url)) as conn:
+        db.update_user(conn, "bob@example.com", active=True)
+    r = provider.sign_in(anonymous, email="bob@example.com", sub="bob-sub", follow_redirects=False)
+    assert r.status_code == 303 and auth.SESSION_COOKIE in _set_cookies(r)
+    assert _user(anonymous.app, "bob@example.com")["oidc_sub"] == "bob-sub"
+
+
+def test_a_reset_during_sign_in_ends_the_new_session(anonymous, provider, monkeypatch):
+    link = db.link_account
+
+    def link_then_reset(conn, id, sub):
+        row = link(conn, id, sub)
+        db.reset_sign_in(conn, id)
+        return row
+
+    monkeypatch.setattr(db, "link_account", link_then_reset)
+    r = provider.sign_in(anonymous, follow_redirects=False)
+    assert r.status_code == 303 and auth.SESSION_COOKIE in _set_cookies(r)
+    assert anonymous.get("/", follow_redirects=False).status_code == 303
 
 
 def test_sign_in_without_a_sub_fails(anonymous, provider, caplog):
@@ -703,3 +740,6 @@ def test_sign_in_link_on_the_401_page_keeps_the_page(anonymous):
         "/r/x/comments", data={"body": "x"}, headers={"Referer": "https://evil.com//x"}
     )
     assert post.status_code == 401 and 'href="/login?next=%2F%2Fx"' not in post.text
+    for header in ("Referer", "HX-Current-URL"):
+        bad = anonymous.post("/r/x/comments", data={"body": "x"}, headers={header: "http://[x/y"})
+        assert bad.status_code == 401 and 'href="/login"' in bad.text

@@ -47,8 +47,11 @@ def _sign_in_again(request: Request, reason: str, cookie: str | None):
     else:
         # the page the person is on, not the htmx or form URL that answered 401
         page = request.headers.get("HX-Current-URL") or request.headers.get("Referer")
-        if page:
-            parts = urlsplit(page)
+        try:
+            parts = urlsplit(page) if page else None
+        except ValueError:
+            parts = urlsplit("/")
+        if parts:
             target = parts.path + (f"?{parts.query}" if parts.query else "")
         elif request.method not in ("GET", "HEAD"):
             target = "/"

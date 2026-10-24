@@ -488,6 +488,7 @@ MEMBER_INPUT = "Enter an email (1–200 characters) and a name (1–60 character
     ("data", "status", "copy"),
     [
         ({"id": "a b", "name": "Eve Q", "role": "admin"}, 422, PLAIN),
+        ({"id": "\u212aate@example.com", "name": "Kate", "role": "admin"}, 422, PLAIN),
         ({"id": "Admin@example.com", "name": "Again", "role": "admin"}, 409, EXISTS),
         ({"id": "eve@example.com", "name": " ", "role": "admin"}, 422, MEMBER_INPUT),
     ],
@@ -675,7 +676,7 @@ def test_admin_resets_a_members_sign_in(shared_client, conn, as_user, caplog):
     caplog.set_level("INFO", logger="verifair")
     bob = as_user("bob@example.com")
     carol = as_user("carol@example.com")
-    assert db.link_account(conn, "bob@example.com", "bob-sub") is True
+    assert db.link_account(conn, "bob@example.com", "bob-sub")["oidc_sub"] == "bob-sub"
     page = shared_client.get("/access/members", headers=ADMIN)
     assert 'aria-label="Reset sign-in for bob@example.com"' in page.text
     assert 'aria-label="Reset sign-in for admin@example.com"' not in page.text

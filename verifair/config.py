@@ -25,6 +25,13 @@ class Settings:
     def shared(self) -> bool:
         return self.oidc_issuer is not None
 
+    @property
+    def https(self) -> bool:
+        try:
+            return urlsplit(self.base_url).scheme == "https"
+        except ValueError:
+            return False
+
 
 GOOGLE = "https://accounts.google.com"
 DEFAULT_REQUIRED_SECTIONS = "Verification,Rollback,Security impact"

@@ -188,7 +188,7 @@ Member = Annotated[db.Row, Depends(access_member)]
 
 
 def _secure(request: Request) -> bool:
-    return request.app.state.settings.base_url.startswith("https")
+    return request.app.state.settings.https
 
 
 def _with_id_cookie(request: Request, response):
@@ -1515,7 +1515,8 @@ def add_member(
     clean_id, clean_name = id.strip().lower(), name.strip()
     if not (_fits(clean_id, 200) and _fits(clean_name, 60)):
         return refuse(MEMBER_INPUT, 422)
-    if not email_id(clean_id):
+    # before lower-casing, since "\u212a".lower() is an ASCII "k"
+    if not (id.isascii() and email_id(clean_id)):
         return refuse(MEMBER_EMAIL, 422)
     try:
         db.add_user(conn, id=clean_id, name=clean_name, role=role)

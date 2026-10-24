@@ -47,7 +47,7 @@ class Unreachable(SignInError):
 def cookie_name(settings: Settings, name: str) -> str:
     # __Host- makes browsers refuse the cookie unless it is Secure, for Path=/ and without a
     # Domain, so a sibling subdomain or a plain-http page cannot plant or overwrite it
-    return f"__Host-{name}" if settings.base_url.startswith("https") else name
+    return f"__Host-{name}" if settings.https else name
 
 
 def _b64(data: bytes) -> str:
@@ -260,7 +260,7 @@ def _set_cookie(request: Request, response, name: str, value: str, max_age: int)
         path="/",
         httponly=True,
         samesite="lax",
-        secure=request.app.state.settings.base_url.startswith("https"),
+        secure=request.app.state.settings.https,
     )
 
 
@@ -271,7 +271,7 @@ def clear_cookie(request: Request, response, name: str):
         path="/",
         httponly=True,
         samesite="lax",
-        secure=settings.base_url.startswith("https"),
+        secure=settings.https,
     )
 
 
@@ -288,8 +288,9 @@ def _failed(request: Request, error: SignInError):
     log.info("sign-in failed reason=%s", " ".join(map(str, error.args)))
     if isinstance(error, Unreachable):
         return page(request, "Sign-in failed", UNREACHABLE, 502, signin=True)
-    if error.args[0] == "not-member":
-        return page(request, "No access", web.NOT_MEMBER.format(id=error.args[1]), 403, signin=True)
+    if error.args[0] in ("not-member", "inactive"):
+        copy = web.NOT_MEMBER if error.args[0] == "not-member" else web.DEACTIVATED
+        return page(request, "No access", copy.format(id=error.args[1]), 403, signin=True)
     message = REFUSED.get(error.args[0], FAILED)
     return page(request, "Sign-in failed", message, 400, signin=True)
 
@@ -347,12 +348,16 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         id_token = await _exchange(
             request.app, await _discover(request.app), code, flow["verifier"]
         )
-        member_id, sub = check_id_token(id_token, settings, flow["nonce"], time.time())
+        # taken before linking, so a reset that lands meanwhile also ends this session
+        now = time.time()
+        member_id, sub = check_id_token(id_token, settings, flow["nonce"], now)
         # no session for someone who is not a member yet: it would carry no linked account
         linked = await run_with_conn(request.app, db.link_account, member_id, sub)
         if linked is None:
             raise SignInError("not-member", member_id)
-        if not linked:
+        if not linked["active"]:
+            raise SignInError("inactive", member_id)
+        if linked["oidc_sub"] != sub:
             raise SignInError("account")
     except SignInError as failure:
         # another tab may have signed in already, or still be signing in with the newer flow
@@ -367,7 +372,7 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         return response
     log.info("signed in id=%s", member_id)
     response = RedirectResponse(flow["next"], 303)
-    session = make_session(settings.session_secret, member_id)
+    session = make_session(settings.session_secret, member_id, now=now)
     _set_cookie(request, response, SESSION_COOKIE, session, SESSION_AGE)
     clear_cookie(request, response, FLOW_COOKIE)
     return response
