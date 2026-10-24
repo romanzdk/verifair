@@ -9,7 +9,7 @@
 [![CI](https://github.com/romanzdk/verifair/actions/workflows/ci.yml/badge.svg)](https://github.com/romanzdk/verifair/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
-![Postgres 17](https://img.shields.io/badge/postgres-17-336791.svg)
+![Postgres 18](https://img.shields.io/badge/postgres-18-336791.svg)
 
 [Quickstart](#quickstart) · [How it works](#how-it-works) · [Screenshots](#screenshots) · [API](docs/api.md) · [Configuration](docs/configuration.md) · [Deployment](docs/deployment.md)
 
@@ -191,7 +191,7 @@ Details: [docs/configuration.md](docs/configuration.md).
 
 ## Deployment
 
-verifair needs Postgres 17 and HTTPS for any browser access outside `localhost`. For a team, run it in shared mode behind an auth proxy (for example oauth2-proxy with SSO) that sets the identity header, and make sure only the proxy can reach it.
+verifair needs Postgres 18 and HTTPS for any browser access outside `localhost`. For a team, run it in shared mode behind an auth proxy (for example oauth2-proxy with SSO) that sets the identity header, and make sure only the proxy can reach it.
 
 - [Run from source](docs/deployment.md#run-from-source) and [Docker](docs/deployment.md#docker)
 - [Deploying](docs/deployment.md#deploying): proxy, TLS, Postgres, replicas, probes, backup and restore
