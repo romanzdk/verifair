@@ -81,15 +81,28 @@ def section_plain_text(body: str, heading: str) -> str:
 
 
 def _plain_lines(tokens: list[Token]) -> str:
-    lines, bullet = [], ""
+    lines: list[str] = []
+    cells: list[str] | None = None
+    bullet, gap = "", False
     for token in tokens:
+        if token.level == 0 and token.nesting == 1:
+            gap = bool(lines)
         if token.type == "list_item_open":
-            bullet = "- "
+            bullet = f"{token.info}{token.markup} " if token.info else "- "
+        elif token.type == "tr_open":
+            cells = []
         elif token.type == "inline":
             parts = (" " if c.type.endswith("break") else c.content for c in token.children or ())
-            if text := normalize("".join(parts)):
-                lines.append(bullet + text)
+            text = normalize("".join(parts))
+            if cells is not None:
+                cells.append(text)
+            elif text:
+                lines += [""] * gap + [bullet + text]
+                gap = False
             bullet = ""
+        elif token.type == "tr_close":
+            lines += [""] * gap + [" | ".join(cells)]
+            cells, gap = None, False
     return "\n".join(lines)
 
 

@@ -400,6 +400,16 @@ def test_section_plain_text_keeps_lines_and_link_text():
         "![chart](https://e.com/c.png)\n\n## Rollback\ny"
     )
     assert section_plain_text(body, "Judge this") == (
-        "Is a day the right unit?\n- first item\n- second\nchart"
+        "Is a day the right unit?\n\n- first item\n- second\n\nchart"
     )
     assert section_plain_text(body, "Missing") == ""
+
+
+def test_section_plain_text_keeps_numbers_and_table_rows():
+    body = (
+        "## Judge this\nFirst para.\n\nSecond para.\n\n1. one\n2. two\n\n"
+        "| Case | Result |\n|---|---|\n| empty | **0** |\n| one | 1 |\n"
+    )
+    assert section_plain_text(body, "Judge this") == (
+        "First para.\n\nSecond para.\n\n1. one\n2. two\n\nCase | Result\nempty | 0\none | 1"
+    )
