@@ -23,18 +23,19 @@
     <tbody>
       {% for u in users %}{% set action = "/access/users/" ~ u.id|segment %}
       <tr>
-        <td data-label="Id"><code>{{ u.id }}</code>{% if u.id == me %} <small>(you)</small>{% endif %}</td>
+        {% set roles_select %}<select{% if u.id != me and u.active %} name="role"{% endif %} class="sel" aria-label="Role for {{ u.id }}"{% if u.id == me or not u.active %} disabled{% endif %}>{% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}</select>{% endset %}
+        <td data-label="Id"><code>{{ u.id }}</code></td>
         <td data-label="Name"><span class="who"><span class="av sm {{ u.id|avatar }}" aria-hidden="true">{{ u.name[:1]|upper }}</span>{{ u.name }}</span></td>
-        <td data-label="Role"><form method="post" action="{{ action }}" class="role-form">
-          <select name="role" class="sel" aria-label="Role for {{ u.id }}">{% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}</select>
+        <td data-label="Role">{% if u.id == me or not u.active %}{{ roles_select }}{% else %}<form method="post" action="{{ action }}" class="role-form">
+          {{ roles_select }}
           <button class="btn sm" aria-label="Save role for {{ u.id }}">Save</button>
-        </form></td>
+        </form>{% endif %}</td>
         <td data-label="Status">{% if u.active %}<span class="badge b-approved">Active</span>{% else %}<span class="badge b-unsigned">Deactivated</span>{% endif %}</td>
-        <td class="r"><form method="post" action="{{ action }}">
+        <td class="r">{% if u.id == me %}<span class="you">You</span>{% else %}<form method="post" action="{{ action }}">
           <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
-          {% if u.active %}<button class="btn sm danger" aria-label="Deactivate {{ u.id }}" data-confirm="{{ 'Deactivate yourself? You will lose access right away.' if u.id == me else 'Deactivate ' ~ u.id ~ '? Their agent tokens will be revoked.' }}">Deactivate</button>
+          {% if u.active %}<button class="btn sm danger" aria-label="Deactivate {{ u.id }}" data-confirm="Deactivate {{ u.id }}? Their agent tokens will be revoked.">Deactivate</button>
           {% else %}<button class="btn sm" aria-label="Reactivate {{ u.id }}">Reactivate</button>{% endif %}
-        </form></td>
+        </form>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

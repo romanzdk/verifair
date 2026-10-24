@@ -449,12 +449,17 @@ def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, con
         '<button class="btn sm danger" aria-label="Revoke token bob &#34;ci&#34;"'
         ' data-confirm="Revoke token bob &#34;ci&#34;?">Revoke</button>'
     ) in tokens
-    assert page.count("(you)") == 1
-    assert "<code>admin@example.com</code> <small>(you)</small>" in page
+    rows = {re.search(r"<code>([^<]+)</code>", row)[1]: row for row in page.split("<tr>")[2:]}
+    mine, gone = rows["admin@example.com"], rows["gone@example.com"]
+    assert '<span class="you">You</span>' in mine and page.count(">You<") == 1
+    assert "<button" not in mine and "<form" not in mine
+    assert '<select class="sel" aria-label="Role for admin@example.com" disabled>' in mine
+    assert '<select class="sel" aria-label="Role for gone@example.com" disabled>' in gone
+    assert "Save" not in gone and "Reactivate" in gone
     assert (
-        '<button class="btn sm danger" aria-label="Deactivate admin@example.com"'
-        ' data-confirm="Deactivate yourself? You will lose access right away.">Deactivate</button>'
-    ) in page
+        '<select name="role" class="sel" aria-label="Role for bob@example.com">'
+        in rows["bob@example.com"]
+    )
     js = (Path(web.__file__).parent / "static" / "app.js").read_text()
     assert 'addEventListener("submit"' in js and "event.submitter?.dataset.confirm" in js
     assert "!confirm(message)" in js and "event.preventDefault()" in js

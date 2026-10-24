@@ -297,9 +297,14 @@ table.t form { margin: 0; }
 .role-form { display: flex; gap: 8px; align-items: center; }
 .sel {
   height: 28px; padding: 0 28px 0 10px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text);
-  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2380868f' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 9px center;
-  font: 500 13px/20px var(--font); appearance: none;
+  background: var(--bg) no-repeat; font: 500 13px/20px var(--font); appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 38%, var(--text-subtle) 38% 62%, transparent 62%),
+    linear-gradient(-45deg, transparent 38%, var(--text-subtle) 38% 62%, transparent 62%);
+  background-position: right 14px center, right 9px center; background-size: 5px 5px;
 }
+.sel:disabled { color: var(--text-subtle); border-color: var(--border); cursor: not-allowed; }
+.you { font-size: 12px; color: var(--text-muted); }
 .inp {
   height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg);
   color: var(--text); font: 400 13px/20px var(--font); min-width: 0;
