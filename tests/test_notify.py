@@ -297,8 +297,19 @@ def test_a_dropped_connection_stops_sending_and_logs_once(smtp, monkeypatch, cap
     delivered = notify.send_email(mail_settings("smtp://localhost:1025"), "r", "S", letters)
     assert delivered == ["b@x.com"]
     assert [r.getMessage() for r in caplog.records] == [
-        "email failed report=r recipients=3 error=SMTPServerDisconnected code=-"
+        "email failed report=r recipients=2 error=SMTPServerDisconnected code=-"
     ]
+
+
+def test_a_failed_quit_after_all_mail_went_out_logs_nothing(smtp, monkeypatch, caplog):
+    def bad_quit(self, *exc):
+        raise smtplib.SMTPResponseException(421, b"bye")
+
+    monkeypatch.setattr(smtp, "__exit__", bad_quit)
+    letters = {"b@x.com": "T", "c@x.com": "T"}
+    delivered = notify.send_email(mail_settings("smtp://localhost:1025"), "r", "S", letters)
+    assert delivered == ["b@x.com", "c@x.com"]
+    assert caplog.records == []
 
 
 def test_email_failure_logs_one_warning_without_secrets_and_closes(smtp, monkeypatch, caplog):

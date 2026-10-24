@@ -261,9 +261,10 @@ function settleReviewers(sent) {
   const error = rail.querySelector("p.error[tabindex]");
   const next = error || (at >= 0 && removes(rail)[at]) || rail.querySelector(".addrev select") || removes(rail).at(-1);
   next?.focus();
-  const status = error || rail.querySelector("[data-rev-status]");
+  // a focused role=alert error is already read out; repeating it in the live region would say it twice
+  const status = error ? null : rail.querySelector("[data-rev-status]");
   const live = document.getElementById("vf_rev_live");
-  if (status && live) live.textContent = status.textContent;
+  if (live) live.textContent = status ? status.textContent : "";
 }
 
 document.body.addEventListener("htmx:afterSettle", (event) => {

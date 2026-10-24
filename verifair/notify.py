@@ -112,6 +112,7 @@ def send_email(
 ) -> list[str]:
     letters = {to: text for to, text in letters.items() if one_address(to)}
     delivered: list[str] = []
+    refused: list[str] = []
     if not settings.smtp_url or not letters:
         return delivered
     url = urlsplit(settings.smtp_url)
@@ -149,11 +150,13 @@ def send_email(
                 except smtplib.SMTPServerDisconnected:
                     raise
                 except smtplib.SMTPException as exc:
+                    refused.append(to)
                     _failed(report_id, 1, exc)
                 else:
                     delivered.append(to)
     except Exception as exc:
-        _failed(report_id, len(letters), exc)
+        if missed := len(letters) - len(delivered) - len(refused):
+            _failed(report_id, missed, exc)
     return delivered
 
 
