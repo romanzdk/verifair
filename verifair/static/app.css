@@ -419,10 +419,13 @@ body.has-verdict .side { padding-bottom: 112px; }
   font: 500 11px/16px var(--font); font-variant-numeric: tabular-nums;
 }
 .rev { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; white-space: nowrap; }
-.rev .rn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rev .rn {
+  flex: 1; min-width: 0; overflow: hidden; white-space: normal; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
 .rev .btn { flex: none; }
 .rev-state { margin: 0 0 6px 32px; color: var(--text-muted); font-size: 12px; }
-.rev-item > .error, .rev-item + .error { margin-left: 32px; }
+.rev-item > .error { margin-left: 32px; }
 .addrev { display: flex; gap: 6px; margin: 8px 0 0; }
 .addrev .sel { flex: 1; min-width: 0; height: 28px; }
 .rev-summary { margin: 2px 0 6px 32px; color: var(--text-muted); font-size: 12px; white-space: pre-wrap; }

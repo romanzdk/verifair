@@ -130,7 +130,8 @@ def test_owner_unknown_and_inactive_members_cannot_be_requested(shared_client, t
     plain = shared_client.post("/r/r/reviewers", data={"reviewer_id": who}, headers=BOB)
     assert (plain.status_code, plain.json()) == (422, {"detail": REFUSED})
     page = add(shared_client, who)
-    assert page.status_code == 200 and f'<p class="error" role="alert">{REFUSED}</p>' in page.text
+    assert page.status_code == 200
+    assert f'<p class="error" role="alert" tabindex="-1">{REFUSED}</p>' in page.text
     assert db.requested_reviewers(team, "r") == []
 
 
@@ -148,7 +149,7 @@ def test_a_reviewer_with_a_verdict_on_this_version_stays(shared_client, team):
     assert (plain.status_code, plain.json()) == (422, {"detail": KEPT})
     page = rail(shared_client.post(path, headers=ALICE | HX).text)
     carol_row = page.split('title="carol"')[1].split('class="rev-item"')[0]
-    assert f'<p class="error" role="alert">{KEPT}</p>' in carol_row
+    assert f'<p class="error" role="alert" tabindex="-1">{KEPT}</p>' in carol_row
     assert db.requested_reviewers(team, "r") == ["bob@example.com", "carol@example.com"]
     db.push_report(team, project="p", title="T", risk="high", body=BODY, id="r")
     assert "/reviewers/carol%40example.com/remove" in shared_client.get("/r/r", headers=BOB).text

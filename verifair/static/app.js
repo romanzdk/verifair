@@ -192,7 +192,7 @@ function errorAnchor(event) {
 }
 
 function holdsError(anchor) {
-  return anchor.matches(".verdict, main, body");
+  return anchor.matches(".verdict, main, body, .rev-item");
 }
 
 function clearRequestError(anchor) {
@@ -216,6 +216,7 @@ function showRequestError(event, message) {
   const anchor = errorAnchor(event);
   if (!anchor) return;
   clearRequestError(anchor);
+  anchor.closest("#vf_sidebar")?.querySelectorAll("p.vf-req-error").forEach((line) => line.remove());
   const line = document.createElement("p");
   line.className = "error vf-req-error";
   line.setAttribute("role", "alert");
@@ -250,15 +251,17 @@ document.addEventListener("focusout", (event) => {
 highlight();
 showNavForNameError();
 document.body.addEventListener("htmx:afterSwap", highlight);
-// The rail is swapped whole, so focus goes back to the picker, or to the Remove button that took
-// the removed one's place, and the change is read out from a live region outside the rail.
+// The rail is swapped whole, so focus goes to its error, or back to the picker, or to the Remove
+// button that took the removed one's place, and the outcome is read out from a live region
+// outside the rail.
 function settleReviewers(sent) {
   const rail = document.getElementById("vf_sidebar");
   const removes = (root) => Array.from(root.querySelectorAll(".rev .btn"));
   const at = sent ? removes(sent.closest("aside") || rail).indexOf(sent) : -1;
-  const next = (at >= 0 && removes(rail)[at]) || rail.querySelector(".addrev select") || removes(rail).at(-1);
+  const error = rail.querySelector("p.error[tabindex]");
+  const next = error || (at >= 0 && removes(rail)[at]) || rail.querySelector(".addrev select") || removes(rail).at(-1);
   next?.focus();
-  const status = rail.querySelector("[data-rev-status]");
+  const status = error || rail.querySelector("[data-rev-status]");
   const live = document.getElementById("vf_rev_live");
   if (status && live) live.textContent = status.textContent;
 }
@@ -279,6 +282,11 @@ document.body.addEventListener("htmx:sendError", (event) => {
 document.body.addEventListener("htmx:afterRequest", (event) => {
   const anchor = event.detail.successful && errorAnchor(event);
   if (anchor) clearRequestError(anchor);
+  // hx-disabled-elt drops focus to the body while the Request button is disabled
+  const form = event.detail.requestConfig?.elt;
+  if (!event.detail.successful && form?.matches?.(".addrev") && form.isConnected && document.activeElement === document.body) {
+    (form.querySelector("button:enabled") || form.querySelector("select"))?.focus();
+  }
 });
 
 (() => {
