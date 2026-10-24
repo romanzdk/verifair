@@ -211,6 +211,24 @@ def _nav(work: dict) -> dict:
     }
 
 
+def _shell(
+    request: Request, conn: sqlite3.Connection, user: tuple[str, str | None], work=None
+) -> dict:
+    url = request.url.remove_query_params("name_error")
+    member = request.state.member
+    return _nav(work or _work(request, conn, user[0])) | {
+        "user_id": user[0],
+        "user_name": user[1],
+        "user_from_header": request.state.user_from_header,
+        "shared": _shared(request),
+        "member": member,
+        "is_admin": member is not None and member["role"] == "admin",
+        "base_url": request.app.state.settings.base_url,
+        "here": url.path + (f"?{url.query}" if url.query else ""),
+        "name_error": "name_error" in request.query_params,
+    }
+
+
 def _page(
     request: Request,
     conn: sqlite3.Connection,
@@ -220,25 +238,14 @@ def _page(
     status=200,
     work: dict | None = None,
 ):
-    url = request.url.remove_query_params("name_error")
-    member = request.state.member
-    ctx = (
-        ctx
-        | _nav(work or _work(request, conn, user[0]))
-        | {
-            "user_id": user[0],
-            "user_name": user[1],
-            "user_from_header": request.state.user_from_header,
-            "shared": _shared(request),
-            "member": member,
-            "is_admin": member is not None and member["role"] == "admin",
-            "base_url": request.app.state.settings.base_url,
-            "here": url.path + (f"?{url.query}" if url.query else ""),
-            "name_error": "name_error" in request.query_params,
-        }
-    )
+    ctx = ctx | _shell(request, conn, user, work)
     response = templates.TemplateResponse(request, name, ctx, status_code=status)
     return _with_id_cookie(request, response)
+
+
+def _nav_oob(request: Request, conn: sqlite3.Connection, user, ctx: dict) -> dict:
+    shell = _shell(request, conn, user)
+    return shell | {"nav_oob": True, "here": ctx["url"], "active_project": ctx["report"]["project"]}
 
 
 def _partial(request: Request, names: list[str], ctx: dict, headers: dict | None = None):
@@ -772,7 +779,8 @@ def post_verdict(
     settings = request.app.state.settings
     background.add_task(notify.send, settings, notify.verdict_text(report, row, settings.base_url))
     ctx = report_context(conn, report, version, user_id, request.state.member, _shared(request))
-    return _partial(request, ["_verdict.html", "_sidebar.html"], ctx | {"oob": True})
+    ctx |= {"oob": True} | _nav_oob(request, conn, user, ctx)
+    return _partial(request, ["_verdict.html", "_sidebar.html", "_nav.html"], ctx)
 
 
 @router.post("/r/{id}/sign")
@@ -802,8 +810,8 @@ def sign(
         text = notify.ready_for_review_text(report, version, name, settings.base_url)
         background.add_task(notify.send, settings, text)
     ctx = report_context(conn, report, version, user_id, request.state.member, _shared(request))
-    ctx |= {"oob": True, "verdict_oob": True}
-    return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html"], ctx)
+    ctx |= {"oob": True, "verdict_oob": True} | _nav_oob(request, conn, user, ctx)
+    return _partial(request, ["_header.html", "_sidebar.html", "_verdict.html", "_nav.html"], ctx)
 
 
 @router.post("/me")

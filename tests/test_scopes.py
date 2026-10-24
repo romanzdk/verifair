@@ -393,3 +393,23 @@ def test_sidebar_counts(team):
     assert 'class="nav-n acc">1<' in nav_link(team.get("/", headers=BOB).text, "/")
     carol = {"X-Forwarded-Email": "carol@example.com"}
     assert "nav-n" not in nav_link(team.get("/", headers=carol).text, "/")
+
+
+def test_sign_and_verdict_refresh_the_sidebar_counts(team):
+    def oob_nav(html):
+        return 'hx-swap-oob="true"' in re.search(r'<nav class="app-nav" id="vf_nav"[^>]*>', html)[0]
+
+    bob = "bob@example.com"
+    assert publish(team, "r1", by=bob, reviewers=["alice@example.com"]).status_code == 201
+    assert "nav-n" not in nav_link(team.get("/r/r1", headers=BOB).text, "/p/billing")
+    signed = team.post("/r/r1/sign", headers=BOB, data={"version": 1}).text
+    assert oob_nav(signed)
+    assert ">1<" in nav_link(signed, "/p/billing")
+    assert 'class="on" aria-current="page"' in nav_link(signed, "/p/billing")
+    assert "nav-n" not in nav_link(signed, "/")
+
+    assert 'class="nav-n acc">1<' in nav_link(team.get("/r/r1", headers=ALICE).text, "/")
+    approved = team.post("/r/r1/verdict", headers=ALICE, data={"version": 1, "verdict": "approve"})
+    assert oob_nav(approved.text)
+    assert "nav-n" not in nav_link(approved.text, "/")
+    assert "nav-n" not in nav_link(approved.text, "/p/billing")

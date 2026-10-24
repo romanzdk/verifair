@@ -1,5 +1,5 @@
 {% macro item(href, svg, label, on=False, count=0, acc=False) %}<a href="{{ href }}"{% if on %} class="on" aria-current="page"{% endif %}>{{ svg }}<span class="lbl">{{ label }}</span>{% if count %}<span class="nav-n{% if acc %} acc{% endif %}">{{ count }}</span>{% endif %}</a>{% endmacro %}
-<nav class="app-nav" id="vf_nav" popover aria-label="Main">
+<nav class="app-nav" id="vf_nav" popover aria-label="Main"{% if nav_oob %} hx-swap-oob="true"{% endif %}>
   <a class="brand" href="/"><span class="mark">{{ icon("check", "") }}</span><b>veri<span>fair</span></b></a>
   <div class="nav">
     <h6>Your work</h6>
