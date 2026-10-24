@@ -123,7 +123,7 @@ ALREADY_CREATED = (
 
 
 def _fits(value: str, longest: int) -> bool:
-    return 1 <= len(value) <= longest and "\x00" not in value
+    return 1 <= len(value) <= longest and db.storable(value)
 
 
 def plain_id(value: str) -> bool:
@@ -146,7 +146,7 @@ async def current_user(request: Request) -> tuple[str, str | None]:
         # FastAPI drops cookies set on an injected Response when the route returns its own
         user_id = request.state.new_vf_id = secrets.token_urlsafe(8)
     name = unquote(request.cookies.get("vf_name", ""))
-    return user_id, name if name and "\x00" not in name else None
+    return user_id, name if name and db.storable(name) else None
 
 
 User = Annotated[tuple[str, str | None], Depends(current_user)]

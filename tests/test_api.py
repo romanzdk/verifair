@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 import time
 from contextlib import closing
@@ -1137,16 +1138,26 @@ def test_shared_mode_token_refusal_logs_escape_control_characters(
         {"ticket_url": "https://t/\x00"},
     ],
 )
-def test_push_with_a_nul_character_is_422(client, overrides):
-    assert push(client, **overrides).status_code == 422
+@pytest.mark.parametrize("bad", ["\x00", "\ud800", "\udfff"])
+def test_push_with_an_unstorable_character_is_422(client, overrides, bad):
+    payload = {"project": "billing-service", "title": "Prorate", "risk": "high", "body": SAMPLE}
+    assert _post_json(client, "/api/reports", payload | overrides, bad).status_code == 422
+
+
+def _post_json(client, path, payload, bad):
+    # Postgres text holds neither NUL nor a lone surrogate. The payload marks the spot with
+    # NUL, and json.dumps writes the swapped-in character as an escape, as a client would.
+    text = json.dumps(payload).replace("\\u0000", json.dumps(bad)[1:-1])
+    return client.post(path, content=text, headers=H | {"Content-Type": "application/json"})
 
 
 @pytest.mark.parametrize("field", ["body", "author", "section", "quote", "prefix", "suffix"])
-def test_comment_with_a_nul_character_is_422(client, field):
+@pytest.mark.parametrize("bad", ["\x00", "\ud800"])
+def test_comment_with_an_unstorable_character_is_422(client, field, bad):
     push(client)
     payload = {"body": "Why?", "section": "Intent", "quote": "Full new price."}
-    r = _comment(client, **(payload | {field: payload.get(field, "x") + "\x00"}))
-    assert r.status_code == 422
+    payload |= {field: payload.get(field, "x") + "\x00"}
+    assert _post_json(client, "/api/reports/prorate/comments", payload, bad).status_code == 422
 
 
 def test_nul_character_in_a_report_id_is_404(client):

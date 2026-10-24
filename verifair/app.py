@@ -1,11 +1,14 @@
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import psycopg
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from verifair import api, db, web
@@ -126,6 +129,13 @@ def create_app(settings: Settings) -> FastAPI:
         if response.headers.get("content-type", "").startswith("text/html"):
             response.headers["Content-Security-Policy"] = CSP
         return response
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, error: RequestValidationError):
+        # the errors echo the input, and ensure_ascii escapes a lone surrogate there that
+        # JSONResponse's UTF-8 encoding would turn into a 500
+        body = json.dumps({"detail": jsonable_encoder(error.errors())}, separators=(",", ":"))
+        return Response(body, 422, media_type="application/json")
 
     @app.get("/healthz")
     async def healthz():

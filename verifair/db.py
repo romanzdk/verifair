@@ -3,6 +3,7 @@ import hmac
 import itertools
 import json
 import logging
+import re
 import secrets
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -160,9 +161,17 @@ def _short(user_id: str) -> str:
     return f"{user_id[:4]}…"
 
 
+# Postgres text cannot hold NUL, and UTF-8 cannot encode a lone surrogate (JSON "\ud800")
+UNSTORABLE = re.compile("[\x00\ud800-\udfff]")
+
+
+def storable(text: str) -> bool:
+    return UNSTORABLE.search(text) is None
+
+
 def no_nul(text: str | None) -> str | None:
-    if text is not None and "\x00" in text:
-        raise ValueError("must not contain NUL characters")
+    if text is not None and not storable(text):
+        raise ValueError("must not contain NUL characters or lone surrogates")
     return text
 
 
