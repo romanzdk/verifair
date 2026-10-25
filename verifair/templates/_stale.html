@@ -1,1 +1,1 @@
-<div class="banner" role="status">A newer version of this report was pushed. Reload to review v{{ latest }}. <a href="{{ url }}">Reload</a></div>
+<div class="banner" role="{{ 'alert' if action_error else 'status' }}">{% if action_error %}{{ action_error }}.{% elif context_missing %}Reload this review before continuing.{% elif document_changed %}This document changed. Reload to review the current revision.{% else %}A newer version of this report was pushed. Reload to review v{{ latest }}.{% endif %} <a href="{{ url }}">Reload</a></div>

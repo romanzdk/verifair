@@ -35,6 +35,7 @@ verifair is a small web service where agents push markdown change-review reports
 - **Comment on any text.** Select a sentence to start a thread. Threads are blocking by default; a reviewer can mark one as a suggestion.
 - **Verdicts with rules.** Approve or request changes. Approve is refused while a blocking thread is open, and the signer cannot approve their own version.
 - **Versions.** The agent pushes a new version after feedback. Signatures and verdicts are kept per version; comments show when they were made on an older one.
+- **Plan first, when needed.** Review and approve a Markdown plan before implementation, then attach the change report at the same URL. Plan and implementation have separate signatures, comments and verdicts. Direct report submission still works.
 - **Built for agents.** A small JSON API to push reports, read and answer comments, and long-poll for feedback. Ships with an [agent skill](#agent-skill).
 - **An Inbox for people.** Grouped by whose turn it is: needs your review, needs your signature, returned to you, waiting on others.
 - **Two modes.** Local mode for one person or a small trusted group. Shared mode for a team behind an SSO proxy, with members, admins and per-member agent tokens.
@@ -49,6 +50,8 @@ verifair is a small web service where agents push markdown change-review reports
 3. Reviewers select text and comment. A comment is a blocking thread by default, or a non-blocking suggestion. The agent can read and answer threads through the API.
 4. A reviewer approves or requests changes. The person who signed cannot approve.
 5. A new version has no signature, so it goes back to `unsigned`. Signatures and verdicts are kept per version.
+
+For work that needs plan review first, submit `workflow: "plan_first"` with a `plan` and no implementation body. The author signs the plan and another person approves it. The change then waits for implementation. Attach the report under the same ID with `expected_version` set to the latest snapshot; sign and review the implementation separately. An unchanged plan keeps its approval across implementation versions. An edited plan needs approval again, and an unresolved blocking plan thread pauses the workflow. See [plan review](docs/reviewing.md#plan-first-reviews) and [the API](docs/api.md).
 
 ```mermaid
 sequenceDiagram
@@ -206,7 +209,7 @@ verifair needs Postgres 18 and HTTPS for any browser access outside `localhost`.
 verifair reviews the change report, not the diff.
 
 - Tools that review code feed its "Agent reviews" section: CodeRabbit, Greptile, Qodo, Devin Review, Claude Code Review.
-- Tools that review plans before the work starts sit earlier in the flow: Kiro, [Plannotator](https://github.com/backnotprop/plannotator).
+- Plan tools such as Kiro and [Plannotator](https://github.com/backnotprop/plannotator) can produce the Markdown reviewed before implementation.
 - [rcliao/comments](https://github.com/rcliao/comments) is the closest one: markdown review with a human-only verdict for agents. verifair adds the evidence template, versions, signing, a web UI for a team, and an API for agents to read and answer comments.
 
 ## Contributing

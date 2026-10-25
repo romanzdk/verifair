@@ -8,6 +8,7 @@ STATUS_LABELS = {
     "awaiting_review": "Awaiting review",
     "changes_requested": "Changes requested",
     "approved": "Approved",
+    "awaiting_implementation": "Awaiting implementation",
 }
 
 MODERATION = (
@@ -56,6 +57,26 @@ def compute_status(
     if "approve" in kinds:
         return "approved"
     return "awaiting_review"
+
+
+def plan_status(status: str, open_blocking: int) -> str:
+    return "changes_requested" if status == "approved" and open_blocking else status
+
+
+def review_stage(
+    *,
+    workflow: str,
+    has_body: bool,
+    plan_status: str | None,
+    implementation_status: str | None,
+) -> tuple[str, str]:
+    if workflow == "artifact":
+        return "implementation", implementation_status
+    if plan_status != "approved":
+        return "plan", plan_status
+    if not has_body:
+        return "awaiting_implementation", "awaiting_implementation"
+    return "implementation", implementation_status
 
 
 def reviewers(
@@ -145,5 +166,8 @@ def inbox(
         ),
         "sign": _newest_first([row for row in rows if is_mine(row, "unsigned")]),
         "returned": _newest_first([row for row in rows if is_mine(row, "changes_requested")]),
+        "implementation": _newest_first(
+            [row for row in rows if is_mine(row, "awaiting_implementation")]
+        ),
         "waiting": _newest_first([row for row in rows if is_mine(row, "awaiting_review")]),
     }

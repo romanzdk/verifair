@@ -386,3 +386,176 @@ def test_title_with_newlines_still_sends(smtp):
     subject, text = notify.review_email(REPORT | {"title": "A\nB"}, 1, "", "http://x", signer="Ann")
     send("smtp://localhost:1025", {"bob@example.com": text}, subject)
     assert smtp.sessions[0].sent[0][0]["Subject"] == 'Review requested: "A B"'
+
+
+TARGETS = [("plan", "plan revision 3"), ("implementation", "implementation v3")]
+PLAN_FIRST = REPORT | {"workflow": "plan_first"}
+
+
+@pytest.mark.parametrize(("target", "label"), TARGETS)
+def test_plan_first_draft_and_ready_identify_target_revision(target, label):
+    assert notify.report_pushed_text(PLAN_FIRST, 3, "http://x", target=target) == (
+        f"Draft {label} in billing-service: Prorate http://x/r/prorate?tab={target}"
+    )
+    assert notify.ready_for_review_text(PLAN_FIRST, 3, "Ann", "http://x", target=target) == (
+        f"Ready for review: Prorate {label} (risk high), "
+        f"signed by Ann http://x/r/prorate?tab={target}"
+    )
+
+
+def test_plan_first_formatters_default_to_implementation():
+    assert notify.report_pushed_text(PLAN_FIRST, 3, "http://x") == (
+        "Draft implementation v3 in billing-service: Prorate http://x/r/prorate?tab=implementation"
+    )
+    assert notify.ready_for_review_text(PLAN_FIRST, 3, "Ann", "http://x") == (
+        "Ready for review: Prorate implementation v3 (risk high), "
+        "signed by Ann http://x/r/prorate?tab=implementation"
+    )
+    subject, text = notify.review_email(PLAN_FIRST, 3, "", "http://x", signer="Ann")
+    assert subject == 'Review requested: "Prorate" (implementation v3)'
+    assert text.startswith('Ann signed implementation v3 of "Prorate".')
+    assert "http://x/r/prorate?tab=implementation\n" in text
+
+
+@pytest.mark.parametrize(("target", "label"), TARGETS)
+@pytest.mark.parametrize("section", [None, "intent"])
+def test_plan_first_comment_uses_captured_target_and_revision(target, label, section):
+    comment = {
+        "id": 7,
+        "author_name": "bot",
+        "section": section,
+        "body": "a" * 200,
+        "target": target,
+        "version": 3,
+    }
+    report = PLAN_FIRST | {"version": 8, "plan_revision": 6, "stage": "implementation"}
+    assert notify.comment_text(report, comment, "http://x") == (
+        f"bot commented on Prorate {label} › {section or 'report'}: "
+        f"{'a' * 140} http://x/r/prorate?tab={target}#vf_c7"
+    )
+
+
+@pytest.mark.parametrize(("target", "label"), TARGETS)
+@pytest.mark.parametrize(
+    ("verdict", "phrase"), [("approve", "approved"), ("request_changes", "requested changes on")]
+)
+def test_plan_first_verdict_uses_captured_target_and_revision(target, label, verdict, phrase):
+    row = {
+        "reviewer_name": "Ann",
+        "verdict": verdict,
+        "version": 3,
+        "summary": "Looks fine",
+        "target": target,
+    }
+    report = PLAN_FIRST | {"version": 8, "plan_revision": 6, "stage": "plan"}
+    assert notify.verdict_text(report, row, "http://x") == (
+        f"Ann {phrase} Prorate {label}: Looks fine http://x/r/prorate?tab={target}"
+    )
+
+
+@pytest.mark.parametrize(("target", "label"), TARGETS)
+def test_plan_first_slack_text_escapes_user_content(target, label):
+    report = EVIL | {"workflow": "plan_first"}
+    assert notify.report_pushed_text(report, 3, "http://x", target=target) == (
+        f"Draft {label} in a&amp;b: &lt;T&gt; http://x/r/p?tab={target}"
+    )
+    assert notify.ready_for_review_text(report, 3, "<@U1>&", "http://x", target=target) == (
+        f"Ready for review: &lt;T&gt; {label} (risk high), "
+        f"signed by &lt;@U1&gt;&amp; http://x/r/p?tab={target}"
+    )
+    comment = {
+        "id": 1,
+        "author_name": "<@U1>&",
+        "section": "a<b",
+        "body": "<script><!channel>&",
+        "target": target,
+        "version": 3,
+    }
+    assert notify.comment_text(report, comment, "http://x") == (
+        f"&lt;@U1&gt;&amp; commented on &lt;T&gt; {label} › a&lt;b: "
+        f"&lt;script&gt;&lt;!channel&gt;&amp; http://x/r/p?tab={target}#vf_c1"
+    )
+    verdict = {
+        "reviewer_name": "A&B",
+        "verdict": "approve",
+        "version": 3,
+        "summary": "<script><!here>&",
+        "target": target,
+    }
+    assert notify.verdict_text(report, verdict, "http://x") == (
+        f"A&amp;B approved &lt;T&gt; {label}: "
+        f"&lt;script&gt;&lt;!here&gt;&amp; http://x/r/p?tab={target}"
+    )
+
+
+@pytest.mark.parametrize(("target", "label"), TARGETS)
+@pytest.mark.parametrize("judge", ["", "A free-form plan excerpt without headings."])
+def test_plan_first_review_email_identifies_target_without_requiring_headings(target, label, judge):
+    subject, text = notify.review_email(
+        PLAN_FIRST, 3, judge, "http://x", signer="Alice", asker="Bob", target=target
+    )
+    assert subject == f'Review requested: "Prorate" ({label})'
+    blocks = [
+        f'Alice signed {label} of "Prorate". You were asked to review it by Bob.',
+        "Project: billing-service · Risk: high",
+    ]
+    if judge:
+        blocks.append(f"Judge this:\n{judge}")
+    blocks += [
+        f"Open it to comment, approve or request changes:\nhttp://x/r/prorate?tab={target}",
+        "— Sent by verifair. Replies to this mail are not read.",
+    ]
+    assert text == "\n\n".join(blocks)
+
+
+@pytest.mark.parametrize(("target", "label"), TARGETS)
+@pytest.mark.parametrize("signer", [None, "Alice"])
+def test_plan_first_email_when_reviewer_added_names_selected_target(target, label, signer):
+    subject, text = notify.review_email(
+        PLAN_FIRST, 3, "", "http://x", signer=signer, asker="Bob", added=True, target=target
+    )
+    signed = ", signed by Alice" if signer else ""
+    assert subject == f'Review requested: "Prorate" ({label})'
+    assert text.startswith(f'Bob asked you to review "Prorate" ({label}{signed}).\n\n')
+    assert f"http://x/r/prorate?tab={target}\n" in text
+
+
+@pytest.mark.parametrize("workflow", [None, "artifact"])
+@pytest.mark.parametrize("target", ["plan", "implementation"])
+def test_artifact_formatters_keep_exact_legacy_text_and_bare_links(workflow, target):
+    report = REPORT if workflow is None else REPORT | {"workflow": workflow}
+    assert notify.report_pushed_text(report, 3, "http://x", target=target) == (
+        "Draft report v3 in billing-service: Prorate http://x/r/prorate"
+    )
+    assert notify.ready_for_review_text(report, 3, "Ann", "http://x", target=target) == (
+        "Ready for review: Prorate v3 (risk high), signed by Ann http://x/r/prorate"
+    )
+    comment = {
+        "id": 1,
+        "author_name": "bot",
+        "section": None,
+        "body": "Hi",
+        "target": target,
+        "version": 3,
+    }
+    assert notify.comment_text(report, comment, "http://x") == (
+        "bot commented on Prorate › report: Hi http://x/r/prorate#vf_c1"
+    )
+    verdict = {
+        "reviewer_name": "Ann",
+        "verdict": "approve",
+        "version": 3,
+        "summary": "Fine",
+        "target": target,
+    }
+    assert notify.verdict_text(report, verdict, "http://x") == (
+        "Ann approved Prorate v3: Fine http://x/r/prorate"
+    )
+    subject, text = notify.review_email(report, 3, "", "http://x", signer="Alice", target=target)
+    assert subject == 'Review requested: "Prorate"'
+    assert text == (
+        'Alice signed v3 of "Prorate". You were asked to review it.\n\n'
+        "Project: billing-service · Risk: high\n\n"
+        "Open it to comment, approve or request changes:\nhttp://x/r/prorate\n\n"
+        "— Sent by verifair. Replies to this mail are not read."
+    )

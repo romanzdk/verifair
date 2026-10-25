@@ -210,7 +210,7 @@ details.me summary .ic14 { color: var(--text-subtle); }
 .chg-t { font: 600 14px/20px var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chg-m { margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .si.unsigned { color: var(--text-subtle); }
-.si.awaiting_review { color: var(--accent); }
+.si.awaiting_review, .si.awaiting_implementation { color: var(--accent); }
 .si.changes_requested { color: var(--risk-high); }
 .si.approved { color: var(--ok); }
 .risk { display: inline-flex; align-items: center; gap: 4px; font: 500 12px/16px var(--font); color: var(--text-muted); }
@@ -377,7 +377,6 @@ table.t form { margin: 0; }
 .denied a { color: var(--link); }
 
 
-body.has-verdict .app-main { padding-bottom: 90px; }
 .banner { padding: 8px 24px; background: var(--risk-medium-bg); color: var(--warn-text); font-size: 13px; }
 .head { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); }
 .head h1 { margin: 0 0 10px; font: 600 20px/28px var(--font); letter-spacing: -.01em; overflow-wrap: anywhere; }
@@ -390,7 +389,7 @@ body.has-verdict .app-main { padding-bottom: 90px; }
   font: 500 12px/16px var(--font); white-space: nowrap; background: var(--s-unsigned-bg); color: var(--s-unsigned);
 }
 .b-unsigned { background: var(--s-unsigned-bg); color: var(--s-unsigned); }
-.b-awaiting_review { background: var(--s-awaiting-bg); color: var(--s-awaiting); }
+.b-awaiting_review, .b-awaiting_implementation { background: var(--s-awaiting-bg); color: var(--s-awaiting); }
 .b-changes_requested { background: var(--s-changes-bg); color: var(--s-changes); }
 .b-approved { background: var(--s-approved-bg); color: var(--s-approved); }
 .b-stale, .tag-suggestion { background: var(--bg-hover); color: var(--text-muted); }
@@ -488,7 +487,7 @@ body.has-verdict .side { padding-bottom: 112px; }
 .name-prompt .error, .me-form .error { color: var(--risk-high); font-weight: 600; margin: 0; }
 
 .verdict {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex-shrink: 0;
   padding: 12px 24px; border-top: 1px solid var(--border); background: var(--bg);
 }
 .verdict textarea { flex: 1; height: 40px; min-height: 40px; resize: none; padding: 9px 10px; }
@@ -502,7 +501,6 @@ body.has-verdict .side { padding-bottom: 112px; }
 .app-main > .name-prompt { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; margin: 0; border-radius: 0; }
 
 @media (max-width: 720px) {
-  body.has-verdict .app-main { padding-bottom: 170px; }
   .head, .main { padding-left: 16px; padding-right: 16px; }
   .verdict { padding: 12px 16px; }
   .body { display: flex; flex-direction: column; }

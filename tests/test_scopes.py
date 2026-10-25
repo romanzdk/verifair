@@ -141,7 +141,12 @@ def test_all_is_shared_and_personal_scopes_filter_rows_counts_and_links(team):
 
 def test_my_reviews_includes_requested_work_before_activity_and_after_completion(team):
     seed(team)
-    assert team.get("/api/reports/requested/comments", headers=TOKEN).json() == {"threads": []}
+    assert team.get("/api/reports/requested/comments", headers=TOKEN).json() == {
+        "threads": [],
+        "target": "implementation",
+        "revision": 1,
+        "current_version": 1,
+    }
     before = team.get("/changes?scope=reviewer", headers=ALICE).text
     assert 'href="/r/requested"' in before and 'href="/r/owned"' not in before
     assert team.post("/r/requested/sign", headers=BOB, data={"version": 1}).status_code == 200
@@ -278,7 +283,13 @@ def test_shared_my_changes_ignores_a_legacy_author_equal_to_the_user(team):
     assert 'href="/r/legacy"' not in team.get("/changes?scope=author", headers=ALICE).text
 
 
-GROUPS = {"Needs your review", "Needs your signature", "Returned to you", "Waiting on others"}
+GROUPS = {
+    "Needs your review",
+    "Needs your signature",
+    "Returned to you",
+    "Waiting on others",
+    "Needs implementation",
+}
 
 
 def sections(page):
@@ -415,3 +426,176 @@ def test_sign_and_verdict_refresh_the_sidebar_counts(team):
     assert oob_nav(approved.text)
     assert "nav-n" not in nav_link(approved.text, "/")
     assert "nav-n" not in nav_link(approved.text, "/p/billing")
+
+
+def test_plan_inbox_lifecycle(team, settings, monkeypatch):
+    from verifair import web
+
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="plan",
+            project="p",
+            title="Plan",
+            risk="high",
+            workflow="plan_first",
+            body=None,
+            body_supplied=False,
+            plan="One paragraph.",
+            author_id="alice@example.com",
+            reviewers=["bob@example.com"],
+        )
+    assert "Needs your signature" in inbox(team, ALICE)
+    assert "Needs your review" not in inbox(team, BOB)
+    form = {"version": 1, "target": "plan", "revision": 1}
+    assert team.post("/r/plan/sign", data=form, headers=ALICE).status_code == 200
+    assert "Needs your review" in inbox(team, BOB)
+    changes = team.post(
+        "/r/plan/verdict",
+        data=form | {"verdict": "request_changes", "summary": "Revise"},
+        headers=BOB,
+    )
+    assert changes.status_code == 200 and "Returned to you" in inbox(team, ALICE)
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="plan",
+            project="p",
+            title="Plan",
+            risk="high",
+            body=None,
+            body_supplied=False,
+            plan="Revised paragraph.",
+            expected_version=1,
+        )
+    form = {"version": 2, "target": "plan", "revision": 2}
+    team.post("/r/plan/sign", data=form, headers=ALICE)
+    team.post("/r/plan/verdict", data=form | {"verdict": "approve"}, headers=BOB)
+    owner = team.get("/", headers=ALICE).text
+    assert "Needs implementation" in sections(owner)
+    assert 'class="nav-n acc">1<' in nav_link(owner, "/")
+    assert "Needs implementation" not in inbox(team, BOB)
+    pending = team.get("/changes?tab=awaiting_implementation", headers=ALICE).text
+    assert (
+        'aria-label="Open · 1"' in pending and 'aria-label="Awaiting implementation · 1"' in pending
+    )
+    assert 'href="/r/plan?tab=plan"' in pending
+    assert "Plan approved" in team.get("/r/plan", headers=ALICE).text
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="plan",
+            project="p",
+            title="Plan",
+            risk="high",
+            body="## Intent\nEvidence",
+            expected_version=2,
+        )
+    assert "Needs your signature" in inbox(team, ALICE)
+    assert "Needs your review" not in inbox(team, BOB)
+    form = {"version": 3, "target": "implementation", "revision": 3}
+    team.post("/r/plan/sign", data=form, headers=ALICE)
+    assert "Needs your review" in inbox(team, BOB)
+
+    def no_plan_query(*args, **kwargs):
+        raise AssertionError("list pages must use batched plan state")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "plan_review_state", no_plan_query)
+        with closing(db.connect(settings.database_url)) as conn:
+            rows = web._change_rows(conn, db.list_reports(conn))
+    assert len(rows) == 1 and rows[0]["reviewed_by"] == set()
+    assert rows[0]["report"]["signer_id"] == "alice@example.com"
+    team.post("/r/plan/verdict", data=form | {"verdict": "approve"}, headers=BOB)
+    approved = team.get("/changes?tab=approved&scope=reviewer", headers=BOB).text
+    assert 'href="/r/plan?tab=implementation"' in approved
+    with closing(db.connect(settings.database_url)) as conn:
+        db.add_comment(
+            conn,
+            report_id="plan",
+            version=2,
+            target="plan",
+            author_id="bob@example.com",
+            author_name="bob",
+            body="Reopened concern",
+        )
+    assert "Returned to you" in inbox(team, ALICE)
+    assert 'href="/r/plan?tab=plan"' in team.get("/changes", headers=BOB).text
+
+
+def test_plan_shared_token_permissions(team, settings):
+    created = team.post(
+        "/api/reports",
+        headers=TOKEN,
+        json={
+            "id": "plan-token",
+            "project": "p",
+            "title": "Token plan",
+            "risk": "low",
+            "workflow": "plan_first",
+            "plan": "A plan without headings.",
+        },
+    )
+    assert created.status_code == 201
+    with closing(db.connect(settings.database_url)) as conn:
+        admin_token, _ = db.create_token(conn, owner_id="boss", label="admin agent")
+    for token in (AGENTS["bob@example.com"], {"Authorization": f"Bearer {admin_token}"}):
+        refused = team.post(
+            "/api/reports",
+            headers=token,
+            json={
+                "id": "plan-token",
+                "project": "p",
+                "title": "Forged",
+                "risk": "low",
+                "plan": "Changed",
+                "expected_version": 1,
+            },
+        )
+        assert refused.status_code == 403
+        assert (
+            team.post(
+                "/api/reports/plan-token/comments",
+                headers=token,
+                json={"target": "plan", "revision": 1, "body": "Forged"},
+            ).status_code
+            == 403
+        )
+    assert (
+        team.post(
+            "/r/plan-token/sign",
+            headers=TOKEN,
+            data={"version": 1, "target": "plan", "revision": 1},
+        ).status_code
+        == 401
+    )
+    assert (
+        team.post(
+            "/r/plan-token/sign",
+            headers=ALICE,
+            data={"version": 1, "target": "plan", "revision": 1},
+        ).status_code
+        == 200
+    )
+    comment = team.post(
+        "/r/plan-token/comments",
+        headers=BOB,
+        data={"version": 1, "target": "plan", "revision": 1, "body": "Human concern"},
+    )
+    assert comment.status_code == 200
+    with closing(db.connect(settings.database_url)) as conn:
+        cid = db.list_comments(conn, "plan-token", target="plan")[0]["id"]
+    assert (
+        team.post(f"/api/reports/plan-token/comments/{cid}/resolve", headers=TOKEN).status_code
+        == 403
+    )
+    own = team.post(
+        "/api/reports/plan-token/comments",
+        headers=TOKEN,
+        json={"target": "plan", "revision": 1, "body": "Agent response", "parent_id": cid},
+    )
+    assert own.status_code == 201
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.thread_root(conn, "plan-token", cid)["resolved_at"] is None
+        assert db.get_signature(conn, "plan-token", 1) is None
+        assert db.list_verdicts(conn, "plan-token", target="plan") == []

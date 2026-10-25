@@ -5,6 +5,7 @@ Agents use the HTTP API to push change reports, read feedback and answer it. Eve
 The running app also serves the generated OpenAPI docs at `/docs` (in shared mode only for signed-in members).
 
 - [Push a report](#push-a-report)
+- [Plan-first review](#plan-first-review)
 - [Read a report](#read-a-report)
 - [Read and answer comments](#read-and-answer-comments)
 - [Wait for feedback](#wait-for-feedback)
@@ -44,7 +45,7 @@ The commands below use the report `id` as `$ID`. In shared mode, use your own ag
 
 - `id` is optional on the first push. Without it, verifair makes one from the title and returns it.
 - To add a new version, push again with the same `id`. Without `id`, every push makes a new report. Comments stay on the version they were made on; the API marks them `stale` when a newer version exists and `found` when the quoted text can be located in the current version, including after a section rename or move.
-- Required: `project`, `title` (1 to 200 characters), `risk` (`low`, `medium` or `high`) and `body` (markdown).
+- Every push requires `project`, `title` (1 to 200 characters) and `risk` (`low`, `medium` or `high`). The default `artifact` workflow also requires nonblank Markdown `body` on every push. Select `workflow: "plan_first"` on creation to review a plan before submitting an implementation.
 - `project` and `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`: letters, digits, `.`, `_` and `-`, starting with a letter or digit, up to 100 characters.
 - `ticket_url`, `session_url` and `links[].url` must start with `http://` or `https://`.
 - Optional `author` (up to 60 characters): the human author's display name. Defaults to `agent`. Use `author_id` to link ownership to a stable identity. In shared mode `author` is ignored and the report shows the token owner's name.
@@ -52,7 +53,7 @@ The commands below use the report `id` as `$ID`. In shared mode, use your own ag
 - On later versions, omitted `author` and `author_id` retain their previous values. In local mode a supplied `author_id` transfers ownership. `null` for `author_id` also leaves the existing value unchanged.
 - `reviewers` only adds review requests: the ids are added to the ones the change already has. `[]`, `null` or leaving it out changes nothing. To remove a request, use **Remove** on the review page in shared mode (see [reviewing.md](reviewing.md#request-a-review)). Requests belong to the change and survive signing, verdicts and new versions.
 - Optional provenance: `agent` and `model` (up to 60 characters each), `session_url`, and `commit` (7 to 40 lowercase hex characters, the commit the version describes). The report keeps the latest `agent`, `model` and `session_url`; `commit` is stored per version.
-- The body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as a top-level H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
+- An explicitly supplied body must contain every section in `VERIFAIR_REQUIRED_SECTIONS` as a top-level H2 heading, spelled exactly (case matters). Otherwise the push is refused with 422 and nothing is saved: `{"detail": "missing sections", "sections": ["Rollback"]}`. The default is `Verification,Rollback,Security impact`; set the variable to an empty string to turn the check off.
 - Unknown JSON keys are rejected with 422. So is text that holds a NUL character (`\u0000`) or a lone surrogate (such as `\ud800`), because Postgres cannot store them.
 - In shared mode the token owner owns the report. `author_id` can be left out; if sent, it must be the token owner, or the push gets 403 `"author_id must be the token owner."`. A push to an `id` that belongs to another member's report gets 403 `"This report belongs to another member."`, also when the token owner is an admin. A push to an `id` whose report has no owner gets 403 `"This report has no owner. Push it again with an agent token under a new id."`. Every requested reviewer must be an active member, or the push gets 422 with every id that is not: `{"detail": "inactive reviewers", "reviewers": ["ghost@example.com"]}`.
 
@@ -61,6 +62,8 @@ A push sends a "draft" message to Slack (if configured). The "ready for review" 
 Report markdown: raw HTML is shown as text, not rendered, and `javascript:` links are dropped. Use plain markdown only.
 
 ### Optional plan
+
+This section describes the default `artifact` workflow. Its Plan tab stays read-only; it has no plan comments, signatures or verdicts.
 
 `POST /api/reports` accepts one optional `plan`: Markdown contents, not a file path or URL to load. Any design or implementation plan is accepted; no template or report headings are required for it. The implementation `body` and all its required sections are still required on every push.
 
@@ -85,8 +88,8 @@ from pathlib import Path
 print(json.dumps({
     "id": "my-change", "project": "my-project",
     "title": "Describe the implemented change", "risk": "low",
-    "body": Path(sys.argv[1]).read_text(encoding="utf-8"),
-    "plan": Path(sys.argv[2]).read_text(encoding="utf-8"),
+    "body": Path(sys.argv[1]).read_bytes().decode("utf-8"),
+    "plan": Path(sys.argv[2]).read_bytes().decode("utf-8"),
 }))
 PY
 ```
@@ -102,9 +105,52 @@ VERIFAIR_API_TOKEN=change-me bash scripts/push-sample.sh
 VERIFAIR_API_TOKEN=change-me VERIFAIR_URL=https://verifair.example.com VERIFAIR_ALLOW_REMOTE=1 bash scripts/push-sample.sh
 ```
 
+## Plan-first review
+
+Create a review with `workflow: "plan_first"`, one nonblank Markdown `plan`, and no implementation body. A plan can be any design or implementation document, including a paragraph or H1-only document; no template, skill or required headings apply. Send file contents, not a path or a URL for the server to load.
+
+```json
+{
+  "id": "proration", "project": "billing-service", "title": "Proration", "risk": "high",
+  "workflow": "plan_first", "plan": "# Design\nUse daily proration."
+}
+```
+
+The response is still HTTP 201 `{id, version, url}`. If you omit `id` on creation, save the returned ID. Reuse it on every update; implementation attaches to the same review and `/r/{id}` URL. Workflow is fixed at creation. Omit `workflow` on updates to inherit it; changing it gets 409 `"workflow cannot be changed"`.
+
+A human owner signs the exact current plan revision; a different human reviewer approves it. Agent tokens cannot sign or submit verdicts. Once metadata reports `stage: "awaiting_implementation"`, submit the implementation at that same ID, repeating the required metadata and guarding the current global snapshot:
+
+```json
+{
+  "id": "proration", "project": "billing-service", "title": "Proration", "risk": "high",
+  "expected_version": 1,
+  "body": "## Verification\nTests passed.\n\n## Rollback\nRevert.\n\n## Security impact\nNone."
+}
+```
+
+Read the current state before choosing `expected_version`; the example assumes snapshot 1 is still current. A plan-first update requires this guard and at least one explicitly supplied content field. Metadata-only pushes get 422. Stale guards get `409 {"detail":"review changed","current_version":N}`. Creation must omit the guard.
+
+| Input | Artifact workflow | Plan-first workflow |
+| --- | --- | --- |
+| Omitted `body` | 422 on every push | No implementation on creation; inherit on update |
+| `body: null` | 422 | Accepted on creation; 422 on update |
+| Supplied nonblank `body` | Required sections apply | Forbidden on creation; later requires current plan approval and required sections |
+| Omitted `plan` | No plan on creation; inherit on update | 422 on creation; inherit on update |
+| `plan: null` | No plan on creation; remove from new snapshot on update | 422; a plan cannot be removed |
+| Supplied nonblank `plan` | Read-only context | Reviewable document; changes require fresh human signature and approval |
+| Non-null `commit` with omitted body | Invalid because body is required | 422, including when an existing body would be inherited |
+
+Blank strings, NUL and lone surrogates remain 422. Both documents are stored exactly, preserving spaces, Unicode and line endings. If exact bytes matter, load the UTF-8 file with `Path(path).read_bytes().decode("utf-8")`; text-mode file reads can translate CRLF. Neither document is normalized by the server. Required implementation headings are checked only on supplied bodies. The 1,048,576-byte limit covers the whole encoded request, including both documents and metadata.
+
+Every push creates a new global snapshot, even with identical text. A plan revision is the snapshot that began the current continuous run of exactly identical plan text. For example, unchanged plan revision 1 can appear in snapshots 1 and 2; an edited plan in snapshot 3 is plan revision 3. Reverting text after an intervening edit creates another revision and never restores an older approval. Implementation revisions always use global snapshot numbers.
+
+An unchanged approved plan keeps its approval across body pushes. Supplying the same approved plan together with a body is allowed. Changing a plan and submitting a body in the same push is refused: `409 {"detail":"current plan is not approved","plan_revision":R}`. There is no owner/admin override. A plan-only update inherits an existing body and its commit, but that new implementation snapshot needs a new human signature and verdicts. A snapshot with no implementation has `commit: null`.
+
+An unresolved blocking plan thread, including an older unresolved concern, pauses effective approval and implementation submission, signing and verdicts. Reopening a blocker or making a suggestion blocking also pauses it. Resolving it or making it non-blocking restores an otherwise approved unchanged plan without another verdict. Editing the plan instead always needs fresh approval. Implementation threads affect implementation approval separately. No stored signatures or verdicts are deleted.
+
 ## Read a report
 
-`GET /api/reports/$ID` returns the report metadata, status, versions and verdicts. Its shape is unchanged when a plan is attached: it returns neither the Markdown body nor plan contents, including in `versions`. Keep your local source files; read the plan on the report page.
+`GET /api/reports/$ID` returns the report metadata, status, versions and verdicts. It returns neither Markdown document, including in `versions`. Use the exact snapshot route below to read them.
 
 ```json
 {
@@ -123,21 +169,56 @@ VERIFAIR_API_TOKEN=change-me VERIFAIR_URL=https://verifair.example.com VERIFAIR_
   "signed_by": "Alice",
   "signed_at": "2026-10-21T09:30:00+00:00",
   "status": "changes_requested",
+  "workflow": "artifact",
+  "stage": "implementation",
+  "implementation_status": "changes_requested",
+  "plan_review": null,
   "current_version": 2,
   "versions": [
-    {"version": 1, "created_at": "2026-10-21T09:00:12+00:00", "commit": "a1b2c3d"},
-    {"version": 2, "created_at": "2026-10-21T11:30:40+00:00", "commit": null}
+    {"version": 1, "created_at": "2026-10-21T09:00:12+00:00", "commit": "a1b2c3d", "has_implementation": true, "plan_revision": null},
+    {"version": 2, "created_at": "2026-10-21T11:30:40+00:00", "commit": null, "has_implementation": true, "plan_revision": null}
   ],
   "verdicts": [
-    {"reviewer": "Alice", "reviewer_id": "4f0c1a", "verdict": "approve", "version": 1, "current": false, "summary": "", "created_at": "2026-10-21T10:02:00+00:00"},
-    {"reviewer": "Bob", "reviewer_id": "9be2d7", "verdict": "request_changes", "version": 2, "current": true, "summary": "Add the leap year case.", "created_at": "2026-10-21T12:15:09+00:00"}
+    {"reviewer": "Alice", "reviewer_id": "4f0c1a", "verdict": "approve", "target": "implementation", "version": 1, "current": false, "summary": "", "created_at": "2026-10-21T10:02:00+00:00"},
+    {"reviewer": "Bob", "reviewer_id": "9be2d7", "verdict": "request_changes", "target": "implementation", "version": 2, "current": true, "summary": "Add the leap year case.", "created_at": "2026-10-21T12:15:09+00:00"}
   ]
 }
 ```
 
-- `status` is `unsigned`, `awaiting_review`, `changes_requested` or `approved`. It is `unsigned` until someone signs `current_version`; after that it only counts verdicts on `current_version` from people other than its signer. Earlier verdicts by the signer remain in the history.
+- For artifact reviews, `status` is `unsigned`, `awaiting_review`, `changes_requested` or `approved`. It is `unsigned` until someone signs `current_version`; after that it only counts verdicts on `current_version` from people other than its signer. Earlier verdicts by the signer remain in the history.
 - `signed_by` and `signed_at` describe the signature on `current_version`, or are `null`. `agent`, `model` and `session_url` are `null` when the push did not send them.
 - `verdict` is `approve` or `request_changes`. `current` is true only for each reviewer's latest verdict on `current_version`. When a reviewer changes their verdict on the same version, the older one has `current: false`, like verdicts on earlier versions.
+
+For plan-first reviews, top-level `status` is the overall gate; it can also be `awaiting_implementation`. `stage` is `plan` until the current plan is effectively approved, then `awaiting_implementation` without a body, or `implementation` with a body. `implementation_status` and the legacy implementation `signed_by`/`signed_at` are null until body attachment. Raw implementation status can remain `approved` while a reopened plan makes the overall status `changes_requested`.
+
+`plan_review` is null for artifact reviews. For plan-first reviews it contains:
+
+```json
+{
+  "revision": 1, "status": "approved", "signed_by": "Alice",
+  "signed_at": "2026-10-21T09:30:00+00:00", "open_blocking": 0,
+  "verdicts": [
+    {"reviewer": "Bob", "reviewer_id": "bob@example.com", "target": "plan", "verdict": "approve", "version": 1, "current": true, "summary": "", "created_at": "2026-10-21T10:02:00+00:00"}
+  ]
+}
+```
+
+Plan `current` verdict flags compare against that plan revision, independent of the global snapshot. Top-level `verdicts` remain implementation-only. Each version-list item adds `has_implementation` and `plan_revision`.
+
+### Exact snapshot readback
+
+`GET /api/reports/$ID/versions/2` returns the immutable stored documents:
+
+```json
+{
+  "version": 2, "created_at": "2026-10-21T11:30:40+00:00", "commit": "abcdef0",
+  "body": "## Verification\nTests passed.", "plan": "# Design\nUse daily proration.", "plan_revision": 1
+}
+```
+
+`body` is null before implementation attachment; `plan` is null when absent. Missing review/version gets 404. This route needs the same bearer token as other reads. Each assembled metadata/feedback response reads one consistent database snapshot, but separate HTTP calls may observe different current versions.
+
+History preserves exact Markdown and revision-associated live feedback. It is not a frozen replay: replies, resolution and blocking state on included older threads stay live. Historical pages omit roots and verdicts from later document revisions. Metadata such as title and author still describes the latest report; it is not historically versioned or separately signed.
 
 ## Read and answer comments
 
@@ -150,10 +231,12 @@ Response (`open=true` leaves out resolved threads):
 
 ```json
 {
+  "current_version": 2, "target": "implementation", "revision": 2,
   "threads": [
     {
       "id": 1,
       "version": 1,
+      "target": "implementation",
       "parent_id": null,
       "section": "Edge cases",
       "quote": "first day of the cycle",
@@ -173,7 +256,7 @@ Response (`open=true` leaves out resolved threads):
       "match_start": 0,
       "replies": [
         {
-          "id": 2, "version": 1, "parent_id": 1, "section": "Edge cases", "quote": "first day of the cycle",
+          "id": 2, "version": 1, "target": "implementation", "parent_id": 1, "section": "Edge cases", "quote": "first day of the cycle",
           "author": "agent", "author_id": "agent", "author_type": "agent",
           "body": "Cycle start day, inclusive.", "created_at": "2026-10-21T09:20:41+00:00",
           "blocking": true, "resolved": false, "resolved_by": null, "stale": true, "found": true,
@@ -185,7 +268,7 @@ Response (`open=true` leaves out resolved threads):
 }
 ```
 
-- `stale` is true when the comment was made on an older version.
+- `stale` is true when the comment belongs to an older revision of the selected target. An unchanged plan does not become stale just because implementation creates another global snapshot.
 - `found` is true when the quote can be located in the current version, or when the thread has no quote. Matching first tries sections with the original heading, then all sections, and tolerates whitespace changes.
 - `moved` is true when the quote was found in another section. `match_start` is its zero-based offset in that section’s normalized plain text, or `null` for an unlocated quote or a thread without a quote.
 - `prefix` and `suffix` hold optional context immediately before and after the quote, used to choose between repeated matches.
@@ -193,7 +276,7 @@ Response (`open=true` leaves out resolved threads):
 - `author_type` is `agent` or `human`.
 - `resolved_by` is, in shared mode, the member id of the person who resolved the thread, or `agent` when an agent token did. It is `null` for open threads, in local mode, and for threads resolved before the switch to shared mode.
 
-Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?, prefix?, suffix?, blocking?}`. The response is 201 with one comment (same fields as above, without `stale`, `found`, `moved`, `match_start` and `replies`). For a reply, `resolved` and `resolved_by` describe the thread after the reply was saved, so a reply that leaves the thread resolved returns `"resolved": true`.
+Post a comment with `POST /api/reports/$ID/comments` and `{body, author?, parent_id?, section?, quote?, prefix?, suffix?, blocking?, target?, revision?}`. The response is 201 with one comment (same fields as above, without `stale`, `found`, `moved`, `match_start` and `replies`). For a reply, `resolved` and `resolved_by` describe the thread after the reply was saved, so a reply that leaves the thread resolved returns `"resolved": true`.
 
 ```bash
 curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comments" \
@@ -210,13 +293,23 @@ curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comment
 - In shared mode `author` is ignored. The comment shows the token owner's name with `'s agent`, for example `Jane's agent`.
 - In shared mode an agent token can only comment on its owner's reports. Other reports return 403 `"This report belongs to another member."`, and reports with no owner return 403 `"This report has no owner. Push it again with an agent token under a new id."`.
 
+### Select feedback target
+
+Comments and wait default to `target=implementation`. For plan-first feedback explicitly request `GET /api/reports/$ID/comments?target=plan&open=true` or `/wait?target=plan`. Before body attachment, default implementation reads return no threads/events and `revision: null`. Artifact plans stay read-only: explicit plan feedback reads/writes get 422 `"artifact plans are read-only"`.
+
+For a plan root send `{"body":"Which rounding rule?","target":"plan","revision":1}` using the current plan revision. A root without target defaults to implementation; its revision can be omitted for legacy clients and is then chosen under the write lock. Supplying revision guards the current selected document; stale guards return `409 {"detail":"document changed","target":"plan","current_revision":R}`. Writing implementation comments before attachment gets 409 `"implementation has not been attached"`.
+
+Replies may omit target to inherit the root's target. An explicit different target gets 422. A supplied reply revision checks the **current** target revision, while the saved reply retains the older root's revision and anchor. This allows answering old concerns after a document edit; do not send the root's old revision as a guard against the new text. Root section/quote validation runs against the locked current Markdown.
+
+Comment/verdict records add `target`; their legacy `version` field means that document's revision. Comments and wait envelopes, including timeout, add `current_version`, `target` and `revision`, assembled with their threads/events in one consistent read. Compare these identities with metadata and exact readback; if they differ, reread before a guarded write.
+
 To close a thread: `POST /api/reports/$ID/comments/{comment_id}/resolve`. `comment_id` can be the first comment or any reply; the whole thread is resolved. The response is `{"resolved": true}`. Calling it again does nothing. Reviewers can reopen a resolved thread in the web UI.
 
 In shared mode an agent token can only resolve threads the agent started, on its owner's reports. On another member's report it gets 403 `"This report belongs to another member."`. On a thread a person started it gets 403 `"Agent tokens can only resolve threads the agent started on its owner's reports."`.
 
 ## Wait for feedback
 
-`GET /api/reports/$ID/wait` waits for a verdict or a new root comment on the latest version. It checks the database every 0.5 seconds and returns one event. Replies, signatures, resolutions and version pushes are not events. Each check uses the latest version, so feedback on an older version is ignored even if it arrives during the wait.
+`GET /api/reports/$ID/wait` waits for a verdict or a new root comment on the current revision of the selected target. It checks the database every 0.5 seconds and returns one event. Replies, signatures, moderation (including resolve/reopen/blocking changes) and version pushes are not events. Each check follows the current selected revision, never a pinned snapshot. Feedback on older revisions is ignored, but feedback on an unchanged plan still qualifies after a body push advances the global snapshot.
 
 ```bash
 curl -sS --fail-with-body --max-time 60 -G \
@@ -227,14 +320,15 @@ curl -sS --fail-with-body --max-time 60 -G \
   "http://localhost:8000/api/reports/$ID/wait"
 ```
 
+- `target` is `implementation` (default) or `plan`; select `plan` explicitly for plan-first feedback.
 - `for` is `verdict`, `comment` or `any` (the default).
 - `timeout` is seconds, greater than zero and at most 55; the default is 55. Fractions are accepted.
 - `since` is an ISO datetime. Only events strictly newer than it qualify; offsets are compared as instants and a datetime without an offset means UTC. Omitting it snapshots existing event IDs on the first database check and waits for later inserts, including inserts in the same second. Rows inserted after that snapshot remain eligible on subsequent checks.
 - An event returns `event`, `since`, `next_since` and either `verdict` (the same fields as a report verdict) or `comment` (the same fields as the POST comment response). The earliest qualifying timestamp wins; verdicts precede comments when timestamps tie.
 - In shared mode every check also checks the token again. If the token is revoked or its owner is deactivated during the wait, the call ends with 401 `"invalid token"`.
-- A timeout returns `{"event": "timeout", "since": "...", "next_since": "..."}` with the same timestamp in both fields. `since` is the supplied instant normalized to UTC, or the UTC request start time when omitted. On an event, `next_since` is the event’s `created_at`.
+- A timeout returns `{"event": "timeout", "since": "...", "next_since": "...", "current_version": 2, "target": "plan", "revision": 1}` with the same timestamp in both fields. `since` is the supplied instant normalized to UTC, or the UTC request start time when omitted. On an event, `next_since` is the event’s `created_at`.
 
-This endpoint signals feedback; it does not provide a lossless event stream. Stored event timestamps have second precision, so reusing `next_since` excludes other events from that same second. Read the report and comment endpoints after a signal to collect all feedback.
+This endpoint signals feedback; it does not provide a lossless event stream. Stored event timestamps have second precision, so reusing `next_since` excludes other events from that same second. After **every result or timeout**, reread metadata and selected-target comments before interpreting effective approval or writing. This also catches non-events such as reopening. There is no lossless replay or durable resume cursor.
 
 ## Errors
 
@@ -242,9 +336,9 @@ This endpoint signals feedback; it does not provide a lossless event stream. Sto
 | --- | --- |
 | 401 | `"invalid token"`. In shared mode a bearer value that does not start with `vf_` gets `"The shared token is not accepted in shared mode. Use a member agent token."` |
 | 403 | shared mode only: `"This report belongs to another member."`, `"This report has no owner. Push it again with an agent token under a new id."`, `"author_id must be the token owner."` or `"Agent tokens can only resolve threads the agent started on its owner's reports."` |
-| 404 | `"report not found"`, `"parent not found"` or `"comment not found"` |
-| 409 | `"id belongs to another project"` |
-| 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"quote not found"`, `"ambiguous quote"`, `"unknown section"`, `"missing sections"` or, in shared mode, `"inactive reviewers"` |
+| 404 | `"report not found"`, `"version not found"`, `"parent not found"` or `"comment not found"` |
+| 409 | `"id belongs to another project"`, `"workflow cannot be changed"`, `"review changed"` with `current_version`, `"document changed"` with `target`/`current_revision`, `"current plan is not approved"` with `plan_revision`, or `"implementation has not been attached"` |
+| 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"quote not found"`, `"ambiguous quote"`, `"unknown section"`, `"missing sections"`, workflow/content/guard errors described above, `"artifact plans are read-only"`, `"plan revision is required"`, `"reply target conflicts with root target"`, or, in shared mode, `"inactive reviewers"` |
 | 413 | `"request body too large"`: the request body is over 1 MB (1,048,576 bytes). Checked before the body is parsed, for API and web routes |
 | 503 | not JSON: the plain text `The database is not available. Try again in a moment.` with a `Retry-After: 5` header. The database cannot be reached, or no connection was free within 10 seconds. Web pages answer the same way. If the connection drops while a write is being saved, the change may already be stored: read it back before sending it again |
 
@@ -256,14 +350,14 @@ An unknown section also lists the valid headings: `{"detail": "unknown section",
 
 ### Required sections
 
-A push is refused with 422 if the body lacks a required top-level H2 heading. Headings follow Markdown syntax, including closing hashes (`## Verification ###`) and Setext H2 headings. Headings inside code blocks and the synthetic `Intro`/`Report` sections shown by the UI do not count. The list comes from `VERIFAIR_REQUIRED_SECTIONS`. The default is `Verification,Rollback,Security impact`. Set it to an empty string to turn the check off.
+A supplied implementation body is refused with 422 if it lacks a required top-level H2 heading. Headings follow Markdown syntax, including closing hashes (`## Verification ###`) and Setext H2 headings. Headings inside code blocks and the synthetic `Intro`/`Report` sections shown by the UI do not count. The list comes from `VERIFAIR_REQUIRED_SECTIONS`. The default is `Verification,Rollback,Security impact`. Set it to an empty string to turn the check off.
 
 ### Provenance
 
-`agent`, `model`, `session_url` and `commit` tell the reader who wrote the report and what it describes. The page shows who wrote it and the commit next to each version. Agents should also add a trailer to their own commits:
+`agent`, `model`, `session_url` and `commit` tell the reader who wrote the report and what it describes. The page shows the commit next to each snapshot. A non-null commit must accompany a supplied implementation body; plan-only updates carry any inherited body's commit. Only humans sign and give verdicts in the web UI, separately for plan and implementation. Agent tokens have no signature/verdict API.
 
-```
-Assisted-by: AGENT:MODEL
-```
+Local mode trusts the local browser's cookie identity and shared API token; it does not prove a human's identity against a directory. Use shared mode with trusted identity headers for enforced membership/ownership. Plan approval does not change that trust boundary.
 
-For example `Assisted-by: claude:opus`. Agents do not add `Signed-off-by`. Only a human does that.
+### Upgrade boundary
+
+Restart all writers together after this schema upgrade. Existing reviews stay `artifact` and existing feedback stays implementation-targeted. Mixed old writers and plan-first data are unsupported. Preserve the database when rolling back; older code cannot safely interpret plan-only snapshots with null body. See [deployment.md](deployment.md) before a code/schema rollback.

@@ -94,7 +94,10 @@ def test_push_plan_presence_semantics(client, settings):
         assert db.get_version(conn, "null", 1)["plan"] is None
     metadata = client.get("/api/reports/prorate", headers=H).json()
     assert "plan" not in metadata and "body" not in metadata
-    assert all(set(v) == {"version", "created_at", "commit"} for v in metadata["versions"])
+    assert all(
+        set(v) == {"version", "created_at", "commit", "has_implementation", "plan_revision"}
+        for v in metadata["versions"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -141,7 +144,7 @@ def test_plan_does_not_replace_required_body(strict_client, settings):
     payload = {"project": "billing-service", "title": "Missing", "risk": "high", "plan": valid_body}
     missing = strict_client.post("/api/reports", json=payload, headers=H)
     assert missing.status_code == 422
-    assert missing.json()["detail"][0]["loc"] == ["body", "body"]
+    assert missing.json() == {"detail": "artifact reviews require body"}
     for body in [None, "", " \n "]:
         assert push(strict_client, id="prorate", body=body, plan=valid_body).status_code == 422
     invalid = push(strict_client, id="prorate", body="## Other\nx", plan=valid_body)
@@ -202,7 +205,12 @@ def test_plan_headings_and_quotes_are_not_report_comment_anchors(client):
         {"detail": "unknown section", "sections": ["Intent", "Edge cases"]},
     )
     assert _comment(client, section="Intent", quote="Plan intent.").status_code == 422
-    assert client.get("/api/reports/prorate/comments", headers=H).json() == {"threads": []}
+    assert client.get("/api/reports/prorate/comments", headers=H).json() == {
+        "threads": [],
+        "current_version": 1,
+        "target": "implementation",
+        "revision": 1,
+    }
     assert _comment(client, section="Intent", quote="Full new price.").status_code == 201
 
 
@@ -245,6 +253,7 @@ def test_comment_roundtrip_and_open_filter(client):
     assert root.json() == {
         "id": cid,
         "version": 1,
+        "target": "implementation",
         "parent_id": None,
         "section": "Intent",
         "quote": "Full new price.",
@@ -275,7 +284,12 @@ def test_comment_roundtrip_and_open_filter(client):
     done = client.post(f"/api/reports/prorate/comments/{cid}/resolve", headers=H)
     assert (done.status_code, done.json()) == (200, {"resolved": True})
     only_open = client.get("/api/reports/prorate/comments?open=true", headers=H).json()
-    assert only_open == {"threads": []}
+    assert only_open == {
+        "threads": [],
+        "current_version": 1,
+        "target": "implementation",
+        "revision": 1,
+    }
     everything = client.get("/api/reports/prorate/comments?open=false", headers=H).json()
     assert len(everything["threads"]) == 1
     assert everything["threads"][0]["resolved"] is True
@@ -313,7 +327,12 @@ def test_unknown_section_422(client):
         "/api/reports/prorate/comments", json={"body": "x", "section": "Intent"}, headers=H
     )
     assert r.status_code == 422
-    assert client.get("/api/reports/prorate/comments", headers=H).json() == {"threads": []}
+    assert client.get("/api/reports/prorate/comments", headers=H).json() == {
+        "threads": [],
+        "current_version": 2,
+        "target": "implementation",
+        "revision": 2,
+    }
 
 
 def _comment(client, **body):
@@ -363,6 +382,7 @@ def test_verdicts_carry_reviewer_id_and_current(client):
     assert v == {
         "reviewer": "Alice",
         "reviewer_id": "alice000",
+        "target": "implementation",
         "verdict": "approve",
         "version": 1,
         "summary": "",
@@ -505,7 +525,12 @@ def test_quote_without_section_422(client):
     push(client)
     r = _comment(client, quote="Full new price.")
     assert (r.status_code, r.json()) == (422, {"detail": "quote requires section"})
-    assert client.get("/api/reports/prorate/comments", headers=H).json() == {"threads": []}
+    assert client.get("/api/reports/prorate/comments", headers=H).json() == {
+        "threads": [],
+        "current_version": 1,
+        "target": "implementation",
+        "revision": 1,
+    }
 
 
 def test_blank_title_says_must_not_be_blank(client):
@@ -685,7 +710,12 @@ def test_ambiguous_quote_without_context_422(client):
     push(client, body=DUP)
     r = _comment(client, section="Intent", quote="the fee is")
     assert (r.status_code, r.json()) == (422, {"detail": "ambiguous quote"})
-    assert client.get("/api/reports/prorate/comments", headers=H).json() == {"threads": []}
+    assert client.get("/api/reports/prorate/comments", headers=H).json() == {
+        "threads": [],
+        "current_version": 1,
+        "target": "implementation",
+        "revision": 1,
+    }
     assert _comment(client, section="Edge cases", quote="First day").status_code == 201
 
 
@@ -694,7 +724,12 @@ def test_quote_missing_from_section_422(client, quote):
     push(client)
     r = _comment(client, section="Intent", quote=quote)
     assert (r.status_code, r.json()) == (422, {"detail": "quote not found"})
-    assert client.get("/api/reports/prorate/comments", headers=H).json() == {"threads": []}
+    assert client.get("/api/reports/prorate/comments", headers=H).json() == {
+        "threads": [],
+        "current_version": 1,
+        "target": "implementation",
+        "revision": 1,
+    }
     assert _comment(client, section="Intent", quote="Full  new\nprice").status_code == 201
 
 
@@ -842,6 +877,9 @@ def test_wait_timeout_returns_since(client):
         200,
         {
             "event": "timeout",
+            "current_version": 1,
+            "target": "implementation",
+            "revision": 1,
             "since": "2999-01-01T00:00:00+00:00",
             "next_since": "2999-01-01T00:00:00+00:00",
         },
@@ -888,7 +926,20 @@ def test_wait_tracks_new_current_version(client, settings):
         db.push_report(
             conn, id="prorate", project="billing-service", title="Updated", risk="high", body=SAMPLE
         )
-        _verdict(conn)
+        conn.execute(
+            "INSERT INTO verdicts (report_id, version, reviewer_id, reviewer_name, verdict,"
+            " summary, created_at, target) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                "prorate",
+                1,
+                "bob00000",
+                "Bob",
+                "request_changes",
+                "Late historical feedback",
+                db._now(),
+                "implementation",
+            ),
+        )
         db.add_comment(
             conn,
             report_id="prorate",
@@ -995,7 +1046,12 @@ def test_member_token_push_sets_owner_and_every_member_reads(shared_client, alic
     assert push(shared_client, auth=alice, author="Someone else").status_code == 201
     report = shared_client.get("/api/reports/prorate", headers=bob).json()
     assert (report["author"], report["author_id"]) == ("alice", "alice@example.com")
-    assert shared_client.get("/api/reports/prorate/comments", headers=bob).json() == {"threads": []}
+    assert shared_client.get("/api/reports/prorate/comments", headers=bob).json() == {
+        "threads": [],
+        "current_version": 1,
+        "target": "implementation",
+        "revision": 1,
+    }
     waited = shared_client.get("/api/reports/prorate/wait?timeout=0.1", headers=bob)
     assert waited.json()["event"] == "timeout"
     again = push(shared_client, auth=alice, id="prorate", author_id="alice@example.com")
@@ -1357,3 +1413,574 @@ def test_a_nan_in_the_payload_gets_a_strict_json_422(client):
     assert response.status_code == 422
     detail = json.loads(response.text, parse_constant=refuse)["detail"]
     assert [(e["loc"], "input" in e) for e in detail] == [(["body", "risk"], False)]
+
+
+def _plan_push(client, auth=H, **changes):
+    payload = {"id": "prorate", "project": "billing-service", "title": "Prorate", "risk": "high"}
+    return client.post("/api/reports", json=payload | changes, headers=auth)
+
+
+def _approve_plan(settings, revision=1):
+    with closing(db.connect(settings.database_url)) as conn:
+        db.sign_version(
+            conn,
+            report_id="prorate",
+            version=revision,
+            target="plan",
+            signer_id="owner000",
+            signer_name="Owner",
+        )
+        db.add_verdict(
+            conn,
+            report_id="prorate",
+            version=revision,
+            target="plan",
+            reviewer_id="reviewer",
+            reviewer_name="Reviewer",
+            verdict="approve",
+        )
+
+
+def test_plan_first_api_roundtrip(strict_client, settings):
+    plan = "  # Návrh 🦊\r\n\nOne paragraph.  \n"
+    created = _plan_push(strict_client, workflow="plan_first", plan=plan)
+    assert (created.status_code, created.json()) == (
+        201,
+        {"id": "prorate", "version": 1, "url": "http://localhost:8000/r/prorate"},
+    )
+    initial = strict_client.get("/api/reports/prorate", headers=H).json()
+    assert (initial["workflow"], initial["stage"], initial["status"]) == (
+        "plan_first",
+        "plan",
+        "unsigned",
+    )
+    assert initial["implementation_status"] is initial["signed_by"] is initial["signed_at"] is None
+    assert initial["verdicts"] == []
+    assert initial["plan_review"] == {
+        "revision": 1,
+        "status": "unsigned",
+        "signed_by": None,
+        "signed_at": None,
+        "open_blocking": 0,
+        "verdicts": [],
+    }
+    first = strict_client.get("/api/reports/prorate/versions/1", headers=H).json()
+    assert first == {
+        "version": 1,
+        "created_at": initial["versions"][0]["created_at"],
+        "commit": None,
+        "body": None,
+        "plan": plan,
+        "plan_revision": 1,
+    }
+    _approve_plan(settings)
+    ready = strict_client.get("/api/reports/prorate", headers=H).json()
+    assert (ready["stage"], ready["status"]) == (
+        "awaiting_implementation",
+        "awaiting_implementation",
+    )
+    body = "## Verification\nPassed.\n\n## Rollback\nRevert.\n\n## Security impact\nNone.\n"
+    attached = _plan_push(strict_client, expected_version=1, body=body, commit="abcdef0")
+    assert attached.json() == created.json() | {"version": 2}
+    metadata = strict_client.get("/api/reports/prorate", headers=H).json()
+    assert (metadata["stage"], metadata["status"], metadata["implementation_status"]) == (
+        "implementation",
+        "unsigned",
+        "unsigned",
+    )
+    assert [v["has_implementation"] for v in metadata["versions"]] == [False, True]
+    assert [v["plan_revision"] for v in metadata["versions"]] == [1, 1]
+    assert metadata["plan_review"]["verdicts"][0]["current"] is True
+    assert metadata["plan_review"]["verdicts"][0]["target"] == "plan"
+    assert metadata["verdicts"] == []
+    second = strict_client.get("/api/reports/prorate/versions/2", headers=H).json()
+    assert (second["body"], second["plan"], second["commit"], second["plan_revision"]) == (
+        body,
+        plan,
+        "abcdef0",
+        1,
+    )
+    with closing(db.connect(settings.database_url)) as conn:
+        db.sign_version(
+            conn, report_id="prorate", version=2, signer_id="owner000", signer_name="Owner"
+        )
+        db.add_verdict(
+            conn,
+            report_id="prorate",
+            version=2,
+            reviewer_id="reviewer",
+            reviewer_name="Reviewer",
+            verdict="approve",
+        )
+        blocker = db.add_comment(
+            conn,
+            report_id="prorate",
+            target="plan",
+            version=1,
+            author_id="reviewer",
+            author_name="Reviewer",
+            body="Reconsider",
+        )
+    paused = strict_client.get("/api/reports/prorate", headers=H).json()
+    assert (paused["status"], paused["implementation_status"]) == ("changes_requested", "approved")
+    assert paused["verdicts"][0]["target"] == "implementation"
+    with closing(db.connect(settings.database_url)) as conn:
+        db.resolve_thread(conn, "prorate", blocker["id"])
+    assert strict_client.get("/api/reports/prorate", headers=H).json()["status"] == "approved"
+    revised = _plan_push(strict_client, expected_version=2, plan="# Revised\nDifferent.")
+    assert revised.json()["version"] == 3
+    latest = strict_client.get("/api/reports/prorate", headers=H).json()
+    assert (latest["stage"], latest["status"], latest["plan_review"]["revision"]) == (
+        "plan",
+        "unsigned",
+        3,
+    )
+    assert latest["plan_review"]["verdicts"][0]["current"] is False
+    assert latest["verdicts"][0]["current"] is False
+    assert strict_client.get("/api/reports/prorate/versions/1", headers=H).json() == first
+    third = strict_client.get("/api/reports/prorate/versions/3", headers=H).json()
+    assert (third["body"], third["commit"]) == (body, "abcdef0")
+    assert strict_client.get("/api/reports/prorate/versions/99", headers=H).status_code == 404
+    assert strict_client.get("/api/reports/missing/versions/1", headers=H).status_code == 404
+    assert strict_client.get("/api/reports/prorate/versions/1").status_code == 401
+
+
+@pytest.mark.parametrize(
+    "changes, status, error",
+    [
+        ({"plan": None, "expected_version": 1}, 422, "plan-first reviews require plan"),
+        ({"body": None, "expected_version": 1}, 422, "implementation cannot be removed"),
+        ({"plan": "New"}, 422, "expected_version is required for plan-first updates"),
+        ({"expected_version": 1}, 422, "at least one content field must be supplied"),
+        (
+            {"plan": "New", "expected_version": 1, "commit": "abcdef0"},
+            422,
+            "commit requires supplied body",
+        ),
+        (
+            {"workflow": "artifact", "body": SAMPLE, "expected_version": 1},
+            409,
+            "workflow cannot be changed",
+        ),
+        (
+            {"plan": "New", "expected_version": 2},
+            409,
+            {"detail": "review changed", "current_version": 1},
+        ),
+        (
+            {"body": SAMPLE, "expected_version": 1},
+            409,
+            {"detail": "current plan is not approved", "plan_revision": 1},
+        ),
+    ],
+)
+def test_plan_input_contract(client, settings, changes, status, error):
+    assert _plan_push(client, workflow="plan_first", plan="# Original").status_code == 201
+    with closing(db.connect(settings.database_url)) as conn:
+        before = db.get_report(conn, "prorate"), db.list_versions(conn, "prorate")
+    response = _plan_push(client, title="Must roll back", reviewers=["unexpected"], **changes)
+    assert (response.status_code, response.json()) == (
+        status,
+        error if isinstance(error, dict) else {"detail": error},
+    )
+    with closing(db.connect(settings.database_url)) as conn:
+        assert (db.get_report(conn, "prorate"), db.list_versions(conn, "prorate")) == before
+        assert db.requested_reviewers(conn, "prorate") == []
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"body": SAMPLE},
+        {"expected_version": 1},
+        {"plan": None},
+        {"plan": ""},
+        {"plan": " \n"},
+        {"plan": "x\x00"},
+        {"plan": "x\ud800"},
+        {"workflow": "unknown"},
+        {"commit": "abcdef0"},
+    ],
+)
+def test_plan_initial_input_contract(client, settings, changes):
+    payload = {"workflow": "plan_first", "plan": "# Original"} | changes
+    response = client.post(
+        "/api/reports",
+        content=json.dumps(
+            {"id": "prorate", "project": "billing-service", "title": "Prorate", "risk": "high"}
+            | payload
+        ),
+        headers=H | {"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.get_report(conn, "prorate") is None
+
+
+def test_plan_explicit_null_creation_and_omission_inherit(client, settings):
+    assert (
+        _plan_push(client, workflow="plan_first", plan="# Original", body=None).status_code == 201
+    )
+    _approve_plan(settings)
+    assert _plan_push(client, expected_version=1, plan="# Original", body=SAMPLE).status_code == 201
+    assert _plan_push(client, expected_version=2, plan="# Original").status_code == 201
+    third = client.get("/api/reports/prorate/versions/3", headers=H).json()
+    assert (third["body"], third["plan"], third["plan_revision"]) == (SAMPLE, "# Original", 1)
+    refused = _plan_push(client, expected_version=3, plan="# Different", body=SAMPLE)
+    assert (refused.status_code, refused.json()) == (
+        409,
+        {"detail": "current plan is not approved", "plan_revision": 4},
+    )
+    oversized = _plan_push(client, expected_version=3, plan="é" * 600000)
+    assert oversized.status_code == 413
+    assert client.get("/api/reports/prorate", headers=H).json()["current_version"] == 3
+
+
+def test_plan_comments_and_wait_target(client, settings):
+    assert _plan_push(client, workflow="plan_first", plan="## Design\nOriginal.").status_code == 201
+    empty = client.get("/api/reports/prorate/comments", headers=H).json()
+    assert empty == {
+        "threads": [],
+        "current_version": 1,
+        "target": "implementation",
+        "revision": None,
+    }
+    assert _comment(client).status_code == 409
+    missing_guard = _comment(client, target="plan")
+    assert (missing_guard.status_code, missing_guard.json()) == (
+        422,
+        {"detail": "plan revision is required"},
+    )
+    root = _comment(
+        client, target="plan", revision=1, section="Design", quote="Original.", blocking=False
+    )
+    assert root.status_code == 201
+    root = root.json()
+    assert (root["target"], root["version"]) == ("plan", 1)
+    _approve_plan(settings)
+    assert _plan_push(client, expected_version=1, body=SAMPLE).status_code == 201
+    threads = client.get("/api/reports/prorate/comments?target=plan", headers=H).json()
+    assert (threads["current_version"], threads["target"], threads["revision"]) == (2, "plan", 1)
+    assert [t["id"] for t in threads["threads"]] == [root["id"]]
+    assert threads["threads"][0]["stale"] is False
+    assert client.get("/api/reports/prorate/comments", headers=H).json() == {
+        "threads": [],
+        "current_version": 2,
+        "target": "implementation",
+        "revision": 2,
+    }
+    for kind, key in [("comment", "comment"), ("verdict", "verdict")]:
+        event = _wait(
+            client, f"target=plan&for={kind}&since=2000-01-01T00:00:00Z&timeout=0.01"
+        ).json()
+        assert (event["event"], event["current_version"], event["target"], event["revision"]) == (
+            kind,
+            2,
+            "plan",
+            1,
+        )
+        assert (event[key]["target"], event[key]["version"]) == ("plan", 1)
+    timeout = _wait(client, "since=2000-01-01T00:00:00Z&timeout=0.01").json()
+    assert (timeout["event"], timeout["revision"]) == ("timeout", 2)
+    conflict = _comment(client, parent_id=root["id"], target="implementation")
+    assert (conflict.status_code, conflict.json()) == (
+        422,
+        {"detail": "reply target conflicts with root target"},
+    )
+    assert _plan_push(client, expected_version=2, plan="## Different\nNew.").status_code == 201
+    stale = _comment(client, parent_id=root["id"], revision=1)
+    assert (stale.status_code, stale.json()) == (
+        409,
+        {"detail": "document changed", "target": "plan", "current_revision": 3},
+    )
+    reply = _comment(client, parent_id=root["id"], revision=3)
+    assert reply.status_code == 201
+    assert (reply.json()["target"], reply.json()["version"], reply.json()["section"]) == (
+        "plan",
+        1,
+        "Design",
+    )
+    assert (
+        client.post(f"/api/reports/prorate/comments/{root['id']}/resolve", headers=H).status_code
+        == 200
+    )
+    timeout = _wait(client, "target=plan&since=2000-01-01T00:00:00Z&timeout=0.01").json()
+    assert (timeout["event"], timeout["current_version"], timeout["revision"]) == ("timeout", 3, 3)
+
+
+def test_plan_artifact_feedback_is_read_only(client):
+    assert push(client, plan="# Context").status_code == 201
+    for response in [
+        client.get("/api/reports/prorate/comments?target=plan", headers=H),
+        _wait(client, "target=plan&timeout=0.01"),
+        _comment(client, target="plan", revision=1),
+    ]:
+        assert (response.status_code, response.json()) == (
+            422,
+            {"detail": "artifact plans are read-only"},
+        )
+    assert client.get("/api/reports/prorate/versions/1", headers=H).json()["plan"] == "# Context"
+
+
+def test_plan_api_owner_rules(shared_client, shared_settings, alice, bob, admin):
+    assert (
+        _plan_push(shared_client, auth=alice, workflow="plan_first", plan="# Plan").status_code
+        == 201
+    )
+    for auth in [bob, admin]:
+        response = _plan_push(
+            shared_client, auth=auth, workflow="artifact", expected_version=1, body=SAMPLE
+        )
+        assert (response.status_code, response.json()) == (403, {"detail": NOT_OWNER})
+        response = shared_client.post(
+            "/api/reports/prorate/comments",
+            headers=auth,
+            json={"body": "Intruder", "target": "plan", "revision": 99},
+        )
+        assert (response.status_code, response.json()) == (403, {"detail": NOT_OWNER})
+    with closing(db.connect(shared_settings.database_url)) as conn:
+        root = db.add_comment(
+            conn,
+            report_id="prorate",
+            target="plan",
+            version=1,
+            author_id="bob@example.com",
+            author_name="Bob",
+            body="Human concern",
+        )
+        db.resolve_thread(conn, "prorate", root["id"], by="bob@example.com")
+    reply = shared_client.post(
+        "/api/reports/prorate/comments",
+        headers=alice,
+        json={"body": "Answer", "parent_id": root["id"]},
+    )
+    assert (reply.status_code, reply.json()["resolved"], reply.json()["target"]) == (
+        201,
+        True,
+        "plan",
+    )
+    resolve = shared_client.post(
+        f"/api/reports/prorate/comments/{root['id']}/resolve", headers=alice
+    )
+    assert (resolve.status_code, resolve.json()) == (403, {"detail": AGENT_RESOLVE})
+    for action in ["sign", "verdict"]:
+        assert shared_client.post(
+            f"/api/reports/prorate/{action}", headers=alice, json={"target": "plan", "revision": 1}
+        ).status_code in (404, 405)
+    assert (
+        shared_client.get("/api/reports/prorate/comments?target=plan", headers=bob).status_code
+        == 200
+    )
+
+
+@pytest.mark.parametrize("anchor", ["section", "quote"])
+def test_plan_comment_validation_uses_locked_current_markdown(
+    client, settings, monkeypatch, anchor
+):
+    assert _plan_push(client, workflow="plan_first", plan="# Plan").status_code == 201
+    _approve_plan(settings)
+    assert _plan_push(client, expected_version=1, body=SAMPLE).status_code == 201
+    add_comment = db.add_comment
+
+    def update_before_lock(conn, **kwargs):
+        with closing(db.connect(settings.database_url)) as writer:
+            db.push_report(
+                writer,
+                id="prorate",
+                project="billing-service",
+                title="Prorate",
+                risk="high",
+                body="## Other\nChanged." if anchor == "section" else "## Intent\nChanged.",
+                expected_version=2,
+            )
+        return add_comment(conn, **kwargs)
+
+    monkeypatch.setattr(db, "add_comment", update_before_lock)
+    response = _comment(client, section="Intent", quote="Full new price.")
+    assert response.status_code == 422
+    assert response.json() == (
+        {"detail": "unknown section", "sections": ["Other"]}
+        if anchor == "section"
+        else {"detail": "quote not found"}
+    )
+    metadata = client.get("/api/reports/prorate/comments", headers=H).json()
+    assert metadata == {
+        "threads": [],
+        "current_version": 3,
+        "target": "implementation",
+        "revision": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["", "/comments?target=plan", "/wait?target=plan&since=2000-01-01T00:00:00Z&timeout=0.01"],
+)
+def test_plan_api_read_identity_is_one_snapshot(client, settings, monkeypatch, path):
+    assert _plan_push(client, workflow="plan_first", plan="## Design\nOriginal.").status_code == 201
+    root = _comment(client, target="plan", revision=1, body="Old feedback", blocking=False).json()
+    get_report = db.get_report
+    pushed = False
+
+    def update_after_metadata_read(conn, id):
+        nonlocal pushed
+        report = get_report(conn, id)
+        if not pushed:
+            pushed = True
+            with closing(db.connect(settings.database_url)) as writer:
+                db.push_report(
+                    writer,
+                    id="prorate",
+                    project="billing-service",
+                    title="Changed",
+                    risk="high",
+                    body=None,
+                    body_supplied=False,
+                    plan="## Different\nReplacement.",
+                    expected_version=1,
+                )
+        return report
+
+    monkeypatch.setattr(db, "get_report", update_after_metadata_read)
+    response = client.get(f"/api/reports/prorate{path}", headers=H).json()
+    assert response["current_version"] == 1
+    if not path:
+        assert (response["title"], response["plan_review"]["revision"]) == ("Prorate", 1)
+        assert [v["version"] for v in response["versions"]] == [1]
+    elif path.startswith("/comments"):
+        assert response["revision"] == 1
+        assert [t["id"] for t in response["threads"]] == [root["id"]]
+    else:
+        assert (response["event"], response["revision"]) == ("comment", 1)
+        assert response["comment"]["id"] == root["id"]
+    latest = client.get("/api/reports/prorate", headers=H).json()
+    assert (latest["current_version"], latest["plan_review"]["revision"]) == (2, 2)
+
+
+def test_plan_wait_timeout_follows_push_and_has_no_synthetic_events(client, settings):
+    assert _plan_push(client, workflow="plan_first", plan="# Original").status_code == 201
+
+    def update(conn):
+        db.sign_version(
+            conn,
+            report_id="prorate",
+            target="plan",
+            version=1,
+            signer_id="owner000",
+            signer_name="Owner",
+        )
+        db.push_report(
+            conn,
+            id="prorate",
+            project="billing-service",
+            title="Changed",
+            risk="high",
+            body=None,
+            body_supplied=False,
+            plan="# Changed",
+            expected_version=1,
+        )
+
+    worker = _later(settings, 0.02, update)
+    response = _wait(client, "target=plan&timeout=0.15").json()
+    worker.join()
+    assert (
+        response["event"],
+        response["current_version"],
+        response["target"],
+        response["revision"],
+    ) == ("timeout", 2, "plan", 2)
+    absent = _wait(client, "timeout=0.01").json()
+    assert (absent["event"], absent["current_version"], absent["revision"]) == ("timeout", 2, None)
+
+
+def test_plan_draft_notifications_follow_resulting_stage(client, settings, monkeypatch):
+    from verifair import notify
+
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda settings, text: sent.append(text))
+    assert _plan_push(client, workflow="plan_first", plan="# Plan").status_code == 201
+    _approve_plan(settings)
+    assert _plan_push(client, expected_version=1, body=SAMPLE).status_code == 201
+    assert _plan_push(client, expected_version=2, plan="# Changed").status_code == 201
+    assert sent == [
+        "Draft plan revision 1 in billing-service: Prorate http://localhost:8000/r/prorate?tab=plan",
+        "Draft implementation v2 in billing-service: Prorate http://localhost:8000/r/prorate?tab=implementation",
+        "Draft plan revision 3 in billing-service: Prorate http://localhost:8000/r/prorate?tab=plan",
+    ]
+
+
+def test_plan_openapi_contract(client):
+    schema = client.get("/openapi.json").json()
+    report = schema["components"]["schemas"]["ReportIn"]
+    assert report["required"] == ["project", "title", "risk"]
+    for name in ["body", "plan", "workflow", "expected_version"]:
+        assert {item.get("type") for item in report["properties"][name]["anyOf"]} >= {"null"}
+    assert report["properties"]["workflow"]["anyOf"][0]["enum"] == ["artifact", "plan_first"]
+    assert report["properties"]["expected_version"]["anyOf"][0]["exclusiveMinimum"] == 0
+    comment = schema["components"]["schemas"]["CommentIn"]
+    assert comment["properties"]["target"]["anyOf"][0]["enum"] == ["implementation", "plan"]
+    assert comment["properties"]["revision"]["anyOf"][0]["exclusiveMinimum"] == 0
+    for operation in ["comments", "wait"]:
+        target = next(
+            p
+            for p in schema["paths"][f"/api/reports/{{id}}/{operation}"]["get"]["parameters"]
+            if p["name"] == "target"
+        )
+        assert target["schema"]["enum"] == ["implementation", "plan"]
+        assert target["schema"]["default"] == "implementation"
+    assert "/api/reports/{id}/versions/{n}" in schema["paths"]
+
+
+@pytest.mark.parametrize("workflow", ["plan_first", "artifact"])
+def test_push_notification_keeps_its_snapshot_during_concurrent_push(
+    client, settings, monkeypatch, workflow
+):
+    from verifair import notify
+
+    if workflow == "plan_first":
+        assert _plan_push(client, workflow=workflow, plan="# Original").status_code == 201
+        _approve_plan(settings)
+    else:
+        assert push(client, id="prorate").status_code == 201
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda settings, text: sent.append(text))
+    real_push = db.push_report
+
+    def push_then_another_writer(conn, **kwargs):
+        result = real_push(conn, **kwargs)
+        assert result == ("prorate", 2)
+        with closing(db.connect(settings.database_url)) as writer:
+            later_content = (
+                {"body": None, "body_supplied": False, "plan": "# Later plan"}
+                if workflow == "plan_first"
+                else {"body": "## Intent\nLater implementation."}
+            )
+            assert real_push(
+                writer,
+                id="prorate",
+                project="billing-service",
+                title="Prorate",
+                risk="high",
+                expected_version=2,
+                **later_content,
+            ) == ("prorate", 3)
+        return result
+
+    monkeypatch.setattr(db, "push_report", push_then_another_writer)
+    response = _plan_push(client, expected_version=1, body=SAMPLE)
+    assert (response.status_code, response.json()) == (
+        201,
+        {"id": "prorate", "version": 2, "url": "http://localhost:8000/r/prorate"},
+    )
+    expected = (
+        "Draft implementation v2 in billing-service: Prorate "
+        "http://localhost:8000/r/prorate?tab=implementation"
+        if workflow == "plan_first"
+        else "Draft report v2 in billing-service: Prorate http://localhost:8000/r/prorate"
+    )
+    assert sent == [expected]
+    latest = client.get("/api/reports/prorate", headers=H).json()
+    assert latest["current_version"] == 3
+    if workflow == "plan_first":
+        assert (latest["stage"], latest["plan_review"]["revision"]) == ("plan", 3)

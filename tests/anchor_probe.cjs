@@ -16,12 +16,15 @@ function position(node, offset) {
   return [node.root, prior + offset];
 }
 
+const bodyEvents = new Map();
+const documentEvents = new Map();
+const windowEvents = new Map();
 const document = {
   getElementById: () => null,
   querySelector: () => null,
   querySelectorAll: () => [],
-  addEventListener: () => {},
-  body: { addEventListener: () => {} },
+  addEventListener: (name, fn) => documentEvents.set(name, [...(documentEvents.get(name) || []), fn]),
+  body: { addEventListener: (name, fn) => bodyEvents.set(name, fn) },
   createTreeWalker(root) {
     let i = -1;
     return {
@@ -42,7 +45,7 @@ const document = {
     };
   },
 };
-const scope = vm.createContext({ document, Node: { ELEMENT_NODE: 1 }, NodeFilter: { SHOW_TEXT: 4 }, window: {}, getComputedStyle: (node) => node.style, addEventListener: () => {} });
+const scope = vm.createContext({ document, Node: { ELEMENT_NODE: 1 }, NodeFilter: { SHOW_TEXT: 4 }, window: {}, getComputedStyle: (node) => node.style, addEventListener: (name, fn) => windowEvents.set(name, fn) });
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../verifair/static/app.js"), "utf8"), scope);
 
 function find(parts, quote, start) {
@@ -54,6 +57,67 @@ function find(parts, quote, start) {
 }
 
 const cases = {
+  plan_general_cancel() {
+    let resets = 0;
+    const form = { hidden: false, reset: () => resets++, closest: () => ({}) };
+    const cancel = { closest: () => form };
+    const event = { target: { closest: (selector) => selector === "[data-cancel]" ? cancel : null } };
+    documentEvents.get("click").forEach(fn => fn(event));
+    assert.equal(form.hidden, false);
+    assert.equal(resets, 1);
+    form.closest = () => null;
+    documentEvents.get("click").forEach(fn => fn(event));
+    assert.equal(form.hidden, true);
+  },
+  verdict_draft_survives_gate_refresh() {
+    const form = (target, revision, summary) => {
+      const fields = { target: { value: target }, revision: { value: revision }, summary: { value: summary } };
+      return {
+        id: "vf_verdict", target: "_self",
+        elements: { namedItem: (name) => fields[name] },
+        summary: fields.summary,
+      };
+    };
+    const original = form("plan", "1", "Keep my draft");
+    bodyEvents.get("htmx:oobBeforeSwap")({ detail: { target: original } });
+    let refreshed = form("plan", "1", "");
+    document.getElementById = () => refreshed;
+    bodyEvents.get("htmx:oobAfterSwap")({ detail: { target: refreshed } });
+    assert.equal(refreshed.summary.value, "Keep my draft");
+    bodyEvents.get("htmx:oobBeforeSwap")({ detail: { target: original } });
+    refreshed = form("implementation", "1", "");
+    bodyEvents.get("htmx:oobAfterSwap")({ detail: { target: refreshed } });
+    assert.equal(refreshed.summary.value, "");
+    bodyEvents.get("htmx:oobBeforeSwap")({ detail: { target: original } });
+    refreshed = form("plan", "2", "");
+    bodyEvents.get("htmx:oobAfterSwap")({ detail: { target: refreshed } });
+    assert.equal(refreshed.summary.value, "");
+  },
+  resolved_comment_deep_link() {
+    const thread = { open: false };
+    let scrolled = 0;
+    scope.window.location = { hash: "#vf_c13" };
+    document.getElementById = (id) => id === "vf_c13" ? { closest: () => thread, scrollIntoView: () => scrolled++ } : null;
+    windowEvents.get("hashchange")();
+    assert.equal(thread.open, true);
+    assert.equal(scrolled, 1);
+  },
+  load_reveals_fragment_and_focuses_autofocus() {
+    const effects = [];
+    const thread = { open: false };
+    scope.window.location = { hash: "#vf_c13" };
+    document.getElementById = (id) => id === "vf_c13" ? {
+      closest: () => thread,
+      scrollIntoView: () => effects.push("reveal"),
+    } : null;
+    document.querySelector = (selector) => {
+      assert.equal(selector, "[autofocus]");
+      return { focus: () => effects.push("focus") };
+    };
+    windowEvents.get("load")();
+    assert.equal(thread.open, true);
+    assert.deepEqual(effects, ["reveal", "focus"]);
+  },
   unicode_before_duplicate() {
     const range = find(["😀😀 First repeated. Second repeated."], "repeated", 26);
     assert.equal(range.startOffset, 28);

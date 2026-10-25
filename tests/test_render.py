@@ -209,6 +209,7 @@ def test_quote_spanning_inline_markup_is_found(conn):
 
 
 def test_thread_quote_missing_from_section_is_not_found(conn):
+    push_report(conn, project="p", title="T", risk="low", body="new price", id="r")
     add_comment(
         conn,
         report_id="r",

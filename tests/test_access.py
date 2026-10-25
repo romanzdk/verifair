@@ -504,8 +504,6 @@ def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, da
     assert f'name="name" value="{data["name"]}"' in card
     assert '<option value="admin" selected>' in card
     assert '<option value="member" selected>' not in card
-    js = (Path(web.__file__).parent / "static" / "app.js").read_text()
-    assert 'addEventListener("load", () => document.querySelector("[autofocus]")?.focus());' in js
 
 
 def test_add_member_inputs_check_the_id_in_the_browser(shared_client):

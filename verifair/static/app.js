@@ -91,7 +91,11 @@ document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-comment-section]");
   if (button) openForm(button.closest("section"), "");
   const cancel = event.target.closest("[data-cancel]");
-  if (cancel) cancel.closest("form").hidden = true;
+  if (cancel) {
+    const form = cancel.closest("form");
+    if (form.closest(".general")) form.reset();
+    else form.hidden = true;
+  }
 });
 
 function indexText(root) {
@@ -221,7 +225,6 @@ function showRequestError(event, message) {
   line.className = "error vf-req-error";
   line.setAttribute("role", "alert");
   line.textContent = message;
-  // The verdict bar is position: fixed, so a line after it would be hidden under it.
   if (anchor.matches(".verdict")) anchor.prepend(line);
   else if (holdsError(anchor)) anchor.append(line);
   else anchor.after(line);
@@ -251,6 +254,36 @@ document.addEventListener("focusout", (event) => {
 highlight();
 showNavForNameError();
 document.body.addEventListener("htmx:afterSwap", highlight);
+let verdictDraft = null;
+document.body.addEventListener("htmx:oobBeforeSwap", (event) => {
+  const form = event.detail.target;
+  if (form.id === "vf_verdict") {
+    verdictDraft = {
+      target: form.elements.namedItem("target").value,
+      revision: form.elements.namedItem("revision").value,
+      summary: form.elements.namedItem("summary").value,
+    };
+  }
+});
+document.body.addEventListener("htmx:oobAfterSwap", (event) => {
+  if (event.detail.target.id !== "vf_verdict") return;
+  const form = document.getElementById("vf_verdict");
+  if (verdictDraft && form?.elements.namedItem("target").value === verdictDraft.target
+      && form.elements.namedItem("revision").value === verdictDraft.revision) {
+    form.elements.namedItem("summary").value = verdictDraft.summary;
+  }
+  verdictDraft = null;
+});
+
+function revealComment() {
+  const target = document.getElementById(window.location.hash.slice(1));
+  const thread = target?.closest("details.thread");
+  if (thread) {
+    thread.open = true;
+    target.scrollIntoView();
+  }
+}
+addEventListener("hashchange", revealComment);
 // The rail is swapped whole, so focus goes to its error, or back to the picker, or to the Remove
 // button that took the removed one's place, and the outcome is read out from a live region
 // outside the rail.
@@ -312,7 +345,10 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
   });
   // Browsers skip autofocus when the URL has a fragment, and scrolling to the fragment moves
   // focus, so focus the field once that is done
-  addEventListener("load", () => document.querySelector("[autofocus]")?.focus());
+  addEventListener("load", () => {
+    revealComment();
+    document.querySelector("[autofocus]")?.focus();
+  });
   document.addEventListener("submit", event => {
     const message = event.submitter?.dataset.confirm;
     if (message && !confirm(message)) event.preventDefault();

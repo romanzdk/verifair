@@ -42,6 +42,7 @@ export VERIFAIR_API_TOKEN={% if shared %}vf_…{% else %}"&lt;your token&gt;"{% 
   {{ group(groups.review, "user-check", "Needs your review", "High risk first, then oldest", waiting=True) }}
   {{ group(groups.sign, "pencil-line", "Needs your signature", "Sign before reviewers can approve") }}
   {{ group(groups.returned, "circle-x", "Returned to you", "Changes requested") }}
+  {{ group(groups.implementation, "circle-dot", "Needs implementation", "Ask your agent to submit the implementation to the same review") }}
   {% if waiting %}
   <details class="grp">
     <summary class="grp-h"><h2 class="grp-t">{{ icon("circle-dot") }}Waiting on others<span class="cnt">{{ waiting }}</span></h2><span class="sp"></span><span class="show"><span class="when-closed">Show {{ waiting }}</span><span class="when-open">Hide</span>{{ icon("chevron-down", "ic14") }}</span></summary>

@@ -45,8 +45,9 @@ def api_threads(client, id="prorate"):
 def _set_plan(settings, plan, version=1):
     with closing(db.connect(settings.database_url)) as conn:
         conn.execute(
-            "UPDATE versions SET plan = %s WHERE report_id = 'prorate' AND version = %s",
-            (plan, version),
+            "UPDATE versions SET plan = %s, plan_revision = %s "
+            "WHERE report_id = 'prorate' AND version = %s",
+            (plan, version if plan is not None else None, version),
         )
 
 
@@ -433,7 +434,7 @@ def test_review_page_uses_icons_not_emoji(client):
     reply = client.post(
         f"/r/prorate/comments/{thread['id']}/reply", data={"version": 1, "body": "Thanks"}
     )
-    resolved = client.post(f"/r/prorate/comments/{thread['id']}/resolve")
+    resolved = client.post(f"/r/prorate/comments/{thread['id']}/resolve", data={"version": 1})
     assert comment.status_code == reply.status_code == resolved.status_code == 200
     assert 'class="thread resolved"' in resolved.text
     for text in (page, comment.text, reply.text, resolved.text):
@@ -484,7 +485,6 @@ def test_review_rail_leaves_room_for_the_verdict_bar():
     css = (Path(web.__file__).parent / "static" / "app.css").read_text()
     assert "calc(100vh - 48px - 65px)" not in css
     assert "body.has-verdict { padding-bottom" not in css
-    assert "body.has-verdict .app-main { padding-bottom: 90px; }" in css
     assert "body.has-verdict .side { padding-bottom: 112px; }" in css
 
 
@@ -525,7 +525,7 @@ def test_comment_reply_resolve_via_htmx(client):
     assert "Which first day?" in reply.text and "Cycle start." in reply.text
     assert len(api_threads(client)[0]["replies"]) == 1
 
-    resolved = client.post(f"/r/prorate/comments/{cid}/resolve")
+    resolved = client.post(f"/r/prorate/comments/{cid}/resolve", data={"version": 1})
     assert 'class="thread resolved"' in resolved.text
     assert api_threads(client)[0]["resolved"] is True
 
@@ -833,8 +833,8 @@ def test_resolve_needs_confirm_and_reply_reopens(client):
         'hx-confirm="Resolve this thread? You can reopen it later."'
         in client.get("/r/prorate").text
     )
-    client.post(f"/r/prorate/comments/{cid}/resolve")
-    again = client.post(f"/r/prorate/comments/{cid}/resolve")
+    client.post(f"/r/prorate/comments/{cid}/resolve", data={"version": 1})
+    again = client.post(f"/r/prorate/comments/{cid}/resolve", data={"version": 1})
     assert again.status_code == 200 and 'class="thread resolved"' in again.text
     reopened = client.post(f"/r/prorate/comments/{cid}/reply", data={"version": 1, "body": "No."})
     assert 'class="thread resolved"' not in reopened.text and "No." in reopened.text
@@ -939,7 +939,7 @@ def test_resolved_thread_expands_and_can_be_reopened(client):
         f'hx-post="/r/prorate/comments/{cid}/reopen" hx-target="#vf_t{cid}" hx-swap="outerHTML"'
         in page
     )
-    r = client.post(f"/r/prorate/comments/{cid}/reopen")
+    r = client.post(f"/r/prorate/comments/{cid}/reopen", data={"version": 1})
     assert r.status_code == 200
     assert 'class="thread resolved"' not in r.text and f'id="vf_t{cid}"' in r.text
     assert api_threads(client)[0]["resolved"] is False
@@ -1827,7 +1827,7 @@ def test_shared_mode_moderation_refused_for_other_member(
     dave = people["dave"]
     for cid in (human, agent):
         for path, data in [
-            (f"/r/r/comments/{cid}/resolve", None),
+            (f"/r/r/comments/{cid}/resolve", {"version": 1}),
             (f"/r/r/comments/{cid}/blocking", {"version": 1, "blocking": "0"}),
         ]:
             r = shared_client.post(path, data=data, headers=dave)
@@ -1891,14 +1891,20 @@ def test_shared_mode_creator_admin_and_report_owner_can_moderate(
         headers=people["admin"],
     )
     assert r.status_code == 200 and "Mark blocking" in r.text
-    r = shared_client.post(f"/r/r/comments/{human}/resolve", headers=people["carol"])
+    r = shared_client.post(
+        f"/r/r/comments/{human}/resolve", headers=people["carol"], data={"version": 1}
+    )
     assert r.status_code == 200 and 'class="thread resolved"' in r.text
-    r = shared_client.post(f"/r/r/comments/{agent}/resolve", headers=people["owner"])
+    r = shared_client.post(
+        f"/r/r/comments/{agent}/resolve", headers=people["owner"], data={"version": 1}
+    )
     assert r.status_code == 200 and 'class="thread resolved"' in r.text
     assert _moderation_state(shared_settings, human) == (1, "carol@example.com", 0)
     assert _moderation_state(shared_settings, agent) == (1, "owner@example.com", 1)
 
-    r = shared_client.post(f"/r/r/comments/{agent}/reopen", headers=people["dave"])
+    r = shared_client.post(
+        f"/r/r/comments/{agent}/reopen", headers=people["dave"], data={"version": 1}
+    )
     assert r.status_code == 200 and 'class="thread resolved"' not in r.text
     assert _moderation_state(shared_settings, agent) == (0, None, 1)
 
@@ -1933,7 +1939,7 @@ def test_local_mode_anyone_moderates_and_resolver_is_not_shown(client):
     cid = _open_thread(client)
     page = client.get("/r/prorate").text
     assert f'id="vf_resolve_{cid}"' in page and f'id="vf_blocking_{cid}"' in page
-    r = client.post(f"/r/prorate/comments/{cid}/resolve")
+    r = client.post(f"/r/prorate/comments/{cid}/resolve", data={"version": 1})
     assert r.status_code == 200 and 'class="thread resolved"' in r.text
     assert "resolved by" not in r.text and "resolved by" not in client.get("/r/prorate").text
     [thread] = api_threads(client)
@@ -2411,3 +2417,694 @@ def test_sidebar_lists_requested_reviewers_next_to_verdicts(client):
     assert rail.count('class="rev"') == 2
     assert ">approved v1</span>" in rail and "Bob" in rail
     assert REQUESTED.findall(rail) == [("carol000", "review requested")]
+
+
+def _plan_review(settings, *, plan="A plain plan without headings.", body=False):
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="planned",
+            project="p",
+            title="Planned",
+            risk="low",
+            body=None,
+            body_supplied=False,
+            workflow="plan_first",
+            plan=plan,
+        )
+        if body:
+            db.sign_version(
+                conn,
+                report_id="planned",
+                version=1,
+                target="plan",
+                expected_version=1,
+                signer_id="owner000",
+                signer_name="Owner",
+            )
+            db.add_verdict(
+                conn,
+                report_id="planned",
+                version=1,
+                target="plan",
+                reviewer_id="judge000",
+                reviewer_name="Judge",
+                verdict="approve",
+            )
+            db.push_report(
+                conn,
+                id="planned",
+                project="p",
+                title="Planned",
+                risk="low",
+                body="## Intent\nImplementation-only evidence.",
+                expected_version=1,
+            )
+
+
+def _identity(client, person="owner000", name="Owner"):
+    client.cookies.set("vf_id", person)
+    client.cookies.set("vf_name", name)
+
+
+def _target_form(version=1, revision=1, target="plan", **fields):
+    return {"version": version, "revision": revision, "target": target} | fields
+
+
+def test_plan_page_flow_and_history(client, settings):
+    _plan_review(settings)
+    _identity(client)
+    page = client.get("/r/planned")
+    assert page.status_code == 200
+    assert page.context["target"] == "plan"
+    nav = _document_nav(page.text)
+    assert '<a href="/r/planned?tab=plan" aria-current="page">Plan</a>' in nav
+    assert '<a href="/r/planned?tab=implementation">Implementation</a>' in nav
+    assert "Plan revision 1" in page.text and "Sign plan revision 1" in page.text
+    general = re.search(r'<form class="cform" id="vf_cform_vf_general"([^>]*)>', page.text)
+    assert general and " hidden" not in general[1]
+    assert 'aria-label="Comment on plan"' in page.text
+    assert page.text.count('id="vf_threads_vf_general"') == 1
+    comment = client.post("/r/planned/comments", data=_target_form(body="General plan concern"))
+    assert comment.status_code == 200 and "General plan concern" in comment.text
+    assert 'id="vf_cform_vf_general"' in comment.text and 'hx-swap-oob="true"' in comment.text
+    assert (
+        " hidden"
+        not in re.search(r'<form class="cform" id="vf_cform_vf_general"([^>]*)>', comment.text)[1]
+    )
+    with closing(db.connect(settings.database_url)) as conn:
+        root = db.list_comments(conn, "planned", target="plan")[0]
+        assert root["section"] is None
+        db.resolve_thread(conn, "planned", root["id"])
+    signed = client.post("/r/planned/sign", data=_target_form())
+    assert "Signed by <b>Owner</b>" in signed.text
+    _identity(client, "judge000", "Judge")
+    approved = client.post("/r/planned/verdict", data=_target_form(verdict="approve"))
+    assert "You approved plan revision 1" in approved.text
+    assert "Awaiting implementation" in approved.text
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="planned",
+            project="p",
+            title="Planned",
+            risk="low",
+            body="## Intent\nImplementation-only evidence.",
+            expected_version=1,
+        )
+        later = db.add_comment(
+            conn,
+            report_id="planned",
+            version=2,
+            author_id="judge000",
+            author_name="Judge",
+            body="Implementation concern",
+        )
+    current = client.get("/r/planned")
+    assert current.context["target"] == "implementation"
+    assert (
+        "Implementation-only evidence." in current.text
+        and "General plan concern" not in current.text
+    )
+    plan = client.get("/r/planned?tab=plan")
+    assert "General plan concern" in plan.text and "Implementation concern" not in plan.text
+    assert "Plan revision 1" in plan.text and "You approved plan revision 1" in plan.text
+    assert 'name="version" value="2"' in plan.text and 'name="revision" value="1"' in plan.text
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="planned",
+            project="p",
+            title="Planned",
+            risk="low",
+            body=None,
+            body_supplied=False,
+            plan="# Revised\nNew direction.",
+            expected_version=2,
+        )
+        db.add_comment(
+            conn,
+            report_id="planned",
+            version=3,
+            target="plan",
+            author_id="judge000",
+            author_name="Judge",
+            body="Later plan concern",
+        )
+        db.add_verdict(
+            conn,
+            report_id="planned",
+            version=3,
+            target="plan",
+            reviewer_id="judge000",
+            reviewer_name="Judge",
+            verdict="request_changes",
+            summary="Later verdict",
+        )
+    historical = client.get("/r/planned/v/1?tab=plan")
+    assert "A plain plan without headings." in historical.text
+    assert "Signed by <b>Owner</b>" in historical.text
+    assert "Later plan concern" not in historical.text and "Later verdict" not in historical.text
+    assert "hx-post=" not in historical.text
+    assert "General plan concern" in historical.text
+    implementation = client.get("/r/planned/v/2?tab=implementation")
+    assert f'id="vf_c{later["id"]}"' in implementation.text
+    assert "New direction." not in implementation.text
+    assert 'href="/r/planned?tab=implementation"' in implementation.text
+    revised = client.get("/r/planned")
+    assert revised.context["target"] == "plan"
+    assert "Plan revision 3" in revised.text and "Sign plan revision 3" in revised.text
+    assert re.search(
+        r'approved <a href="/r/planned/v/1\?tab=plan">plan revision 1</a>', revised.text
+    )
+
+
+@pytest.mark.parametrize("plan", ["Plain paragraph.", "# Heading\n\nH1-only text."])
+def test_plan_fallback_sections_and_safe_absent_implementation(client, settings, plan):
+    _plan_review(settings, plan=plan)
+    _identity(client)
+    page = client.get("/r/planned")
+    assert page.status_code == 200 and 'data-section="Report"' in page.text
+    selected = client.post(
+        "/r/planned/comments",
+        data=_target_form(
+            section="Report",
+            quote="Plain" if plan.startswith("Plain") else "H1-only",
+            body="Selection concern",
+        ),
+    )
+    assert selected.status_code == 200 and 'data-found="true"' in selected.text
+    for alias in ("implementation", "report"):
+        empty = client.get(f"/r/planned?tab={alias}")
+        assert empty.status_code == 200 and "Implementation has not been attached" in empty.text
+        assert "Implementation v1" not in empty.text
+        assert 'id="vf_sign"' not in empty.text and 'id="vf_verdict"' not in empty.text
+    with closing(db.connect(settings.database_url)) as conn:
+        assert len(db.list_comments(conn, "planned", target="plan")) == 1
+        assert db.list_comments(conn, "planned") == []
+
+
+@pytest.mark.parametrize(
+    "action,extra",
+    [
+        ("sign", {}),
+        ("comments", {"body": "Do not save"}),
+        ("verdict", {"verdict": "approve"}),
+    ],
+)
+@pytest.mark.parametrize("version,revision", [(1, 1), (2, 1)])
+def test_plan_web_stale_target(client, settings, action, extra, version, revision):
+    _plan_review(settings)
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="planned",
+            project="p",
+            title="Planned",
+            risk="low",
+            body=None,
+            body_supplied=False,
+            plan="Changed plan.",
+            expected_version=1,
+        )
+    _identity(client)
+    result = client.post(f"/r/planned/{action}", data=_target_form(version, revision, **extra))
+    assert result.status_code == 200 and 'href="/r/planned?tab=plan"' in result.text
+    assert "Reload" in result.text
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.get_signature(conn, "planned", 2, target="plan") is None
+        assert db.list_comments(conn, "planned", target="plan") == []
+        assert db.list_verdicts(conn, "planned", target="plan") == []
+
+
+def test_plan_navigation_prompts_and_invalid_anchors(client, settings):
+    _plan_review(settings, plan="## Shared\nPlan quote.")
+    prompt = client.post("/r/planned/sign", data=_target_form())
+    assert 'name="next" value="/r/planned?tab=plan"' in prompt.text
+    _identity(client)
+    for fields in (
+        {"section": "Missing"},
+        {"section": "Shared", "quote": "wrong"},
+        {"quote": "Plan quote."},
+    ):
+        response = client.post("/r/planned/comments", data=_target_form(body="bad", **fields))
+        assert response.status_code == 422
+    valid = client.post(
+        "/r/planned/comments", data=_target_form(section="Shared", body="Plan note")
+    )
+    assert valid.status_code == 200
+    for field in ('name="target" value="plan"', 'name="revision" value="1"'):
+        assert field in valid.text
+    with closing(db.connect(settings.database_url)) as conn:
+        assert len(db.list_comments(conn, "planned", target="plan")) == 1
+
+
+def test_plan_gate_thread_partials_refresh_all_controls(client, settings):
+    _plan_review(settings, body=True)
+    _identity(client, "judge000", "Judge")
+    response = client.post(
+        "/r/planned/comments", data=_target_form(2, 1, body="New blocking plan concern")
+    )
+    assert response.status_code == 200
+    for id in ("vf_header", "vf_sidebar", "vf_verdict", "vf_nav"):
+        assert re.search(rf'id="{id}"[^>]*hx-swap-oob="true"', response.text)
+    assert "Changes requested" in response.text
+    with closing(db.connect(settings.database_url)) as conn:
+        root = db.list_comments(conn, "planned", target="plan")[0]
+    _identity(client)
+    paused = client.get("/r/planned?tab=implementation")
+    assert "current plan" in paused.text.lower() and "Sign implementation" not in paused.text
+    refused = client.post("/r/planned/sign", data=_target_form(2, 2, "implementation"))
+    assert "current plan" in refused.text.lower()
+    resolved = client.post(
+        f"/r/planned/comments/{root['id']}/resolve", data={"version": 2, "target": "implementation"}
+    )
+    assert resolved.status_code == 200 and 'name="target" value="plan"' in resolved.text
+    assert re.search(r'id="vf_header"[^>]*hx-swap-oob="true"', resolved.text)
+    assert "Sign implementation v2" in client.get("/r/planned?tab=implementation").text
+    reopened = client.post(f"/r/planned/comments/{root['id']}/reopen", data={"version": 2})
+    assert "Changes requested" in reopened.text
+    suggestion = client.post(
+        f"/r/planned/comments/{root['id']}/blocking", data={"version": 2, "blocking": "0"}
+    )
+    assert "Unsigned" in suggestion.text
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.thread_root(conn, "planned", root["id"])["target"] == "plan"
+
+
+def test_plan_comment_validation_runs_under_write_lock(client, settings, monkeypatch):
+    _plan_review(settings, plan="## Shared\nOriginal quote.")
+    _identity(client)
+    actual = db.add_comment
+    seen = []
+
+    def add(conn, **kwargs):
+        callback = kwargs.get("validate")
+        assert callback is not None
+
+        def validate(markdown, revision):
+            seen.append(conn.execute("SELECT pg_current_xact_id_if_assigned()").fetchone())
+            return callback(markdown, revision)
+
+        return actual(conn, **(kwargs | {"validate": validate}))
+
+    monkeypatch.setattr(db, "add_comment", add)
+    response = client.post(
+        "/r/planned/comments",
+        data=_target_form(section="Shared", quote="Original quote.", body="note"),
+    )
+    assert response.status_code == 200 and seen
+
+
+def test_plan_read_assembly_begins_snapshot_before_metadata(client, settings, monkeypatch):
+    _plan_review(settings)
+    actual = db.get_report
+    observed = []
+
+    def read(conn, id):
+        observed.append(
+            conn.execute("SHOW transaction_isolation").fetchone()["transaction_isolation"]
+        )
+        return actual(conn, id)
+
+    monkeypatch.setattr(db, "get_report", read)
+    assert client.get("/r/planned").status_code == 200
+    assert observed and set(observed) == {"repeatable read"}
+
+
+def test_plan_thread_refresh_keeps_named_user_in_navigation(client, settings):
+    _plan_review(settings)
+    _identity(client)
+    response = client.post("/r/planned/comments", data=_target_form(body="A note"))
+    nav = re.search(r'<nav class="app-nav" id="vf_nav".*?</nav>', response.text, re.S)[0]
+    assert '<span class="me-name">Owner</span>' in nav
+
+
+def test_plan_shared_signing_and_moderation_keep_existing_permissions(proxied):
+    settings = proxied.app.state.settings
+    alice = {"X-Forwarded-Email": "alice@example.com"}
+    bob = {"X-Forwarded-Email": "bob@example.com"}
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="planned",
+            project="p",
+            title="Planned",
+            risk="low",
+            body=None,
+            body_supplied=False,
+            workflow="plan_first",
+            plan="## Shared\nPlan text.",
+            author_id="alice@example.com",
+        )
+    form = _target_form()
+    assert proxied.post("/r/planned/sign", data=form, headers=bob).status_code == 403
+    assert proxied.post("/r/planned/sign", data=form, headers=alice).status_code == 200
+    refused = proxied.post("/r/planned/verdict", data=form | {"verdict": "approve"}, headers=alice)
+    assert SELF_COPY in refused.text
+    with closing(db.connect(settings.database_url)) as conn:
+        root = db.add_comment(
+            conn,
+            report_id="planned",
+            version=1,
+            target="plan",
+            author_id="bob@example.com",
+            author_name="bob",
+            body="Bob's blocker",
+        )
+    denied = proxied.post(
+        f"/r/planned/comments/{root['id']}/resolve",
+        headers=alice | {"HX-Request": "true"},
+        data={"version": 1},
+    )
+    assert (
+        "Only the person who started" in denied.text and 'name="target" value="plan"' in denied.text
+    )
+    assert (
+        proxied.post(
+            f"/r/planned/comments/{root['id']}/resolve", headers=bob, data={"version": 1}
+        ).status_code
+        == 200
+    )
+    approved = proxied.post("/r/planned/verdict", data=form | {"verdict": "approve"}, headers=bob)
+    assert "You approved plan revision 1" in approved.text
+    forged = proxied.post(
+        f"/r/planned/comments/{root['id']}/reply",
+        headers=bob,
+        data=form | {"target": "implementation", "body": "forged"},
+    )
+    assert forged.status_code == 422
+    with closing(db.connect(settings.database_url)) as conn:
+        assert len(db.list_comments(conn, "planned", target="plan")) == 1
+        assert db.list_verdicts(conn, "planned") == []
+
+
+def test_plan_partial_name_navigation_keeps_selected_document(client, settings):
+    _plan_review(settings, body=True)
+    _identity(client)
+    response = client.post("/r/planned/comments", data=_target_form(2, 1, body="Question"))
+    nav = re.search(r'<nav class="app-nav" id="vf_nav".*?</nav>', response.text, re.S)[0]
+    assert 'name="next" value="/r/planned?tab=plan"' in nav
+
+
+@pytest.mark.parametrize(
+    "action,helper,fields",
+    [
+        ("sign", "sign_version", {}),
+        ("comments", "add_comment", {"body": "Original concern"}),
+        ("verdict", "add_verdict", {"verdict": "approve"}),
+    ],
+)
+def test_plan_push_after_write_requires_reload_before_new_controls(
+    client, settings, monkeypatch, action, helper, fields
+):
+    _plan_review(settings)
+    _identity(client)
+    if action == "verdict":
+        client.post("/r/planned/sign", data=_target_form())
+        _identity(client, "judge000", "Judge")
+    actual = getattr(db, helper)
+
+    def advance(conn, **kwargs):
+        row = actual(conn, **kwargs)
+        with closing(db.connect(settings.database_url)) as other:
+            db.push_report(
+                other,
+                id="planned",
+                project="p",
+                title="Planned",
+                risk="low",
+                body=None,
+                body_supplied=False,
+                plan="Unread new plan",
+                expected_version=1,
+            )
+        return row
+
+    monkeypatch.setattr(db, helper, advance)
+    response = client.post(f"/r/planned/{action}", data=_target_form(**fields))
+    assert response.status_code == 200 and "Reload to review v2" in response.text
+    assert 'href="/r/planned?tab=plan"' in response.text
+    assert 'name="version" value="2"' not in response.text
+    assert 'id="vf_verdict"' not in response.text
+
+
+def test_plan_implementation_hint_tracks_live_gate_in_partials(client, settings):
+    _plan_review(settings)
+    _identity(client)
+    client.post("/r/planned/sign", data=_target_form())
+    _identity(client, "judge000", "Judge")
+    ready = client.post("/r/planned/verdict", data=_target_form(verdict="approve"))
+    assert "Plan approved · Awaiting implementation" in ready.text
+    assert "expected_version: 1" in ready.text
+    blocked = client.post("/r/planned/comments", data=_target_form(body="New blocker"))
+    assert "Plan approved · Awaiting implementation" not in blocked.text
+    with closing(db.connect(settings.database_url)) as conn:
+        cid = db.list_comments(conn, "planned", target="plan")[0]["id"]
+    restored = client.post(f"/r/planned/comments/{cid}/resolve", data={"version": 1})
+    assert "Plan approved · Awaiting implementation" in restored.text
+
+
+@pytest.mark.parametrize("action", ["resolve", "reopen"])
+@pytest.mark.parametrize("displayed_version", [1, None])
+def test_moderation_after_push_cannot_expose_unread_approval(
+    client, settings, action, displayed_version
+):
+    _plan_review(settings, plan="Original visible plan")
+    _identity(client, "judge000", "Judge")
+    with closing(db.connect(settings.database_url)) as conn:
+        root = db.add_comment(
+            conn,
+            report_id="planned",
+            version=1,
+            target="plan",
+            author_id="judge000",
+            author_name="Judge",
+            body="Existing suggestion",
+            blocking=False,
+        )
+        if action == "reopen":
+            db.resolve_thread(conn, "planned", root["id"])
+    old = client.get("/r/planned?tab=plan")
+    assert "Original visible plan" in old.text
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="planned",
+            project="p",
+            title="Planned",
+            risk="low",
+            body=None,
+            body_supplied=False,
+            plan="UNREAD REPLACEMENT PLAN",
+            expected_version=1,
+        )
+        db.sign_version(
+            conn,
+            report_id="planned",
+            version=2,
+            target="plan",
+            expected_version=2,
+            signer_id="owner000",
+            signer_name="Owner",
+        )
+    response = client.post(
+        f"/r/planned/comments/{root['id']}/{action}",
+        data={"version": displayed_version} if displayed_version is not None else {},
+    )
+    assert response.status_code == 200 and "Reload" in response.text
+    assert 'href="/r/planned?tab=plan"' in response.text
+    assert (
+        'id="vf_verdict"' not in response.text and 'name="version" value="2"' not in response.text
+    )
+    assert "UNREAD REPLACEMENT PLAN" not in response.text
+    with closing(db.connect(settings.database_url)) as conn:
+        assert (db.thread_root(conn, "planned", root["id"])["resolved_at"] is not None) == (
+            action == "resolve"
+        )
+        assert db.plan_review_state(conn, "planned")["status"] == "awaiting_review"
+
+
+@pytest.mark.parametrize("action", ["resolve", "reopen"])
+def test_legacy_moderation_without_snapshot_requires_reload(client, settings, action):
+    _plan_review(settings)
+    _identity(client)
+    with closing(db.connect(settings.database_url)) as conn:
+        root = db.add_comment(
+            conn,
+            report_id="planned",
+            version=1,
+            target="plan",
+            author_id="owner000",
+            author_name="Owner",
+            body="Live concern",
+        )
+        if action == "reopen":
+            db.resolve_thread(conn, "planned", root["id"])
+    response = client.post(f"/r/planned/comments/{root['id']}/{action}")
+    assert "Reload" in response.text and 'href="/r/planned?tab=plan"' in response.text
+    assert 'id="vf_verdict"' not in response.text and 'id="vf_sign"' not in response.text
+    with closing(db.connect(settings.database_url)) as conn:
+        assert (db.thread_root(conn, "planned", root["id"])["resolved_at"] is not None) == (
+            action == "resolve"
+        )
+
+
+@pytest.mark.parametrize(
+    "action,context", [("resolve", True), ("resolve", False), ("blocking", True)]
+)
+def test_moderation_refusal_after_push_cannot_expose_unread_controls(proxied, action, context):
+    settings = proxied.app.state.settings
+    alice = {"X-Forwarded-Email": "alice@example.com", "HX-Request": "true"}
+    _plan_review(settings, plan="Original visible plan")
+    with closing(db.connect(settings.database_url)) as conn:
+        root = db.add_comment(
+            conn,
+            report_id="planned",
+            version=1,
+            target="plan",
+            author_id="bob@example.com",
+            author_name="bob",
+            body="Bob's concern",
+            blocking=False,
+        )
+        db.push_report(
+            conn,
+            id="planned",
+            project="p",
+            title="Planned",
+            risk="low",
+            body=None,
+            body_supplied=False,
+            plan="UNREAD REPLACEMENT PLAN",
+            expected_version=1,
+        )
+        db.sign_version(
+            conn,
+            report_id="planned",
+            version=2,
+            target="plan",
+            expected_version=2,
+            signer_id="bob@example.com",
+            signer_name="bob",
+        )
+    data = {"version": 1} if context else {}
+    if action == "blocking":
+        data["blocking"] = "1"
+    response = proxied.post(f"/r/planned/comments/{root['id']}/{action}", data=data, headers=alice)
+    assert response.status_code == 200 and "Reload" in response.text
+    assert 'href="/r/planned?tab=plan"' in response.text
+    assert (
+        'id="vf_verdict"' not in response.text and 'name="version" value="2"' not in response.text
+    )
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.thread_root(conn, "planned", root["id"])["resolved_at"] is None
+        assert db.thread_root(conn, "planned", root["id"])["blocking"] == 0
+
+
+def test_moderation_buttons_include_displayed_snapshot(client, settings):
+    _plan_review(settings)
+    _identity(client)
+    with closing(db.connect(settings.database_url)) as conn:
+        root = db.add_comment(
+            conn,
+            report_id="planned",
+            version=1,
+            target="plan",
+            author_id="owner000",
+            author_name="Owner",
+            body="Concern",
+        )
+        cid = root["id"]
+    page = client.get("/r/planned?tab=plan").text
+    button = re.search(rf'<button[^>]*id="vf_resolve_{cid}"[^>]*>', page)[0]
+    assert 'hx-vals=\'{"version": "1"}\'' in button
+    with closing(db.connect(settings.database_url)) as conn:
+        db.resolve_thread(conn, "planned", cid)
+    page = client.get("/r/planned?tab=plan").text
+    button = re.search(rf'<button[^>]*id="vf_reopen_{cid}"[^>]*>', page)[0]
+    assert 'hx-vals=\'{"version": "1"}\'' in button
+
+
+@pytest.mark.parametrize("workflow", ["artifact", "plan_first"])
+@pytest.mark.parametrize("action", ["comments", "verdict"])
+def test_unsigned_named_owner_partial_keeps_sign_action(client, settings, workflow, action):
+    if workflow == "plan_first":
+        _plan_review(settings)
+        id, form = "planned", _target_form()
+    else:
+        push(client)
+        id, form = "prorate", {"version": 1, "section": "Intent"}
+    _identity(client)
+    assert 'id="vf_sign"' in client.get(f"/r/{id}").text
+    form |= (
+        {"body": "Suggestion", "blocking": "0"} if action == "comments" else {"verdict": "approve"}
+    )
+    response = client.post(f"/r/{id}/{action}", data=form)
+    header = re.search(r'<header[^>]*id="vf_header".*?</header>', response.text, re.S)[0]
+    assert 'id="vf_sign"' in header
+    if workflow == "plan_first":
+        assert "Sign plan revision 1" in header
+    else:
+        assert "Sign this version" in header
+
+
+@pytest.mark.parametrize(
+    "actor,can_sign", [("alice@example.com", True), ("bob@example.com", False)]
+)
+@pytest.mark.parametrize("action", ["comments", "verdict"])
+def test_shared_unsigned_partial_keeps_sign_permissions(proxied, actor, can_sign, action):
+    settings = proxied.app.state.settings
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="planned",
+            project="p",
+            title="Planned",
+            risk="low",
+            body=None,
+            body_supplied=False,
+            workflow="plan_first",
+            plan="Owner's plan",
+            author_id="alice@example.com",
+        )
+    fields = (
+        {"body": "Suggestion", "blocking": "0"} if action == "comments" else {"verdict": "approve"}
+    )
+    response = proxied.post(
+        f"/r/planned/{action}", headers={"X-Forwarded-Email": actor}, data=_target_form(**fields)
+    )
+    header = re.search(r'<header[^>]*id="vf_header".*?</header>', response.text, re.S)[0]
+    assert ('id="vf_sign"' in header) == can_sign
+    if not can_sign:
+        assert "Only alice" in header
+
+
+@pytest.mark.parametrize(
+    "stage,label",
+    [
+        ("artifact", "billing-service · v1"),
+        ("plan", "p · plan revision 1"),
+        ("implementation", "p · implementation v2"),
+        ("paused", "p · plan revision 1"),
+    ],
+)
+def test_change_row_visible_metadata_names_actionable_document(client, settings, stage, label):
+    if stage == "artifact":
+        push(client)
+    else:
+        _plan_review(settings, body=stage in ("implementation", "paused"))
+        if stage == "paused":
+            with closing(db.connect(settings.database_url)) as conn:
+                db.add_comment(
+                    conn,
+                    report_id="planned",
+                    version=1,
+                    target="plan",
+                    author_id="judge000",
+                    author_name="Judge",
+                    body="Plan blocker",
+                )
+    page = client.get("/changes").text
+    metadata = re.search(r'<div class="chg-m">(.*?)</div>', page)[1]
+    assert metadata.startswith(label)
