@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -35,6 +36,21 @@ CONNECTION_LOST = ("08", "57P")
 STARTUP_LOCKED = (
     "Startup waited too long for a database lock held by another transaction. Restart to try again."
 )
+
+
+def _loopback_own_origin(request: Request) -> bool:
+    # browsers omit Sec-Fetch-Site on http://0.0.0.0, which is not a trustworthy origin. Only
+    # literal loopback or unspecified hosts qualify, so plain-HTTP hostnames and DNS rebinding
+    # stay refused.
+    host = request.url.hostname or ""
+    if host != "localhost":
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        if not (ip.is_loopback or ip.is_unspecified):
+            return False
+    return request.headers.get("Origin") == f"{request.url.scheme}://{request.url.netloc}"
 
 
 def _sign_in_again(request: Request, reason: str, cookie: str | None):
@@ -205,7 +221,9 @@ def create_app(settings: Settings) -> FastAPI:
             if response is None and request.method == "POST" and not is_api:
                 site = request.headers.get("Sec-Fetch-Site")
                 if site is None:
-                    response = JSONResponse({"detail": "browser request required"}, 403)
+                    # shared mode runs on HTTPS or localhost, where browsers send Sec-Fetch-Site
+                    if settings.shared or not _loopback_own_origin(request):
+                        response = JSONResponse({"detail": "browser request required"}, 403)
                 elif site not in ("same-origin", "none"):
                     response = PlainTextResponse("cross-origin request refused", 403)
             if response is None:
