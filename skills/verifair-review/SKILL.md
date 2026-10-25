@@ -66,11 +66,19 @@ For review before implementation, create `workflow: "plan_first"` with `plan` an
 ```python
 import json, sys
 from pathlib import Path
-print(json.dumps({
-    "id": "short-stable-slug", "project": "repo-name",
-    "title": "Proposed change", "risk": "low", "workflow": "plan_first",
-    "plan": Path(sys.argv[1]).read_bytes().decode("utf-8"),
-}))
+
+print(
+    json.dumps(
+        {
+            "id": "short-stable-slug",
+            "project": "repo-name",
+            "title": "Proposed change",
+            "risk": "low",
+            "workflow": "plan_first",
+            "plan": Path(sys.argv[1]).read_bytes().decode("utf-8"),
+        }
+    )
+)
 ```
 
 Save the returned `{id, version, url}`. If creation omitted `id`, use the **returned ID** on every later push; omitting it again creates another review. Workflow is fixed after creation. Tell the owner to sign the plan, then wait for another human's approval. No agent token can sign or give a verdict on either target.
