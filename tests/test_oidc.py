@@ -137,6 +137,12 @@ def test_provider_error_fails(anonymous, provider, caplog):
     assert 'href="/login"' in r.text
 
 
+def _now_relative(claims):
+    # exp and iat are offsets so they are taken when the test runs, not at collection
+    now = int(time.time())
+    return {k: now + v if k in ("exp", "iat") and type(v) is int else v for k, v in claims.items()}
+
+
 @pytest.mark.parametrize(
     ("claims", "reason"),
     [
@@ -147,9 +153,9 @@ def test_provider_error_fails(anonymous, provider, caplog):
         ({"aud": ["other-client", CLIENT_ID]}, "aud"),
         ({"aud": [CLIENT_ID, "other"], "azp": "other"}, "aud"),
         ({"azp": "other"}, "aud"),
-        ({"exp": int(time.time()) - 200}, "exp"),
+        ({"exp": -200}, "exp"),
         ({"exp": None}, "exp"),
-        ({"iat": int(time.time()) + 300}, "iat"),
+        ({"iat": 300}, "iat"),
         ({"iat": "now"}, "iat"),
         ({"email_verified": False}, "email"),
         ({"email_verified": "true"}, "email"),
@@ -161,7 +167,7 @@ def test_provider_error_fails(anonymous, provider, caplog):
 )
 def test_bad_id_token_claims_fail(anonymous, provider, caplog, claims, reason):
     caplog.set_level("INFO", logger="verifair")
-    _fails(provider.sign_in(anonymous, **claims), reason, caplog)
+    _fails(provider.sign_in(anonymous, **_now_relative(claims)), reason, caplog)
 
 
 @pytest.mark.parametrize(
@@ -170,12 +176,13 @@ def test_bad_id_token_claims_fail(anonymous, provider, caplog, claims, reason):
         {"iss": ISSUER + "/"},
         {"aud": [CLIENT_ID]},
         {"aud": [CLIENT_ID, "other"], "azp": CLIENT_ID},
-        {"exp": int(time.time()) - 60},
-        {"iat": int(time.time()) + 60},
+        {"exp": -60},
+        {"iat": 60},
     ],
 )
 def test_id_token_edge_cases_that_pass(anonymous, provider, claims):
-    assert provider.sign_in(anonymous, follow_redirects=False, **claims).status_code == 303
+    response = provider.sign_in(anonymous, follow_redirects=False, **_now_relative(claims))
+    assert response.status_code == 303
 
 
 def test_malformed_id_token_fails(anonymous, provider, caplog, monkeypatch):

@@ -536,7 +536,7 @@ def test_plan_shared_token_permissions(team, settings):
     )
     assert created.status_code == 201
     with closing(db.connect(settings.database_url)) as conn:
-        admin_token, _ = db.create_token(conn, owner_id="boss", label="admin agent")
+        admin_token, _ = db.create_token(conn, owner_id="boss@example.com", label="admin agent")
     for token in (AGENTS["bob@example.com"], {"Authorization": f"Bearer {admin_token}"}):
         refused = team.post(
             "/api/reports",

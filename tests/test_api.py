@@ -2230,7 +2230,7 @@ def test_trace_shared_owner_and_authenticated_read_rules(shared_client, alice, b
         denied = shared_client.post(
             f"/r/prorate/{path}",
             data=data,
-            headers=alice | {"X-Forwarded-Email": ""},
+            headers=alice | {"Cookie": ""},
         )
         assert denied.status_code == 401
     assert shared_client.get("/api/reports/prorate", headers=alice).json() == before

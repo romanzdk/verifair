@@ -3160,8 +3160,8 @@ def test_plan_thread_refresh_keeps_named_user_in_navigation(client, settings):
 
 def test_plan_shared_signing_and_moderation_keep_existing_permissions(proxied):
     settings = proxied.app.state.settings
-    alice = {"X-Forwarded-Email": "alice@example.com"}
-    bob = {"X-Forwarded-Email": "bob@example.com"}
+    alice = signed_in("alice@example.com")
+    bob = signed_in("bob@example.com")
     with closing(db.connect(settings.database_url)) as conn:
         db.push_report(
             conn,
@@ -3373,7 +3373,7 @@ def test_legacy_moderation_without_snapshot_requires_reload(client, settings, ac
 )
 def test_moderation_refusal_after_push_cannot_expose_unread_controls(proxied, action, context):
     settings = proxied.app.state.settings
-    alice = {"X-Forwarded-Email": "alice@example.com", "HX-Request": "true"}
+    alice = signed_in("alice@example.com") | {"HX-Request": "true"}
     _plan_review(settings, plan="Original visible plan")
     with closing(db.connect(settings.database_url)) as conn:
         root = db.add_comment(
@@ -3490,7 +3490,7 @@ def test_shared_unsigned_partial_keeps_sign_permissions(proxied, actor, can_sign
         {"body": "Suggestion", "blocking": "0"} if action == "comments" else {"verdict": "approve"}
     )
     response = proxied.post(
-        f"/r/planned/{action}", headers={"X-Forwarded-Email": actor}, data=_target_form(**fields)
+        f"/r/planned/{action}", headers=signed_in(actor), data=_target_form(**fields)
     )
     header = re.search(r'<header[^>]*id="vf_header".*?</header>', response.text, re.S)[0]
     assert ('id="vf_sign"' in header) == can_sign
