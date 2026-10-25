@@ -46,7 +46,7 @@ A request without the header, or with the header sent more than once, gets 401. 
 | Read all projects, reports and threads | Yes | Yes | Yes |
 | Push a report or a new version | Through their own agent token | Same as a member | The owner's reports only |
 | Comment, reply, reopen a thread | Yes | Yes | Comment and reply on the owner's reports |
-| Request a review, or remove a request | Yes, on any report, from any active member except the report owner. A reviewer with a verdict on the current version cannot be removed | Same as a member | Add requests on the owner's reports when pushing |
+| Request a review, or remove a request | Yes, on any report, from any active member except the report owner. A reviewer with a current verdict on either review target cannot be removed | Same as a member | Add requests on the owner's reports when pushing |
 | Sign a version | Own reports | Own reports | No |
 | Approve or request changes | Reports someone else signed | Same as a member | No |
 | Resolve a thread or change its blocking flag | Threads they started, and agent threads on their own reports | Any thread | Resolve agent threads on the owner's reports |
@@ -80,6 +80,8 @@ The token owner owns every report the token pushes. Report ids are chosen by the
 A report with no owner (a report pushed in local mode and never signed) is frozen in shared mode. Nobody can sign it, push a new version to it, or comment on it with an agent token. People can still read it, comment and request reviews in the browser. To go on, push it again with an agent token under a new id.
 
 ## Moderation
+
+For plan-first reviews these permissions apply separately to the plan and implementation. Shared-mode owners sign each target, and another person gives its verdict. Agent tokens can submit and discuss their owner's documents but cannot sign or approve either one. Implementation attachment, signing and verdicts wait for effective approval of the current plan. Admins have no bypass. In local mode the existing cookie identities and signing rules still apply; they do not provide strong authentication.
 
 In shared mode, anyone can reply to a thread or reopen it with the **Reopen** button. Only these people can resolve a thread or change its blocking flag:
 

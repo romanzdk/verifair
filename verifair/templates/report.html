@@ -1,28 +1,36 @@
 {% extends "base.html" %}
 {% set drawer = true %}
-{% set is_report = view_tab|default('report') == 'report' %}
-{% set inline_name_prompt = is_report and is_current and not user_name and not user_from_header %}
+{% set is_report = view_tab|default('report') != 'plan' %}
+{% set reviewing = (is_report or plan_first) and reviewable %}
+{% set inline_name_prompt = reviewing and is_current and not user_name and not user_from_header %}
 {% block title %}{{ report.title }} · verifair{% endblock %}
-{% block body_class %}{% if is_current and is_report %} class="has-verdict"{% endif %}{% endblock %}
+{% block body_class %}{% if is_current and reviewing %} class="has-verdict"{% endif %}{% endblock %}
 {% block crumbs %}<a href="/p/{{ report.project|urlencode }}">{{ report.project }}</a>{{ icon("chevron-right", "ic14") }}<span class="cur">{{ report.title }}</span>{% endblock %}
 {% block content %}
 {% if not is_current %}
-<div class="banner">Viewing v{{ version }} · current is v{{ current_version }} · <a href="{{ url }}{% if not is_report and versions[0].plan is not none %}?tab=plan{% endif %}">open current</a></div>
+<div class="banner">Viewing v{{ version }} · current is v{{ current_version }} · <a href="{{ url }}{% if plan_first %}{{ selection_query }}{% elif not is_report and versions[0].plan is not none %}?tab=plan{% endif %}">open current</a></div>
 {% endif %}
 {% include "_header.html" %}
 <div class="body">
   <main class="main" id="vf_main">
     {% if plan_html is not none %}
     <nav class="tabs" aria-label="Report documents">
+      {% if plan_first %}
+      <a href="{{ shown_url }}?tab=plan"{% if not is_report %} aria-current="page"{% endif %}>Plan</a>
+      <a href="{{ shown_url }}?tab=implementation"{% if is_report %} aria-current="page"{% endif %}>Implementation</a>
+      {% else %}
       <a href="{{ shown_url }}"{% if is_report %} aria-current="page"{% endif %}>Report</a>
       <a href="{{ shown_url }}?tab=plan"{% if not is_report %} aria-current="page"{% endif %}>Plan</a>
+      {% endif %}
     </nav>
     {% endif %}
-    {% if not is_report %}
+    {% if not is_report and not plan_first %}
     <p class="dismiss">Plan attached to report v{{ version }}. Read-only context; sign and review this version on the <a href="{{ shown_url }}">Report tab</a>.</p>
     <article class="content">{{ plan_html|safe }}</article>
+    {% elif is_report and not has_body %}
+    <p class="banner">Implementation has not been attached. <a href="{{ shown_url }}?tab=plan">Review the plan</a>.</p>
     {% else %}
-    {% if inline_name_prompt %}{% with next=here %}{% include "_name_prompt.html" %}{% endwith %}{% endif %}
+    {% if inline_name_prompt %}{% with next=selected_url %}{% include "_name_prompt.html" %}{% endwith %}{% endif %}
     {% for s in sections %}
     <section id="{{ s.slug }}" data-section="{{ s.heading }}">
       <h2><span class="num">{{ loop.index }}</span>{{ s.heading }}{% if is_current %} <button type="button" class="cc" data-comment-section aria-label="Comment on {{ s.heading }}">{{ icon("message-square", "ic12") }} comment</button>{% endif %}</h2>
@@ -30,17 +38,16 @@
       <div class="threads" id="vf_threads_{{ s.slug }}">
         {% for thread in threads_by_section.get(s.slug, []) %}{% include "_thread.html" %}{% endfor %}
       </div>
-      {% if is_current %}
-      {% include "_cform.html" %}
-      {% endif %}
+      {% if is_current %}{% include "_cform.html" %}{% endif %}
     </section>
     {% endfor %}
-    {% if threads_by_section.get("vf_general") %}
+    {% if threads_by_section.get("vf_general") or (plan_first and not is_report) %}
     <section id="vf_general" class="general">
       <h2>General comments</h2>
-      <div class="threads" id="vf_threads_general">
-        {% for thread in threads_by_section["vf_general"] %}{% include "_thread.html" %}{% endfor %}
+      <div class="threads" id="{{ 'vf_threads_vf_general' if plan_first and not is_report else 'vf_threads_general' }}">
+        {% for thread in threads_by_section.get("vf_general", []) %}{% include "_thread.html" %}{% endfor %}
       </div>
+      {% if is_current and plan_first and not is_report %}{% with s = {'slug': 'vf_general', 'heading': none} %}{% include "_cform.html" %}{% endwith %}{% endif %}
     </section>
     {% endif %}
     {% if threads_by_section.get(None) %}
@@ -60,7 +67,7 @@
   {% include "_sidebar.html" %}
 </div>
 <p id="vf_rev_live" class="sr-only" role="status"></p>
-{% if is_current and is_report %}
+{% if is_current and reviewing %}
 {% include "_verdict.html" %}
 <div id="vf_popover" class="pop" hidden><button type="button">{{ icon("message-square", "ic12") }} Comment on selection</button></div>
 {% endif %}

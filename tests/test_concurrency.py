@@ -457,3 +457,291 @@ def test_a_verdict_in_flight_keeps_the_review_request(url):
     requested = db.requested_reviewers(c, "r1")
     c.close()
     assert removed == ["kept"] and requested == ["a"]
+
+
+def _plan_seed(conn, *, implementation=False):
+    db.push_report(
+        conn,
+        id="plan",
+        project="p",
+        title="Plan",
+        risk="low",
+        body=None,
+        body_supplied=False,
+        plan="A",
+        workflow="plan_first",
+    )
+    db.sign_version(
+        conn,
+        report_id="plan",
+        target="plan",
+        version=1,
+        expected_version=1,
+        signer_id="owner",
+        signer_name="Owner",
+    )
+    db.add_verdict(
+        conn,
+        report_id="plan",
+        target="plan",
+        version=1,
+        reviewer_id="reviewer",
+        reviewer_name="Reviewer",
+        verdict="approve",
+    )
+    if implementation:
+        db.push_report(
+            conn, id="plan", project="p", title="Plan", risk="low", body="body", expected_version=1
+        )
+
+
+def _ordered_plan_race(url, monkeypatch, first, second):
+    held, attempted = threading.Event(), threading.Event()
+    original = db._lock_report
+    second_pid = []
+
+    def lock(conn, report_id):
+        if conn.info.backend_pid in second_pid:
+            attempted.set()
+        return original(conn, report_id)
+
+    monkeypatch.setattr(db, "_lock_report", lock)
+
+    def winner():
+        with closing(connect(url)) as conn, conn.transaction():
+            result = first(conn)
+            held.set()
+            assert attempted.wait(3)
+            return result
+
+    def follower():
+        with closing(connect(url)) as conn:
+            second_pid.append(conn.info.backend_pid)
+            assert held.wait(3)
+            return second(conn)
+
+    with ThreadPoolExecutor(2) as pool:
+        a, b = pool.submit(winner), pool.submit(follower)
+        return a.result(timeout=5), b.result(timeout=5)
+
+
+@pytest.mark.parametrize("action", ["attach", "body", "sign", "approve", "request_changes"])
+@pytest.mark.parametrize("close", ["edit", "reopen", "new_blocker", "make_blocking"])
+@pytest.mark.parametrize("closing_first", [True, False])
+def test_plan_gate_races_all_implementation_writers(url, monkeypatch, action, close, closing_first):
+    snapshot = 1 if action == "attach" else 2
+    body_action = action in ("attach", "body")
+    with closing(connect(url)) as conn:
+        _plan_seed(conn, implementation=action != "attach")
+        if action in ("approve", "request_changes"):
+            db.sign_version(
+                conn, report_id="plan", version=snapshot, signer_id="owner", signer_name="O"
+            )
+        root = db.add_comment(
+            conn,
+            report_id="plan",
+            target="plan",
+            version=1,
+            author_id="r",
+            author_name="R",
+            body="concern",
+            blocking=close != "make_blocking",
+        )
+        if close != "make_blocking":
+            db.resolve_thread(conn, "plan", root["id"])
+
+    def close_plan(conn):
+        if close == "edit":
+            expected = snapshot + int(body_action and not closing_first)
+            return db.push_report(
+                conn,
+                id="plan",
+                project="p",
+                title="Plan",
+                risk="low",
+                body=None,
+                body_supplied=False,
+                plan="B",
+                expected_version=expected,
+            )
+        if close == "reopen":
+            return db.reopen_thread(conn, "plan", root["id"])
+        if close == "make_blocking":
+            return db.set_blocking(conn, "plan", root["id"], True)
+        return db.add_comment(
+            conn,
+            report_id="plan",
+            target="plan",
+            version=1,
+            author_id="r",
+            author_name="R",
+            body="new concern",
+        )
+
+    def implementation(conn):
+        try:
+            if body_action:
+                result = db.push_report(
+                    conn,
+                    id="plan",
+                    project="p",
+                    title="Attached",
+                    risk="high",
+                    body="new body",
+                    expected_version=snapshot,
+                    reviewers=["new"],
+                )
+            elif action == "sign":
+                result = db.sign_version(
+                    conn, report_id="plan", version=snapshot, signer_id="owner", signer_name="O"
+                )
+            else:
+                result = db.add_verdict(
+                    conn,
+                    report_id="plan",
+                    version=snapshot,
+                    expected_version=snapshot,
+                    reviewer_id="r",
+                    reviewer_name="R",
+                    verdict=action,
+                )
+            return "saved", result
+        except (db.StaleVersion, db.PlanNotApproved) as exc:
+            return "refused", exc
+
+    first, second = (close_plan, implementation) if closing_first else (implementation, close_plan)
+    results = _ordered_plan_race(url, monkeypatch, first, second)
+    assert results[1 if closing_first else 0][0] == ("refused" if closing_first else "saved")
+    with closing(connect(url)) as conn:
+        state = db.plan_review_state(conn, "plan")
+        assert state["status"] == ("unsigned" if close == "edit" else "changes_requested")
+        assert db.get_report(conn, "plan")["title"] == (
+            "Plan" if closing_first or close == "edit" else "Attached" if body_action else "Plan"
+        )
+        if body_action:
+            assert db.requested_reviewers(conn, "plan") == ([] if closing_first else ["new"])
+            assert db.get_version(conn, "plan", snapshot)["body"] == (
+                None if action == "attach" else "body"
+            )
+            if not closing_first:
+                assert db.get_version(conn, "plan", snapshot + 1)["body"] == "new body"
+        if action == "sign":
+            assert (db.get_signature(conn, "plan", 2) is None) == closing_first
+        if action in ("approve", "request_changes"):
+            assert len(db.list_verdicts(conn, "plan")) == (0 if closing_first else 1)
+
+
+def test_plan_concurrent_updates_one_guard_has_one_winner(url):
+    with closing(connect(url)) as conn:
+        _plan_seed(conn)
+
+    def update(conn, i):
+        try:
+            return db.push_report(
+                conn,
+                id="plan",
+                project="p",
+                title="Plan",
+                risk="low",
+                body=None,
+                body_supplied=False,
+                plan=f"B{i}",
+                expected_version=1,
+            )
+        except db.StaleVersion as exc:
+            return exc.latest
+
+    results = _race(url, update)
+    assert sorted(results, key=str) == [("plan", 2), 2]
+
+
+@pytest.mark.parametrize("workflow", ["artifact", "plan_first"])
+def test_plan_same_id_creation_rechecks_winning_workflow_and_guard(url, monkeypatch, workflow):
+    def initial(conn, selected):
+        return db.push_report(
+            conn,
+            id="same",
+            project="p",
+            title="T",
+            risk="low",
+            workflow=selected,
+            plan="A",
+            body="body" if selected == "artifact" else None,
+            body_supplied=selected == "artifact",
+        )
+
+    other = "artifact" if workflow == "plan_first" else "plan_first"
+
+    def competing(conn):
+        with pytest.raises(db.WorkflowMismatch):
+            initial(conn, other)
+        if workflow == "plan_first":
+            with pytest.raises(ValueError, match="expected_version"):
+                initial(conn, workflow)
+
+    _ordered_plan_race(url, monkeypatch, lambda c: initial(c, workflow), competing)
+    with closing(connect(url)) as conn:
+        assert db.latest_version(conn, "same") == 1
+        assert db.get_report(conn, "same")["workflow"] == workflow
+
+
+def test_plan_stale_approval_after_edit_cannot_approve_new_text(url, monkeypatch):
+    with closing(connect(url)) as conn:
+        _plan_seed(conn)
+
+    def edit(conn):
+        db.push_report(
+            conn,
+            id="plan",
+            project="p",
+            title="Plan",
+            risk="low",
+            body=None,
+            body_supplied=False,
+            plan="B",
+            expected_version=1,
+        )
+
+    def approve(conn):
+        with pytest.raises(db.StaleRevision) as exc:
+            db.add_verdict(
+                conn,
+                report_id="plan",
+                target="plan",
+                version=1,
+                reviewer_id="r",
+                reviewer_name="R",
+                verdict="approve",
+            )
+        assert exc.value.current_revision == 2
+
+    _ordered_plan_race(url, monkeypatch, edit, approve)
+    with closing(connect(url)) as conn:
+        assert db.plan_review_state(conn, "plan")["status"] == "unsigned"
+        assert len(db.list_verdicts(conn, "plan", target="plan")) == 1
+
+
+@pytest.mark.parametrize("push_first", [True, False])
+def test_plan_legacy_comment_validation_uses_locked_current_markdown(url, monkeypatch, push_first):
+    with closing(connect(url)) as conn:
+        _push(conn, id="r1")
+    checked = []
+
+    def push(conn):
+        return db.push_report(conn, id="r1", project="p", title="T", risk="low", body="new body")
+
+    def comment(conn):
+        return db.add_comment(
+            conn,
+            report_id="r1",
+            author_id="r",
+            author_name="R",
+            body="comment",
+            validate=lambda markdown, revision: checked.append((markdown, revision)),
+        )
+
+    first, second = (push, comment) if push_first else (comment, push)
+    results = _ordered_plan_race(url, monkeypatch, first, second)
+    saved = results[1 if push_first else 0]
+    assert checked == [("new body", 2) if push_first else ("b", 1)]
+    assert saved["version"] == checked[0][1]

@@ -1,11 +1,13 @@
-<form class="cform" id="vf_cform_{{ s.slug }}" hidden{% if oob %} hx-swap-oob="true"{% endif %} hx-post="{{ url }}/comments" hx-target="#vf_threads_{{ s.slug }}" hx-swap="beforeend" hx-disabled-elt="find button">
+<form class="cform" id="vf_cform_{{ s.slug }}"{% if s.heading %} hidden{% endif %}{% if oob %} hx-swap-oob="true"{% endif %} hx-post="{{ url }}/comments" hx-target="#vf_threads_{{ s.slug }}" hx-swap="beforeend" hx-disabled-elt="find button">
   <input type="hidden" name="version" value="{{ version }}">
-  <input type="hidden" name="section" value="{{ s.heading }}">
+  <input type="hidden" name="target" value="{{ target }}">
+  <input type="hidden" name="revision" value="{{ revision }}">
+  {% if s.heading %}<input type="hidden" name="section" value="{{ s.heading }}">{% endif %}
   <input type="hidden" name="quote" value="">
   <input type="hidden" name="prefix" value="">
   <input type="hidden" name="suffix" value="">
   <div class="q" hidden></div>
-  <textarea name="body" required maxlength="20000" placeholder="Comment on {{ s.heading }}" aria-label="Comment on {{ s.heading }}"></textarea>
+  <textarea name="body" required maxlength="20000" placeholder="Comment on {{ s.heading or 'plan' }}" aria-label="Comment on {{ s.heading or 'plan' }}"></textarea>
   <label class="nb"><input type="checkbox" name="blocking" value="0"> Non-blocking (suggestion)</label>
   <div class="tact">
     <button class="btn p">Comment</button>

@@ -17,34 +17,65 @@ def _esc(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def report_pushed_text(report: Mapping, version: int, base_url: str) -> str:
+def _revision(report: Mapping, version: int, target: str) -> str:
+    if report.get("workflow") == "plan_first":
+        return f"plan revision {version}" if target == "plan" else f"implementation v{version}"
+    return f"v{version}"
+
+
+def _tab(report: Mapping, target: str) -> str:
+    return f"?tab={target}" if report.get("workflow") == "plan_first" else ""
+
+
+def report_pushed_text(
+    report: Mapping, version: int, base_url: str, *, target: str = "implementation"
+) -> str:
+    revision = _revision(report, version, target)
+    if report.get("workflow") != "plan_first":
+        revision = f"report {revision}"
     return (
-        f"Draft report v{version} in {_esc(report['project'])}: {_esc(report['title'])} "
-        f"{base_url}/r/{report['id']}"
+        f"Draft {revision} in {_esc(report['project'])}: {_esc(report['title'])} "
+        f"{base_url}/r/{report['id']}{_tab(report, target)}"
     )
 
 
-def ready_for_review_text(report: Mapping, version: int, signer_name: str, base_url: str) -> str:
+def ready_for_review_text(
+    report: Mapping,
+    version: int,
+    signer_name: str,
+    base_url: str,
+    *,
+    target: str = "implementation",
+) -> str:
     return (
-        f"Ready for review: {_esc(report['title'])} v{version} (risk {report['risk']}), "
-        f"signed by {_esc(signer_name)} {base_url}/r/{report['id']}"
+        f"Ready for review: {_esc(report['title'])} {_revision(report, version, target)} "
+        f"(risk {report['risk']}), signed by {_esc(signer_name)} "
+        f"{base_url}/r/{report['id']}{_tab(report, target)}"
     )
 
 
 def comment_text(report: Mapping, comment: Mapping, base_url: str) -> str:
     section = _esc(comment["section"] or "report")
-    url = f"{base_url}/r/{report['id']}#vf_c{comment['id']}"
+    target = comment.get("target", "implementation")
+    revision = (
+        f" {_revision(report, comment['version'], target)}"
+        if report.get("workflow") == "plan_first"
+        else ""
+    )
+    url = f"{base_url}/r/{report['id']}{_tab(report, target)}#vf_c{comment['id']}"
     return (
-        f"{_esc(comment['author_name'])} commented on {_esc(report['title'])} › {section}: "
-        f"{_esc(comment['body'][:140])} {url}"
+        f"{_esc(comment['author_name'])} commented on {_esc(report['title'])}{revision} "
+        f"› {section}: {_esc(comment['body'][:140])} {url}"
     )
 
 
 def verdict_text(report: Mapping, verdict: Mapping, base_url: str) -> str:
     action = "approved" if verdict["verdict"] == "approve" else "requested changes on"
+    target = verdict.get("target", "implementation")
     return (
         f"{_esc(verdict['reviewer_name'])} {action} {_esc(report['title'])} "
-        f"v{verdict['version']}: {_esc(verdict['summary'])} {base_url}/r/{report['id']}"
+        f"{_revision(report, verdict['version'], target)}: {_esc(verdict['summary'])} "
+        f"{base_url}/r/{report['id']}{_tab(report, target)}"
     )
 
 
@@ -79,22 +110,28 @@ def review_email(
     signer: str | None,
     asker: str | None = None,
     added: bool = False,
+    target: str = "implementation",
 ) -> tuple[str, str]:
     title = " ".join(report["title"].split())
+    revision = _revision(report, version, target)
     if added:
         signed = f", signed by {signer}" if signer else ""
-        opening = f'{asker} asked you to review "{title}" (v{version}{signed}).'
+        opening = f'{asker} asked you to review "{title}" ({revision}{signed}).'
     else:
         by = f" by {asker}" if asker else ""
-        opening = f'{signer} signed v{version} of "{title}". You were asked to review it{by}.'
+        opening = f'{signer} signed {revision} of "{title}". You were asked to review it{by}.'
     blocks = [opening, f"Project: {report['project']} · Risk: {report['risk']}"]
     if judge:
         blocks.append(f"Judge this:\n{_cut(judge)}")
     blocks += [
-        f"Open it to comment, approve or request changes:\n{base_url}/r/{quote(report['id'])}",
+        "Open it to comment, approve or request changes:\n"
+        f"{base_url}/r/{quote(report['id'])}{_tab(report, target)}",
         "— Sent by verifair. Replies to this mail are not read.",
     ]
-    return f'Review requested: "{title}"', "\n\n".join(blocks)
+    subject = f'Review requested: "{title}"'
+    if report.get("workflow") == "plan_first":
+        subject += f" ({revision})"
+    return subject, "\n\n".join(blocks)
 
 
 def _failed(report_id: str, recipients: int, exc: Exception) -> None:

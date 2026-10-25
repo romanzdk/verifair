@@ -91,6 +91,7 @@ def test_reviewers_label_and_agent_excluded(conn):
 def test_reviewers_use_latest_name_and_verdict(conn):
     _comment(conn, "alice", name="Al")
     _verdict(conn, "alice", "request_changes", version=1, name="Alice")
+    push_report(conn, id="r", project="p", title="T", risk="low", body="v2")
     _verdict(conn, "alice", "approve", version=2, name="Alice B")
     (r,) = reviewers([], _verdicts(conn))
     assert (r.name, r.verdict, r.verdict_version, r.label) == (
@@ -259,4 +260,43 @@ def test_inbox_groups_and_order():
         "sign": [],
         "returned": [],
         "waiting": [],
+        "implementation": [],
     }
+
+
+@pytest.mark.parametrize(
+    ("workflow", "body", "plan", "implementation", "expected"),
+    [
+        ("artifact", True, None, "approved", ("implementation", "approved")),
+        ("plan_first", False, "unsigned", None, ("plan", "unsigned")),
+        ("plan_first", True, "changes_requested", "approved", ("plan", "changes_requested")),
+        (
+            "plan_first",
+            False,
+            "approved",
+            None,
+            ("awaiting_implementation", "awaiting_implementation"),
+        ),
+        ("plan_first", True, "approved", "unsigned", ("implementation", "unsigned")),
+        ("plan_first", True, "approved", "approved", ("implementation", "approved")),
+    ],
+)
+def test_plan_review_stage(workflow, body, plan, implementation, expected):
+    from verifair.rules import review_stage
+
+    assert (
+        review_stage(
+            workflow=workflow, has_body=body, plan_status=plan, implementation_status=implementation
+        )
+        == expected
+    )
+
+
+def test_plan_inbox_awaiting_implementation_is_owner_work():
+    from verifair.rules import STATUS_LABELS
+
+    rows = [row("mine", "awaiting_implementation"), row("other", "awaiting_implementation")]
+    groups = inbox(rows, user_id="me", mine={"mine"}, requested={"other"})
+    assert [r["report"]["id"] for r in groups["implementation"]] == ["mine"]
+    assert not groups["review"]
+    assert STATUS_LABELS["awaiting_implementation"] == "Awaiting implementation"

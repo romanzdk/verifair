@@ -8,7 +8,7 @@ import secrets
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import psycopg
 from psycopg.rows import dict_row
@@ -18,6 +18,8 @@ from verifair.render import slugify
 
 log = logging.getLogger("verifair")
 
+Target = Literal["implementation", "plan"]
+Workflow = Literal["artifact", "plan_first"]
 Row = dict[str, Any]
 Connection = psycopg.Connection[Row]
 CONNECT_KWARGS: dict[str, Any] = {"autocommit": True, "row_factory": dict_row}
@@ -122,6 +124,29 @@ CREATE INDEX IF NOT EXISTS reports_author ON reports(author_id);
 
 class ProjectMismatch(Exception):
     pass
+
+
+class WorkflowMismatch(Exception):
+    pass
+
+
+class PlanNotApproved(Exception):
+    def __init__(self, plan_revision: int) -> None:
+        super().__init__("current plan is not approved")
+        self.plan_revision = plan_revision
+
+
+class MissingDocument(Exception):
+    def __init__(self, target: Target) -> None:
+        super().__init__(f"{target} has not been attached")
+        self.target = target
+
+
+class StaleRevision(Exception):
+    def __init__(self, target: Target, current_revision: int) -> None:
+        super().__init__("document changed")
+        self.target = target
+        self.current_revision = current_revision
 
 
 class AlreadySigned(Exception):
@@ -247,6 +272,131 @@ def init_schema(conn: Connection) -> None:
         ).fetchone():
             conn.execute("ALTER TABLE versions ADD COLUMN IF NOT EXISTS plan TEXT")
 
+        columns = {
+            (row["table_name"], row["column_name"])
+            for row in conn.execute(
+                "SELECT table_name, column_name FROM information_schema.columns"
+                " WHERE table_schema=current_schema()"
+            )
+        }
+        if ("reports", "workflow") not in columns:
+            conn.execute(
+                "ALTER TABLE reports ADD COLUMN workflow TEXT NOT NULL DEFAULT 'artifact'"
+                " CHECK (workflow IN ('artifact', 'plan_first'))"
+            )
+        for table in ("comments", "verdicts", "signatures"):
+            if (table, "target") not in columns:
+                conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN target TEXT NOT NULL DEFAULT 'implementation'"
+                    " CHECK (target IN ('implementation', 'plan'))"
+                )
+                if table == "signatures":
+                    conn.execute(
+                        "ALTER TABLE signatures DROP CONSTRAINT signatures_pkey,"
+                        " ADD PRIMARY KEY (report_id, target, version)"
+                    )
+        if ("versions", "plan_revision") not in columns:
+            conn.execute("ALTER TABLE versions ADD COLUMN plan_revision INTEGER")
+            conn.execute(
+                "WITH previous AS ("
+                " SELECT report_id, version, plan,"
+                " lag(plan) OVER (PARTITION BY report_id ORDER BY version) AS previous_plan"
+                " FROM versions), sources AS ("
+                " SELECT report_id, version, plan, max(CASE WHEN"
+                ' plan COLLATE "C" IS DISTINCT FROM previous_plan COLLATE "C" THEN version END)'
+                " OVER (PARTITION BY report_id ORDER BY version) AS source FROM previous)"
+                " UPDATE versions v SET plan_revision = CASE WHEN s.plan IS NOT NULL"
+                " THEN s.source END FROM sources s"
+                " WHERE v.report_id=s.report_id AND v.version=s.version"
+            )
+            conn.execute(
+                "ALTER TABLE versions ALTER COLUMN body DROP NOT NULL,"
+                " ADD CONSTRAINT versions_content CHECK ("
+                " (body IS NOT NULL OR plan IS NOT NULL) AND"
+                " (body IS NULL OR body <> '') AND (plan IS NULL OR plan <> '')),"
+                " ADD CONSTRAINT versions_plan_pointer CHECK ("
+                " (plan IS NULL) = (plan_revision IS NULL) AND"
+                " (plan_revision IS NULL OR (plan_revision > 0 AND plan_revision <= version))),"
+                " ADD CONSTRAINT versions_plan_source FOREIGN KEY (report_id, plan_revision)"
+                " REFERENCES versions(report_id, version)"
+            )
+
+
+def target_document(
+    conn: Connection, report_id: str, snapshot: int, target: Target
+) -> tuple[int, str] | None:
+    if target not in ("implementation", "plan"):
+        raise ValueError("invalid target")
+    row = get_version(conn, report_id, snapshot)
+    if row is None:
+        return None
+    document = row["body" if target == "implementation" else "plan"]
+    if document is None:
+        return None
+    return (snapshot if target == "implementation" else row["plan_revision"], document)
+
+
+def _check_target(
+    conn: Connection,
+    report_id: str,
+    target: Target,
+    revision: int,
+    expected_version: int | None,
+) -> None:
+    _check_version(conn, report_id, expected_version)
+    report = get_report(conn, report_id)
+    if report is None:
+        raise LookupError(f"report {report_id!r} not found")
+    if target == "plan" and report["workflow"] != "plan_first":
+        raise ValueError("artifact plans are read-only")
+    document = target_document(conn, report_id, latest_version(conn, report_id), target)
+    if document is None:
+        raise MissingDocument(target)
+    if revision != document[0]:
+        raise StaleRevision(target, document[0])
+
+
+def plan_review_state(conn: Connection, report_id: str, snapshot: int | None = None) -> dict | None:
+    from verifair.rules import compute_status, latest_verdicts, plan_status
+
+    report = get_report(conn, report_id)
+    if report is None or report["workflow"] != "plan_first":
+        return None
+    snapshot = latest_version(conn, report_id) if snapshot is None else snapshot
+    document = target_document(conn, report_id, snapshot, "plan")
+    if document is None:
+        return None
+    revision, _ = document
+    signature = get_signature(conn, report_id, revision, target="plan")
+    verdicts = [
+        row for row in list_verdicts(conn, report_id, target="plan") if row["version"] <= revision
+    ]
+    blockers = conn.execute(
+        "SELECT count(*) AS n FROM comments WHERE report_id=%s AND target='plan'"
+        " AND parent_id IS NULL AND resolved_at IS NULL AND blocking=1 AND version<=%s",
+        (report_id, revision),
+    ).fetchone()["n"]
+    status = compute_status(
+        verdicts,
+        revision,
+        signature is not None,
+        signature["signer_id"] if signature else None,
+    )
+    return {
+        "revision": revision,
+        "signature": signature,
+        "verdicts": verdicts,
+        "latest_verdicts": latest_verdicts(verdicts, revision),
+        "status": plan_status(status, blockers),
+        "open_blocking": blockers,
+    }
+
+
+def _require_plan_approved(conn: Connection, report_id: str) -> None:
+    state = plan_review_state(conn, report_id)
+    if state is not None and state["status"] != "approved":
+        raise PlanNotApproved(state["revision"])
+
 
 def push_report(
     conn: Connection,
@@ -254,7 +404,10 @@ def push_report(
     project: str,
     title: str,
     risk: str,
-    body: str,
+    body: str | None,
+    body_supplied: bool = True,
+    workflow: Workflow | None = None,
+    expected_version: int | None = None,
     plan: str | None = None,
     inherit_plan: bool = True,
     id: str | None = None,
@@ -269,6 +422,13 @@ def push_report(
     commit: str | None = None,
     owner_id: str | None = None,
 ) -> tuple[str, int]:
+    if workflow not in (None, "artifact", "plan_first"):
+        raise ValueError("invalid workflow")
+    if not body_supplied and body is not None:
+        raise ValueError("body must be omitted when body_supplied is false")
+    for name, document in (("body", body), ("plan", plan)):
+        if document is not None and (not document.strip() or not storable(document)):
+            raise ValueError(f"{name} must be nonblank storable Markdown")
     now = _now()
     links_json = json.dumps(links or [])
     if owner_id is not None:
@@ -318,6 +478,12 @@ def push_report(
                     "push rejected id=%s project=%s owner=%s", id, project, existing["project"]
                 )
                 raise ProjectMismatch(f"report {id!r} belongs to project {existing['project']!r}")
+            _check_version(conn, id, expected_version)
+            if workflow is not None and workflow != existing["workflow"]:
+                raise WorkflowMismatch("workflow cannot be changed")
+            workflow = existing["workflow"]
+            if workflow == "plan_first" and expected_version is None:
+                raise ValueError("expected_version is required for plan-first updates")
             version = latest_version(conn, id) + 1
             conn.execute(
                 "UPDATE reports SET title=%s, risk=%s, ticket_url=%s, links=%s,"
@@ -337,6 +503,46 @@ def push_report(
                     id,
                 ),
             )
+        else:
+            if expected_version is not None:
+                raise ValueError("expected_version must be omitted on creation")
+            workflow = workflow or "artifact"
+            conn.execute("UPDATE reports SET workflow=%s WHERE id=%s", (workflow, id))
+        plan_supplied = plan is not None or not inherit_plan
+        previous = get_version(conn, id, version - 1) if version > 1 else None
+        if plan is None and inherit_plan and previous is not None:
+            plan = previous["plan"]
+        plan_revision = (
+            None
+            if plan is None
+            else (previous["plan_revision"] if previous and previous["plan"] == plan else version)
+        )
+        if workflow == "artifact":
+            if not body_supplied or body is None:
+                raise ValueError("artifact reviews require body")
+        else:
+            if plan is None:
+                raise ValueError("plan-first reviews require plan")
+            if previous is None:
+                if body is not None:
+                    raise ValueError("initial plan-first review cannot contain body")
+            else:
+                if not body_supplied and not plan_supplied:
+                    raise ValueError("at least one content field must be supplied")
+                if body_supplied and body is None:
+                    raise ValueError("implementation cannot be removed")
+                if body_supplied:
+                    if plan_revision != previous["plan_revision"]:
+                        raise PlanNotApproved(plan_revision)
+                    _require_plan_approved(conn, id)
+                else:
+                    body = previous["body"]
+            if not body_supplied:
+                if commit is not None:
+                    raise ValueError("commit requires supplied body")
+                commit = previous["commit"] if previous else None
+            elif body is None and commit is not None:
+                raise ValueError("commit requires supplied body")
         owner = author_id if author_id is not None else (existing or {}).get("author_id")
         if reviewers:
             conn.cursor().executemany(
@@ -344,12 +550,11 @@ def push_report(
                 " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                 [(id, reviewer, owner_id) for reviewer in set(reviewers) - {owner}],
             )
-        if plan is None and inherit_plan and version > 1:
-            plan = get_version(conn, id, version - 1)["plan"]
         conn.execute(
-            'INSERT INTO versions (report_id, version, body, plan, created_at, "commit")'
-            " VALUES (%s, %s, %s, %s, %s, %s)",
-            (id, version, body, plan, now, commit),
+            "INSERT INTO versions (report_id, version, body, plan, plan_revision, created_at,"
+            ' "commit")'
+            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (id, version, body, plan, plan_revision, now, commit),
         )
     log.info("report pushed id=%s project=%s version=%d", id, project, version)
     return id, version
@@ -387,13 +592,27 @@ def project_exists(conn: Connection, project: str) -> bool:
 
 def list_reports(conn: Connection) -> list[Row]:
     return conn.execute(
-        "SELECT r.*, s.signer_id, s.created_at AS signed_at,"
-        " (SELECT MAX(version) FROM versions v WHERE v.report_id = r.id) AS latest_version,"
-        " (SELECT COUNT(*) FROM comments c WHERE c.report_id = r.id"
-        "  AND c.parent_id IS NULL AND c.resolved_at IS NULL) AS open_threads"
-        " FROM reports r LEFT JOIN signatures s ON s.report_id = r.id"
-        " AND s.version = (SELECT MAX(version) FROM versions v WHERE v.report_id = r.id)"
-        " ORDER BY r.created_at DESC, r.seq DESC"
+        "SELECT r.*, v.version AS latest_version, v.plan_revision, v.body IS NOT NULL AS has_body,"
+        " s.signer_id, s.created_at AS signed_at,"
+        " s.signer_id AS implementation_signer_id, s.signer_name AS implementation_signer_name,"
+        " s.created_at AS implementation_signed_at,"
+        " ps.signer_id AS plan_signer_id, ps.signer_name AS plan_signer_name,"
+        " ps.created_at AS plan_signed_at,"
+        " COALESCE(c.open_threads, 0) AS open_threads,"
+        " COALESCE(c.open_plan_threads, 0) AS open_plan_threads,"
+        " COALESCE(c.open_plan_blocking, 0) AS open_plan_blocking"
+        " FROM reports r JOIN LATERAL (SELECT * FROM versions WHERE report_id=r.id"
+        " ORDER BY version DESC LIMIT 1) v ON TRUE"
+        " LEFT JOIN signatures s ON s.report_id=r.id AND s.version=v.version"
+        " AND s.target='implementation'"
+        " LEFT JOIN signatures ps ON ps.report_id=r.id AND ps.version=v.plan_revision"
+        " AND ps.target='plan'"
+        " LEFT JOIN (SELECT report_id,"
+        " count(*) FILTER (WHERE target='implementation') AS open_threads,"
+        " count(*) FILTER (WHERE target='plan') AS open_plan_threads,"
+        " count(*) FILTER (WHERE target='plan' AND blocking=1) AS open_plan_blocking"
+        " FROM comments WHERE parent_id IS NULL AND resolved_at IS NULL GROUP BY report_id) c"
+        " ON c.report_id=r.id ORDER BY r.created_at DESC, r.seq DESC"
     ).fetchall()
 
 
@@ -408,7 +627,8 @@ def _by_report(conn: Connection, sql: str, ids: list[str]) -> dict[str, list[Row
 def verdicts_by_report(conn: Connection, ids: list[str]) -> dict[str, list[Row]]:
     return _by_report(
         conn,
-        "SELECT id, report_id, version, reviewer_id, reviewer_name, verdict, created_at"
+        "SELECT id, report_id, target, version, reviewer_id, reviewer_name, verdict, summary,"
+        " created_at"
         " FROM verdicts ORDER BY id",
         ids,
     )
@@ -457,8 +677,11 @@ def add_review_request(
 def remove_review_request(conn: Connection, report_id: str, reviewer_id: str) -> str:
     with _write(conn, report_id):
         judged = conn.execute(
-            "SELECT 1 FROM verdicts WHERE report_id=%s AND reviewer_id=%s AND version ="
-            " (SELECT MAX(version) FROM versions WHERE report_id=%s)",
+            "SELECT 1 FROM verdicts d JOIN versions v ON v.report_id=d.report_id"
+            " WHERE d.report_id=%s AND d.reviewer_id=%s"
+            " AND v.version=(SELECT MAX(version) FROM versions WHERE report_id=%s)"
+            " AND ((d.target='implementation' AND v.body IS NOT NULL AND d.version=v.version)"
+            " OR (d.target='plan' AND d.version=v.plan_revision)) LIMIT 1",
             (report_id, reviewer_id, report_id),
         ).fetchone()
         if judged:
@@ -474,7 +697,9 @@ def add_comment(
     conn: Connection,
     *,
     report_id: str,
-    version: int,
+    version: int | None = None,
+    target: Target | None = None,
+    validate: Callable[[str, int], str | None] | None = None,
     author_id: str,
     author_name: str,
     body: str,
@@ -489,25 +714,37 @@ def add_comment(
 ) -> Row:
     with _write(conn, report_id):
         _check_version(conn, report_id, expected_version)
+        root = None
         if parent_id is not None:
-            parent = conn.execute(
-                "SELECT * FROM comments WHERE id=%s AND report_id=%s", (parent_id, report_id)
-            ).fetchone()
-            if parent is None:
+            root = thread_root(conn, report_id, parent_id)
+            if root is None:
                 raise ValueError(f"parent comment {parent_id} not found on report {report_id!r}")
-            parent_id = parent["parent_id"] or parent["id"]
-            version, section, quote = parent["version"], parent["section"], parent["quote"]
-            prefix, suffix = parent["prefix"], parent["suffix"]
-            root = conn.execute(
-                "SELECT blocking FROM comments WHERE id=%s", (parent_id,)
-            ).fetchone()
+            if target is not None and target != root["target"]:
+                raise ValueError("reply target conflicts with root target")
+            target = root["target"]
+        target = "implementation" if target is None else target
+        document = target_document(conn, report_id, latest_version(conn, report_id), target)
+        checked_revision = version if version is not None else (document[0] if document else 0)
+        _check_target(conn, report_id, target, checked_revision, expected_version)
+        if document is None:
+            raise MissingDocument(target)
+        revision, markdown = document
+        if version is None and target == "plan" and root is None:
+            raise ValueError("plan revision is required")
+        if validate is not None and (error := validate(markdown, revision)):
+            raise ValueError(error)
+        version = revision
+        if root is not None:
+            parent_id = root["id"]
+            version, section, quote = root["version"], root["section"], root["quote"]
+            prefix, suffix = root["prefix"], root["suffix"]
             blocking = bool(root["blocking"])
             if reopen:
                 reopen_thread(conn, report_id, parent_id)
         row = conn.execute(
             "INSERT INTO comments (report_id, version, parent_id, section, quote, author_id,"
-            " author_name, body, created_at, blocking, prefix, suffix)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            " author_name, body, created_at, blocking, prefix, suffix, target)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
             (
                 report_id,
                 version,
@@ -521,6 +758,7 @@ def add_comment(
                 int(blocking),
                 prefix,
                 suffix,
+                target,
             ),
         ).fetchone()
     log.info(
@@ -534,14 +772,16 @@ def add_comment(
     return row
 
 
-def list_comments(conn: Connection, report_id: str, open_only: bool = False) -> list[Row]:
+def list_comments(
+    conn: Connection, report_id: str, open_only: bool = False, *, target: Target = "implementation"
+) -> list[Row]:
     sql = (
         "SELECT c.* FROM comments c JOIN comments root ON root.id = COALESCE(c.parent_id, c.id)"
-        " WHERE c.report_id=%s"
+        " WHERE c.report_id=%s AND c.target=%s"
     )
     if open_only:
         sql += " AND root.resolved_at IS NULL"
-    return conn.execute(sql + " ORDER BY c.id", (report_id,)).fetchall()
+    return conn.execute(sql + " ORDER BY c.id", (report_id, target)).fetchall()
 
 
 def resolve_thread(
@@ -585,6 +825,7 @@ def add_verdict(
     *,
     report_id: str,
     version: int,
+    target: Target = "implementation",
     reviewer_id: str,
     reviewer_name: str,
     verdict: str,
@@ -593,13 +834,15 @@ def add_verdict(
     validate: Callable[[], str | None] | None = None,
 ) -> Row:
     with _write(conn, report_id):
-        _check_version(conn, report_id, expected_version)
+        _check_target(conn, report_id, target, version, expected_version)
+        if target == "implementation":
+            _require_plan_approved(conn, report_id)
         if validate is not None and (error := validate()):
             raise VerdictRefused(error)
         row = conn.execute(
             "INSERT INTO verdicts (report_id, version, reviewer_id, reviewer_name, verdict,"
-            " summary, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",
-            (report_id, version, reviewer_id, reviewer_name, verdict, summary, _now()),
+            " summary, created_at, target) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            (report_id, version, reviewer_id, reviewer_name, verdict, summary, _now(), target),
         ).fetchone()
     log.info(
         "verdict added report=%s version=%d reviewer_id=%s verdict=%s",
@@ -611,9 +854,11 @@ def add_verdict(
     return row
 
 
-def list_verdicts(conn: Connection, report_id: str) -> list[Row]:
+def list_verdicts(
+    conn: Connection, report_id: str, *, target: Target = "implementation"
+) -> list[Row]:
     return conn.execute(
-        "SELECT * FROM verdicts WHERE report_id=%s ORDER BY id", (report_id,)
+        "SELECT * FROM verdicts WHERE report_id=%s AND target=%s ORDER BY id", (report_id, target)
     ).fetchall()
 
 
@@ -635,15 +880,28 @@ def set_blocking(
 
 
 def sign_version(
-    conn: Connection, *, report_id: str, version: int, signer_id: str, signer_name: str
+    conn: Connection,
+    *,
+    report_id: str,
+    version: int,
+    signer_id: str,
+    signer_name: str,
+    target: Target = "implementation",
+    expected_version: int | None = None,
 ) -> Row:
     with _write(conn, report_id):
-        _check_version(conn, report_id, version)
+        guard = (
+            version if target == "implementation" and expected_version is None else expected_version
+        )
+        _check_target(conn, report_id, target, version, guard)
+        if target == "implementation":
+            _require_plan_approved(conn, report_id)
         signed = conn.execute(
-            "INSERT INTO signatures (report_id, version, signer_id, signer_name, created_at)"
-            " VALUES (%s, %s, %s, %s, %s)"
-            " ON CONFLICT (report_id, version) DO NOTHING RETURNING report_id",
-            (report_id, version, signer_id, signer_name, _now()),
+            "INSERT INTO signatures (report_id, version, signer_id, signer_name, created_at,"
+            " target)"
+            " VALUES (%s, %s, %s, %s, %s, %s)"
+            " ON CONFLICT (report_id, target, version) DO NOTHING RETURNING report_id",
+            (report_id, version, signer_id, signer_name, _now(), target),
         ).fetchone()
         if signed is None:
             raise AlreadySigned(f"{report_id} v{version} is already signed")
@@ -654,12 +912,15 @@ def sign_version(
     log.info(
         "version signed report=%s version=%d signer_id=%s", report_id, version, _short(signer_id)
     )
-    return get_signature(conn, report_id, version)
+    return get_signature(conn, report_id, version, target=target)
 
 
-def get_signature(conn: Connection, report_id: str, version: int) -> Row | None:
+def get_signature(
+    conn: Connection, report_id: str, version: int, *, target: Target = "implementation"
+) -> Row | None:
     return conn.execute(
-        "SELECT * FROM signatures WHERE report_id=%s AND version=%s", (report_id, version)
+        "SELECT * FROM signatures WHERE report_id=%s AND version=%s AND target=%s",
+        (report_id, version, target),
     ).fetchone()
 
 

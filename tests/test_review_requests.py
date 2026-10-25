@@ -405,3 +405,117 @@ def test_no_email_in_local_mode(settings, make_app, outbox):
     client.cookies.set("vf_name", "Alice")
     assert client.post("/r/r/sign", data={"version": 1}).status_code == 200
     assert outbox.sent == []
+
+
+def _requested_plan(conn, *, id="planned"):
+    db.push_report(
+        conn,
+        id=id,
+        project="p",
+        title="Plan",
+        risk="low",
+        workflow="plan_first",
+        body=None,
+        body_supplied=False,
+        plan="No headings required.",
+        author_id="alice@example.com",
+        reviewers=["bob@example.com"],
+    )
+
+
+def test_plan_review_request_removal_uses_both_targets(shared_client, team):
+    _requested_plan(team)
+    form = {"version": 1, "revision": 1, "target": "plan"}
+    shared_client.post("/r/planned/sign", data=form, headers=ALICE)
+    shared_client.post("/r/planned/verdict", data=form | {"verdict": "approve"}, headers=BOB)
+    db.push_report(
+        team, id="planned", project="p", title="Plan", risk="low", body=BODY, expected_version=1
+    )
+    page = shared_client.get("/r/planned?tab=implementation", headers=ALICE).text
+    assert "Remove review request for bob" not in page
+    result = shared_client.post(
+        "/r/planned/reviewers/bob%40example.com/remove", headers=ALICE | HX, data={"target": "plan"}
+    )
+    assert result.status_code == 200 and "request stays" in result.text
+    assert 'name="target" value="plan"' in result.text
+    assert db.requested_reviewers(team, "planned") == ["bob@example.com"]
+    assert (
+        'name="target" value="plan"'
+        in shared_client.post(
+            "/r/planned/reviewers",
+            headers=ALICE | HX,
+            data={"target": "plan", "reviewer_id": "carol@example.com"},
+        ).text
+    )
+    redirect = shared_client.post(
+        "/r/planned/reviewers",
+        headers=ALICE,
+        data={"target": "plan", "reviewer_id": "carol@example.com"},
+        follow_redirects=False,
+    )
+    assert redirect.headers["location"] == "/r/planned?tab=plan"
+
+
+def test_plan_notifications_and_mail_dedupe(mail, team, outbox):
+    _requested_plan(team)
+    form = {"version": 1, "revision": 1, "target": "plan"}
+    assert mail.post("/r/planned/sign", data=form, headers=ALICE).status_code == 200
+    assert len(outbox.sent) == 1 and "plan revision 1" in outbox.sent[0].get_content()
+    assert "Judge this:" not in outbox.sent[0].get_content()
+    assert "?tab=plan" in outbox.sent[0].get_content()
+    mail.post("/r/planned/sign", data=form, headers=ALICE)
+    assert len(outbox.sent) == 1
+    mail.post("/r/planned/verdict", data=form | {"verdict": "approve"}, headers=BOB)
+    mail.post("/r/planned/reviewers", headers=ALICE, data={"reviewer_id": "carol@example.com"})
+    assert len(outbox.sent) == 1
+    assert db.requested_reviewers(team, "planned") == ["bob@example.com", "carol@example.com"]
+    db.push_report(
+        team, id="planned", project="p", title="Plan", risk="low", body=BODY, expected_version=1
+    )
+    mail.post(
+        "/r/planned/sign",
+        data={"version": 2, "revision": 2, "target": "implementation"},
+        headers=ALICE,
+    )
+    assert len(outbox.sent) == 3
+    assert all(
+        "implementation v2" in m.get_content() and "?tab=implementation" in m.get_content()
+        for m in outbox.sent[1:]
+    )
+    assert ("planned", "bob@example.com", "plan", 1) in mail.app.state.mailed
+    assert ("planned", "bob@example.com", "implementation", 2) in mail.app.state.mailed
+    db.push_report(
+        team,
+        id="planned",
+        project="p",
+        title="Plan",
+        risk="low",
+        body=None,
+        body_supplied=False,
+        plan="A new plan",
+        expected_version=2,
+    )
+    mail.post(
+        "/r/planned/sign", data={"version": 3, "revision": 3, "target": "plan"}, headers=ALICE
+    )
+    assert len(outbox.sent) == 5 and "plan revision 3" in outbox.sent[-1].get_content()
+
+
+def test_plan_failed_mail_releases_only_captured_target_key(mail, team, outbox):
+    import asyncio
+
+    from verifair import web
+
+    mail.app.state.mailed.update(
+        {
+            ("planned", "bob@example.com", "plan", 1),
+            ("planned", "bob@example.com", "implementation", 1),
+        }
+    )
+    outbox.fail = True
+    asyncio.run(
+        web._send_mail(
+            mail.app, "planned", 1, "subject", {"bob@example.com": "text"}, target="plan"
+        )
+    )
+    assert mail.app.state.mailed == {("planned", "bob@example.com", "implementation", 1)}

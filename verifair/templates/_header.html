@@ -1,4 +1,4 @@
-<header class="head" id="vf_header">
+<header class="head" id="vf_header"{% if header_oob %} hx-swap-oob="true"{% endif %}>
   <h1>{{ report.title }}</h1>
   <div class="meta">
     <span id="vf_status" class="badge b-{{ status }}">{% if not is_current %}Current: {% endif %}{{ STATUS_LABELS[status] }}</span>
@@ -7,15 +7,22 @@
     {% if report.agent or report.model %}<span>Written by <b>{{ report.agent or report.model }}</b>{% if report.agent and report.model %} ({{ report.model }}){% endif %}</span>{% endif %}
     {% if report.session_url %}<a class="ext" href="{{ report.session_url }}">session{{ icon("external-link", "ic12") }}</a>{% endif %}
     <span>v{{ version }} · {{ version_date|date }}</span>
+    {% if plan_first and (target == 'plan' or has_body) %}<span>{{ target_label }} · {{ STATUS_LABELS[target_status] }}</span>{% endif %}
     <span id="vf_open">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
     {% if ticket %}<a class="ext" href="{{ report.ticket_url }}">{{ ticket }}{{ icon("external-link", "ic12") }}</a>{% endif %}
-    {% if is_current %}
     {% if signature %}<span>Signed by <b>{{ signature.signer_name }}</b> · {{ signature.created_at|date }}</span>
-    {% elif sign_refusal and view_tab|default('report') == 'report' %}<span>{{ sign_refusal }}</span>
-    {% elif user_name and view_tab|default('report') == 'report' %}<form class="sign" id="vf_sign" hx-post="{{ url }}/sign" hx-target="#vf_header" hx-swap="outerHTML" hx-disabled-elt="find button">
+    {% elif is_current and reviewable and (view_tab|default('report') != 'plan' or plan_first) %}
+    {% if plan_gate %}<span>The current plan must be approved before signing the implementation.</span>
+    {% elif sign_refusal %}<span>{{ sign_refusal }}</span>
+    {% elif user_name %}<form class="sign" id="vf_sign" hx-post="{{ url }}/sign" hx-target="#vf_header" hx-swap="outerHTML" hx-disabled-elt="find button">
       <input type="hidden" name="version" value="{{ version }}">
-      <button class="btn p">Sign this version</button>
+      <input type="hidden" name="target" value="{{ target }}">
+      <input type="hidden" name="revision" value="{{ revision }}">
+      <button class="btn p">{{ 'Sign ' ~ target_phrase if plan_first else 'Sign this version' }}</button>
     </form>{% endif %}
     {% endif %}
   </div>
+    {% if plan_first and stage == 'awaiting_implementation' and is_current %}
+    <p class="banner">Plan approved · Awaiting implementation. Ask your agent to submit the implementation body to <code>/api/reports</code> with this review's ID <code>{{ report.id }}</code> and <code>expected_version: {{ current_version }}</code>.</p>
+    {% endif %}
 </header>

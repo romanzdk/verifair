@@ -17,6 +17,10 @@ import pytest
         "error_copy",
         "triple_click_clamp",
         "name_error_opens_closed_drawer",
+        "plan_general_cancel",
+        "verdict_draft_survives_gate_refresh",
+        "resolved_comment_deep_link",
+        "load_reveals_fragment_and_focuses_autofocus",
     ],
 )
 def test_actual_javascript_anchor_ranges(case):

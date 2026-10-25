@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import secrets
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from itertools import islice
 from time import monotonic
@@ -22,7 +23,6 @@ from pydantic import (
 from verifair import db, notify
 from verifair.deps import get_conn, run_with_conn
 from verifair.render import (
-    Section,
     build_threads,
     iter_occurrences,
     normalize,
@@ -30,7 +30,7 @@ from verifair.render import (
     section_headings,
     split_sections,
 )
-from verifair.rules import NO_OWNER, compute_status, latest_verdicts
+from verifair.rules import NO_OWNER, compute_status, latest_verdicts, review_stage
 
 NOT_OWNER = "This report belongs to another member."
 SHARED_TOKEN = "The shared token is not accepted in shared mode. Use a member agent token."
@@ -127,8 +127,10 @@ class ReportIn(Input):
         str, StringConstraints(strip_whitespace=True, max_length=200), AfterValidator(_not_blank)
     ]
     risk: Literal["low", "medium", "high"]
-    body: Annotated[str, AfterValidator(_not_blank)]
+    body: Annotated[str, AfterValidator(_not_blank)] | None = None
     plan: Annotated[str, AfterValidator(_not_blank)] | None = None
+    workflow: db.Workflow | None = None
+    expected_version: int | None = Field(default=None, gt=0)
     id: str | None = Field(default=None, pattern=SLUG)
     ticket_url: HttpUrl | None = None
     links: list[Link] = []
@@ -150,6 +152,8 @@ class CommentIn(Input):
     prefix: Context | None = None
     suffix: Context | None = None
     blocking: bool = True
+    target: db.Target | None = None
+    revision: int | None = Field(default=None, gt=0)
 
 
 def _require_report(conn: db.Connection, id: str) -> db.Row:
@@ -168,8 +172,44 @@ def _require_owner(report: db.Row, owner: db.Row | None) -> None:
         raise HTTPException(403, NOT_OWNER)
 
 
-def _current_sections(conn: db.Connection, id: str) -> list[Section]:
-    return split_sections(db.get_version(conn, id, db.latest_version(conn, id))["body"])
+@contextmanager
+def _read(conn: db.Connection):
+    with conn.transaction():
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        yield
+
+
+def _write_error(error: Exception) -> JSONResponse:
+    if isinstance(error, db.StaleVersion):
+        return JSONResponse({"detail": "review changed", "current_version": error.latest}, 409)
+    if isinstance(error, db.StaleRevision):
+        return JSONResponse(
+            {
+                "detail": str(error),
+                "target": error.target,
+                "current_revision": error.current_revision,
+            },
+            409,
+        )
+    if isinstance(error, db.PlanNotApproved):
+        return JSONResponse({"detail": str(error), "plan_revision": error.plan_revision}, 409)
+    return JSONResponse(
+        {"detail": str(error)},
+        409 if isinstance(error, (db.WorkflowMismatch, db.MissingDocument)) else 422,
+    )
+
+
+def _feedback_identity(conn: db.Connection, id: str, target: db.Target):
+    report = _require_report(conn, id)
+    if target == "plan" and report["workflow"] != "plan_first":
+        raise HTTPException(422, "artifact plans are read-only")
+    current = db.latest_version(conn, id)
+    document = db.target_document(conn, id, current, target)
+    return {
+        "current_version": current,
+        "target": target,
+        "revision": document[0] if document else None,
+    }, document
 
 
 def _comment_json(row: db.Row, root: db.Row | None = None) -> dict:
@@ -177,6 +217,7 @@ def _comment_json(row: db.Row, root: db.Row | None = None) -> dict:
     return {
         "id": row["id"],
         "version": row["version"],
+        "target": row["target"],
         "parent_id": row["parent_id"],
         "section": row["section"],
         "quote": row["quote"],
@@ -203,6 +244,7 @@ def _verdict_json(row: db.Row, latest_ids: set[int]) -> dict:
         "reviewer_id": row["reviewer_id"],
         "verdict": row["verdict"],
         "version": row["version"],
+        "target": row["target"],
         "summary": row["summary"],
         "created_at": row["created_at"],
         "current": row["id"] in latest_ids,
@@ -211,10 +253,11 @@ def _verdict_json(row: db.Row, latest_ids: set[int]) -> dict:
 
 @router.post("/reports", status_code=201)
 def push_report(body: ReportIn, request: Request, conn: Conn, background: BackgroundTasks):
-    headings = set(section_headings(body.body))
-    missing = [s for s in request.app.state.settings.required_sections if s not in headings]
-    if missing:
-        return JSONResponse({"detail": "missing sections", "sections": missing}, 422)
+    if body.body is not None:
+        headings = set(section_headings(body.body))
+        missing = [s for s in request.app.state.settings.required_sections if s not in headings]
+        if missing:
+            return JSONResponse({"detail": "missing sections", "sections": missing}, 422)
     owner = request.state.token_owner
     author = body.author if "author" in body.model_fields_set else None
     reviewers = body.reviewers
@@ -238,6 +281,9 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             title=body.title,
             risk=body.risk,
             body=body.body,
+            body_supplied="body" in body.model_fields_set,
+            workflow=body.workflow,
+            expected_version=body.expected_version,
             plan=body.plan,
             inherit_plan="plan" not in body.model_fields_set,
             id=body.id,
@@ -258,21 +304,66 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
         raise HTTPException(403, NOT_OWNER) from None
     except db.ProjectMismatch:
         raise HTTPException(409, "id belongs to another project") from None
+    except (db.StaleVersion, db.PlanNotApproved, db.WorkflowMismatch, ValueError) as error:
+        return _write_error(error)
     settings = request.app.state.settings
     base_url = settings.base_url
+    with _read(conn):
+        report = _report_json(conn, id, snapshot_version=version)
+    target = "implementation" if report["stage"] == "implementation" else "plan"
+    revision = (
+        report["current_version"]
+        if target == "implementation"
+        else report["plan_review"]["revision"]
+    )
     background.add_task(
-        notify.send, settings, notify.report_pushed_text(db.get_report(conn, id), version, base_url)
+        notify.send, settings, notify.report_pushed_text(report, revision, base_url, target=target)
     )
     return {"id": id, "version": version, "url": f"{base_url}/r/{id}"}
 
 
 @router.get("/reports/{id}")
 def get_report(id: str, conn: Conn):
+    with _read(conn):
+        return _report_json(conn, id)
+
+
+def _report_json(conn: db.Connection, id: str, *, snapshot_version: int | None = None):
     report = _require_report(conn, id)
-    current = db.latest_version(conn, id)
+    current = db.latest_version(conn, id) if snapshot_version is None else snapshot_version
+    snapshot = db.get_version(conn, id, current)
     verdicts = db.list_verdicts(conn, id)
-    signature = db.get_signature(conn, id, current)
+    signature = db.get_signature(conn, id, current) if snapshot["body"] is not None else None
     latest_ids = _latest_ids(verdicts, current)
+    implementation_status = (
+        compute_status(
+            verdicts,
+            current,
+            signed=signature is not None,
+            signer_id=signature["signer_id"] if signature else None,
+        )
+        if snapshot["body"] is not None
+        else None
+    )
+    plan = db.plan_review_state(conn, id, current)
+    stage, status = review_stage(
+        workflow=report["workflow"],
+        has_body=snapshot["body"] is not None,
+        plan_status=plan["status"] if plan else None,
+        implementation_status=implementation_status,
+    )
+    plan_review = None
+    if plan is not None:
+        signed = plan["signature"]
+        plan_latest_ids = _latest_ids(plan["verdicts"], plan["revision"])
+        plan_review = {
+            "revision": plan["revision"],
+            "status": plan["status"],
+            "signed_by": signed["signer_name"] if signed else None,
+            "signed_at": signed["created_at"] if signed else None,
+            "open_blocking": plan["open_blocking"],
+            "verdicts": [_verdict_json(v, plan_latest_ids) for v in plan["verdicts"]],
+        }
     return {
         "id": report["id"],
         "project": report["project"],
@@ -288,19 +379,37 @@ def get_report(id: str, conn: Conn):
         "session_url": report["session_url"],
         "signed_by": signature["signer_name"] if signature else None,
         "signed_at": signature["created_at"] if signature else None,
-        "status": compute_status(
-            verdicts,
-            current,
-            signed=signature is not None,
-            signer_id=signature["signer_id"] if signature else None,
-        ),
+        "status": status,
+        "workflow": report["workflow"],
+        "stage": stage,
+        "implementation_status": implementation_status,
+        "plan_review": plan_review,
         "current_version": current,
         "versions": [
-            {"version": v["version"], "created_at": v["created_at"], "commit": v["commit"]}
+            {
+                "version": v["version"],
+                "created_at": v["created_at"],
+                "commit": v["commit"],
+                "has_implementation": v["body"] is not None,
+                "plan_revision": v["plan_revision"],
+            }
             for v in db.list_versions(conn, id)
         ],
         "verdicts": [_verdict_json(v, latest_ids) for v in verdicts],
     }
+
+
+@router.get("/reports/{id}/versions/{n}")
+def get_version(id: str, n: int, conn: Conn):
+    with _read(conn):
+        _require_report(conn, id)
+        snapshot = db.get_version(conn, id, n)
+        if snapshot is None:
+            raise HTTPException(404, "version not found")
+        return {
+            key: snapshot[key]
+            for key in ("version", "created_at", "commit", "body", "plan", "plan_revision")
+        }
 
 
 def _poll_wait(
@@ -311,28 +420,27 @@ def _poll_wait(
     since: datetime | None,
     after: dict[str, int] | None,
     token: str | None,
-) -> tuple[dict | None, dict[str, int]]:
+    target: db.Target,
+) -> tuple[dict, dict[str, int]]:
     if token is not None and (reason := db.authenticate_token(conn, token)[1]):
         _refuse_token(reason, url_path)
-    with conn.transaction():
-        # one snapshot for the version and the event lists of this tick
-        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        _require_report(conn, id)
-        current = db.latest_version(conn, id)
+    with _read(conn):
+        identity, document = _feedback_identity(conn, id, target)
+        revision = identity["revision"]
         rows = {}
         if kind in ("any", "verdict"):
-            rows["verdict"] = db.list_verdicts(conn, id)
+            rows["verdict"] = db.list_verdicts(conn, id, target=target) if document else []
         if kind in ("any", "comment"):
-            rows["comment"] = db.list_comments(conn, id)
+            rows["comment"] = db.list_comments(conn, id, target=target) if document else []
         if since is None and after is None:
-            return None, {
+            return identity, {
                 event: max((r["id"] for r in items), default=0) for event, items in rows.items()
             }
-        latest_ids = _latest_ids(rows.get("verdict", []), current)
+        latest_ids = _latest_ids(rows.get("verdict", []), revision)
         events = []
         for event, items in rows.items():
             for row in items:
-                if row["version"] != current or (
+                if row["version"] != revision or (
                     event == "comment" and row["parent_id"] is not None
                 ):
                     continue
@@ -346,7 +454,8 @@ def _poll_wait(
                 events.append(
                     (created, {"event": event, event: value, "next_since": row["created_at"]})
                 )
-        return min(events, key=lambda e: e[0])[1] if events else None, after or {}
+        event = min(events, key=lambda e: e[0])[1] if events else {}
+        return identity | event, after or {}
 
 
 @router.get("/reports/{id}/wait")
@@ -356,6 +465,7 @@ async def wait_for_event(
     kind: Annotated[Literal["verdict", "comment", "any"], Query(alias="for")] = "any",
     since: datetime | None = None,
     timeout: Annotated[float, Query(gt=0, le=55)] = 55,
+    target: db.Target = "implementation",
 ):
     if since is not None:
         since = since.replace(tzinfo=UTC) if since.tzinfo is None else since.astimezone(UTC)
@@ -372,38 +482,44 @@ async def wait_for_event(
             since,
             after,
             request.state.token,
+            target,
         )
-        if event is not None:
+        if "event" in event:
             return {"since": cursor, **event}
         remaining = deadline - monotonic()
         if remaining <= 0:
-            return {"event": "timeout", "since": cursor, "next_since": cursor}
+            return {"event": "timeout", "since": cursor, "next_since": cursor, **event}
         await asyncio.sleep(min(0.5, remaining))
 
 
 @router.get("/reports/{id}/comments")
-def get_comments(id: str, conn: Conn, open: bool = False):
-    _require_report(conn, id)
-    comments = db.list_comments(conn, id, open_only=open)
-    threads = build_threads(comments, _current_sections(conn, id), db.latest_version(conn, id))
-    result = []
-    for t in threads:
-        anchor = {
-            "stale": t.stale,
-            "found": t.found if t.root["quote"] else True,
-            "moved": t.moved,
-            "match_start": t.match_start,
-        }
-        result.append(
-            _comment_json(t.root)
-            | anchor
-            | {
-                "replies": [
-                    _comment_json(r, t.root) | anchor | {"blocking": t.blocking} for r in t.replies
-                ],
+def get_comments(id: str, conn: Conn, open: bool = False, target: db.Target = "implementation"):
+    with _read(conn):
+        identity, document = _feedback_identity(conn, id, target)
+        if document is None:
+            return {"threads": [], **identity}
+        revision, markdown = document
+        comments = db.list_comments(conn, id, open_only=open, target=target)
+        threads = build_threads(comments, split_sections(markdown), revision)
+        result = []
+        for t in threads:
+            anchor = {
+                "stale": t.stale,
+                "found": t.found if t.root["quote"] else True,
+                "moved": t.moved,
+                "match_start": t.match_start,
             }
-        )
-    return {"threads": result}
+            result.append(
+                _comment_json(t.root)
+                | anchor
+                | {
+                    "replies": [
+                        _comment_json(r, t.root) | anchor | {"blocking": t.blocking}
+                        for r in t.replies
+                    ],
+                }
+            )
+        return {"threads": result, **identity}
 
 
 @router.post("/reports/{id}/comments", status_code=201)
@@ -419,11 +535,16 @@ def post_comment(
         raise HTTPException(422, "replies cannot set section, quote, prefix or suffix")
     if body.parent_id is None and body.quote is not None and body.section is None:
         raise HTTPException(422, "quote requires section")
-    if body.parent_id is None and body.section is not None:
-        sections = _current_sections(conn, id)
+    headings = []
+
+    def validate(markdown: str, revision: int) -> str | None:
+        nonlocal headings
+        if body.parent_id is not None or body.section is None:
+            return None
+        sections = split_sections(markdown)
         headings = list(dict.fromkeys(s.heading for s in sections))
         if body.section not in headings:
-            return JSONResponse({"detail": "unknown section", "sections": headings}, 422)
+            return "unknown section"
         quote = normalize(body.quote or "")
         same = [s for s in sections if s.heading == body.section]
         if quote and not quote_found(quote, same):
@@ -437,6 +558,8 @@ def post_comment(
             )
             if hits > 1:
                 raise HTTPException(422, "ambiguous quote")
+        return None
+
     reopen = True
     if owner is not None and body.parent_id is not None:
         root = db.thread_root(conn, id, body.parent_id)
@@ -445,7 +568,9 @@ def post_comment(
         row = db.add_comment(
             conn,
             report_id=id,
-            version=db.latest_version(conn, id),
+            version=body.revision,
+            target=body.target,
+            validate=validate,
             author_id="agent",
             author_name=f"{owner['name']}'s agent" if owner is not None else body.author,
             body=body.body,
@@ -457,11 +582,18 @@ def post_comment(
             suffix=body.suffix,
             reopen=reopen,
         )
-    except ValueError:
-        raise HTTPException(404, "parent not found") from None
+    except ValueError as error:
+        if str(error).startswith("parent comment "):
+            raise HTTPException(404, "parent not found") from None
+        if str(error) == "unknown section":
+            return JSONResponse({"detail": "unknown section", "sections": headings}, 422)
+        return _write_error(error)
+    except (db.StaleVersion, db.StaleRevision, db.PlanNotApproved, db.MissingDocument) as error:
+        return _write_error(error)
     settings = request.app.state.settings
     background.add_task(notify.send, settings, notify.comment_text(report, row, settings.base_url))
-    return _comment_json(row, db.thread_root(conn, id, row["id"]))
+    with _read(conn):
+        return _comment_json(row, db.thread_root(conn, id, row["id"]))
 
 
 @router.post("/reports/{id}/comments/{cid}/resolve")

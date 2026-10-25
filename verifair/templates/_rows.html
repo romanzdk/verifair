@@ -2,12 +2,12 @@
 {% set r = row.report %}{% set st = row.status %}
 {% set when = row.signed_at if waiting and row.signed_at else r.updated_at %}
 {% set marks = {"approve": ("ok", "check"), "request_changes": ("no", "x"), "stale": ("stale", "check")} %}
-{% set what = {"approve": "approved v" ~ r.latest_version, "request_changes": "requested changes on v" ~ r.latest_version, "stale": "reviewed an earlier version"} %}
-<a class="chg" href="/r/{{ r.id|urlencode }}">
+{% set what = {"approve": "approved " ~ row.target_phrase, "request_changes": "requested changes on " ~ row.target_phrase, "stale": "reviewed an earlier version"} %}
+<a class="chg" href="{{ row.url }}">
   <span class="si {{ st }}" title="{{ STATUS_LABELS[st] }}" aria-hidden="true">{{ icon(STATUS_ICONS[st]) }}</span>
   <div class="chg-main">
     <div class="chg-t">{{ r.title }}</div>
-    <div class="chg-m">{{ (([r.project] if show_project else []) + ["v" ~ r.latest_version] + ([row.ticket] if row.ticket else []))|join(" · ") }}</div>
+    <div class="chg-m">{{ (([r.project] if show_project else []) + [row.target_phrase if r.workflow == "plan_first" else "v" ~ r.latest_version] + ([row.ticket] if row.ticket else []))|join(" · ") }}</div>
   </div>
   <span class="sr-only">{{ STATUS_LABELS[st] }}, {{ r.risk }} risk, by {{ r.author }}{% if row.reviewers %}, reviewers: {% for rv in row.reviewers %}{{ rv.name }} {{ what[rv.mark] if rv.mark else "review requested" }}{{ ", " if not loop.last }}{% endfor %}{% endif %}</span>
   <span class="badge b-{{ st }}" aria-hidden="true">{{ STATUS_LABELS[st] }}</span>

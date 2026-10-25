@@ -879,3 +879,602 @@ def test_token_auth_does_not_hide_a_lost_connection_during_the_touch(conn, monke
     monkeypatch.setattr(db, "_touch_token", lost)
     with pytest.raises(psycopg.OperationalError, match="server closed"):
         authenticate_token(conn, token, touch=True)
+
+
+def _plan_push(conn, **kwargs):
+    return push_report(
+        conn,
+        **(
+            {
+                "id": "plan",
+                "project": "p",
+                "title": "Plan",
+                "risk": "low",
+                "body": None,
+                "body_supplied": False,
+            }
+            | kwargs
+        ),
+    )
+
+
+def _plan_sign(conn, revision=1, snapshot=1, signer="owner"):
+    return sign_version(
+        conn,
+        report_id="plan",
+        target="plan",
+        version=revision,
+        expected_version=snapshot,
+        signer_id=signer,
+        signer_name=signer,
+    )
+
+
+def _plan_verdict(conn, revision=1, snapshot=1, reviewer="reviewer", verdict="approve"):
+    return add_verdict(
+        conn,
+        report_id="plan",
+        target="plan",
+        version=revision,
+        expected_version=snapshot,
+        reviewer_id=reviewer,
+        reviewer_name=reviewer,
+        verdict=verdict,
+    )
+
+
+def _approved_plan(conn):
+    _plan_push(conn, workflow="plan_first", plan="# Návrh\r\nExact  \n")
+    _plan_sign(conn)
+    _plan_verdict(conn)
+
+
+def test_plan_schema_upgrade_preserves_legacy_records(new_database_url):
+    with connect(new_database_url()) as conn:
+        conn.execute("""
+            CREATE TABLE reports (
+                id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL,
+                risk TEXT NOT NULL, ticket_url TEXT, links TEXT NOT NULL DEFAULT '[]',
+                author TEXT NOT NULL, author_id TEXT, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, agent TEXT, model TEXT, session_url TEXT,
+                seq BIGINT GENERATED ALWAYS AS IDENTITY);
+            CREATE TABLE versions (
+                report_id TEXT NOT NULL REFERENCES reports(id), version INTEGER NOT NULL,
+                body TEXT NOT NULL, plan TEXT, created_at TEXT NOT NULL, "commit" TEXT,
+                PRIMARY KEY (report_id, version));
+            CREATE TABLE signatures (
+                report_id TEXT NOT NULL REFERENCES reports(id), version INTEGER NOT NULL,
+                signer_id TEXT NOT NULL, signer_name TEXT NOT NULL, created_at TEXT NOT NULL,
+                PRIMARY KEY (report_id, version));
+            CREATE TABLE comments (
+                id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                report_id TEXT NOT NULL REFERENCES reports(id), version INTEGER NOT NULL,
+                parent_id BIGINT REFERENCES comments(id), section TEXT, quote TEXT,
+                author_id TEXT NOT NULL, author_name TEXT NOT NULL, body TEXT NOT NULL,
+                created_at TEXT NOT NULL, resolved_at TEXT, blocking INTEGER NOT NULL DEFAULT 1,
+                prefix TEXT, suffix TEXT, resolved_by TEXT);
+            CREATE TABLE verdicts (
+                id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                report_id TEXT NOT NULL REFERENCES reports(id), version INTEGER NOT NULL,
+                reviewer_id TEXT NOT NULL, reviewer_name TEXT NOT NULL, verdict TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+            INSERT INTO reports (id, project, title, risk, author, created_at, updated_at)
+                VALUES ('r', 'p', 'T', 'low', 'agent', 'then', 'then');
+            INSERT INTO signatures VALUES ('r', 1, 'Owner', 'Owner', 'signed');
+            INSERT INTO verdicts (report_id, version, reviewer_id, reviewer_name, verdict,
+                                  created_at)
+                VALUES ('r', 1, 'Reviewer', 'Reviewer', 'approve', 'approved');
+            INSERT INTO comments (report_id, version, author_id, author_name, body, created_at)
+                VALUES ('r', 1, 'Reviewer', 'Reviewer', 'root', 'commented');
+            INSERT INTO comments (report_id, version, parent_id, author_id, author_name, body,
+                                  created_at)
+                VALUES ('r', 1, 1, 'agent', 'agent', 'reply', 'replied');
+        """)
+        a, b = "# Návrh 🦊\r\ntext  \n", "# Návrh 🦊\ntext\n"
+        for n, plan in enumerate([a, a, b, None, a], 1):
+            conn.execute(
+                "INSERT INTO versions VALUES (%s, %s, %s, %s, %s, %s)",
+                ("r", n, f"body{n}", plan, f"time{n}", f"commit{n}"),
+            )
+        before = {
+            table: conn.execute(f"SELECT * FROM {table}").fetchall()
+            for table in ("reports", "versions", "comments", "signatures", "verdicts")
+        }
+        init_schema(conn)
+        init_schema(conn)
+        assert [v["plan_revision"] for v in list_versions(conn, "r")] == [1, 1, 3, None, 5]
+        for table, old_rows in before.items():
+            rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+            assert len(rows) == len(old_rows)
+            for old in old_rows:
+                assert any(all(row[key] == value for key, value in old.items()) for row in rows)
+        assert get_report(conn, "r")["workflow"] == "artifact"
+        for table in ("comments", "signatures", "verdicts"):
+            assert {r["target"] for r in conn.execute(f"SELECT * FROM {table}")} == {
+                "implementation"
+            }
+        assert db.target_document(conn, "r", 2, "plan") == (1, a)
+        assert db.target_document(conn, "r", 4, "plan") is None
+        _check_plan_schema_constraints(conn)
+
+
+def test_plan_schema_constraints_and_target_signature_keys(conn):
+    _check_plan_schema_constraints(conn)
+
+
+def _check_plan_schema_constraints(conn):
+    _plan_push(conn, workflow="plan_first", plan="A")
+    _plan_sign(conn)
+    conn.execute(
+        "INSERT INTO signatures VALUES ('plan', 1, 'other', 'Other', 'now', 'implementation')"
+    )
+    assert len(conn.execute("SELECT * FROM signatures WHERE report_id='plan'").fetchall()) == 2
+    bad_versions = [
+        (None, None, None),
+        ("", "A", 1),
+        ("x", "", 1),
+        ("x", "A", None),
+        ("x", None, 1),
+        ("x", "A", 0),
+        ("x", "A", 3),
+    ]
+    for body, plan, pointer in bad_versions:
+        with pytest.raises(psycopg.IntegrityError), conn.transaction():
+            conn.execute(
+                "INSERT INTO versions (report_id, version, body, plan, plan_revision,"
+                " created_at) VALUES (%s, 2, %s, %s, %s, %s)",
+                ("plan", body, plan, pointer, "now"),
+            )
+    with pytest.raises(psycopg.IntegrityError), conn.transaction():
+        conn.execute("UPDATE reports SET workflow='unknown'")
+    add_comment(
+        conn,
+        report_id="plan",
+        target="plan",
+        version=1,
+        author_id="r",
+        author_name="R",
+        body="concern",
+        blocking=False,
+    )
+    _plan_verdict(conn)
+    for table in ("signatures", "comments", "verdicts"):
+        with pytest.raises(psycopg.errors.CheckViolation), conn.transaction():
+            conn.execute(f"UPDATE {table} SET target='unknown' WHERE report_id='plan'")
+    assert len([r for r in list_reports(conn) if r["id"] == "plan"]) == 1
+    push_report(conn, project="p", title="Other", risk="low", body="x", id="other")
+    _plan_push(conn, plan="B", expected_version=1)
+    with pytest.raises(psycopg.errors.ForeignKeyViolation), conn.transaction():
+        conn.execute(
+            "INSERT INTO versions (report_id, version, body, plan, plan_revision,"
+            " created_at) VALUES ('other', 3, 'x', 'A', 2, 'now')"
+        )
+
+
+def test_plan_revision_approval_survives_implementation_push(conn):
+    _approved_plan(conn)
+    state = db.plan_review_state(conn, "plan")
+    assert state["status"] == "approved" and state["revision"] == 1
+    _plan_push(conn, body="implementation", body_supplied=True, expected_version=1, commit="abc")
+    assert db.target_document(conn, "plan", 2, "implementation") == (2, "implementation")
+    assert db.plan_review_state(conn, "plan") == state
+    assert get_signature(conn, "plan", 2) is None
+    assert db.list_verdicts(conn, "plan") == []
+    assert len(db.list_verdicts(conn, "plan", target="plan")) == 1
+    _plan_push(conn, plan="# Návrh\r\nExact  \n", expected_version=2)
+    snapshot = db.get_version(conn, "plan", 3)
+    assert (snapshot["plan_revision"], snapshot["body"], snapshot["commit"]) == (
+        1,
+        "implementation",
+        "abc",
+    )
+
+
+def test_plan_edit_requires_new_signature_and_verdict(conn):
+    _approved_plan(conn)
+    _plan_push(conn, body="body", body_supplied=True, expected_version=1)
+    sign_version(conn, report_id="plan", version=2, signer_id="owner", signer_name="O")
+    _plan_push(conn, plan="B", expected_version=2)
+    state = db.plan_review_state(conn, "plan")
+    assert (state["revision"], state["signature"], state["status"]) == (3, None, "unsigned")
+    assert state["latest_verdicts"] == {}
+    assert get_signature(conn, "plan", 2) is not None
+    assert db.plan_review_state(conn, "plan", 1)["status"] == "approved"
+    _plan_sign(conn, 3, 3)
+    assert db.plan_review_state(conn, "plan")["status"] == "awaiting_review"
+    _plan_verdict(conn, 3, 3)
+    assert db.plan_review_state(conn, "plan")["status"] == "approved"
+    assert get_signature(conn, "plan", 3) is None
+
+
+def test_plan_revert_is_new_revision(conn):
+    for plan in ["A", "A", "B", None, "A"]:
+        push_report(
+            conn,
+            id="r",
+            project="p",
+            title="T",
+            risk="low",
+            body="b",
+            plan=plan,
+            inherit_plan=False,
+        )
+    assert [v["plan_revision"] for v in list_versions(conn, "r")] == [1, 1, 3, None, 5]
+    assert db.plan_review_state(conn, "r") is None
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["unsigned", "awaiting_review", "request_changes", "blocker", "same_signer", "changed_plan"],
+)
+def test_plan_attachment_gate(conn, state):
+    _plan_push(conn, workflow="plan_first", plan="A")
+    if state != "unsigned":
+        _plan_sign(conn)
+    if state in ("blocker", "same_signer", "changed_plan"):
+        _plan_verdict(conn, reviewer="owner" if state == "same_signer" else "reviewer")
+    if state == "request_changes":
+        _plan_verdict(conn, verdict="request_changes")
+    if state == "blocker":
+        add_comment(
+            conn,
+            report_id="plan",
+            target="plan",
+            version=1,
+            author_id="r",
+            author_name="R",
+            body="no",
+        )
+    before = get_report(conn, "plan")
+    with pytest.raises(db.PlanNotApproved) as exc:
+        _plan_push(
+            conn,
+            body="body",
+            body_supplied=True,
+            expected_version=1,
+            title="must roll back",
+            reviewers=["new"],
+            **({"plan": "B"} if state == "changed_plan" else {}),
+        )
+    assert exc.value.plan_revision == (2 if state == "changed_plan" else 1)
+    assert get_report(conn, "plan") == before
+    assert db.requested_reviewers(conn, "plan") == []
+    assert latest_version(conn, "plan") == 1
+
+
+def test_plan_reopened_blocker_holds_and_resolution_restores(conn):
+    _approved_plan(conn)
+    root = add_comment(
+        conn, report_id="plan", target="plan", version=1, author_id="r", author_name="R", body="no"
+    )
+    assert db.plan_review_state(conn, "plan")["status"] == "changes_requested"
+    resolve_thread(conn, "plan", root["id"])
+    assert db.plan_review_state(conn, "plan")["status"] == "approved"
+    _plan_push(
+        conn, body="body", body_supplied=True, plan="# Návrh\r\nExact  \n", expected_version=1
+    )
+    add_comment(
+        conn, report_id="plan", version=2, author_id="r", author_name="R", body="body issue"
+    )
+    reopen_thread(conn, "plan", root["id"])
+    assert db.plan_review_state(conn, "plan")["status"] == "changes_requested"
+    for action in [
+        lambda: sign_version(conn, report_id="plan", version=2, signer_id="owner", signer_name="O"),
+        lambda: add_verdict(
+            conn,
+            report_id="plan",
+            version=2,
+            reviewer_id="r",
+            reviewer_name="R",
+            verdict="request_changes",
+        ),
+        lambda: _plan_push(conn, body="new", body_supplied=True, expected_version=2),
+    ]:
+        with pytest.raises(db.PlanNotApproved):
+            action()
+    assert get_signature(conn, "plan", 2) is None and db.list_verdicts(conn, "plan") == []
+    set_blocking(conn, "plan", root["id"], False)
+    assert db.plan_review_state(conn, "plan")["status"] == "approved"
+    _plan_push(conn, plan="B", expected_version=2)
+    _plan_sign(conn, 3, 3)
+    _plan_verdict(conn, 3, 3)
+    set_blocking(conn, "plan", root["id"], True)
+    assert db.plan_review_state(conn, "plan")["open_blocking"] == 1
+    assert db.plan_review_state(conn, "plan")["status"] == "changes_requested"
+    later = add_comment(
+        conn,
+        report_id="plan",
+        target="plan",
+        version=3,
+        author_id="r",
+        author_name="R",
+        body="later",
+    )
+    resolve_thread(conn, "plan", root["id"])
+    assert db.plan_review_state(conn, "plan", 1)["status"] == "approved"
+    assert db.plan_review_state(conn, "plan")["status"] == "changes_requested"
+    resolve_thread(conn, "plan", later["id"])
+    assert db.plan_review_state(conn, "plan")["status"] == "approved"
+
+
+def test_plan_comments_inherit_target_and_guard_current_before_old_root(conn):
+    _approved_plan(conn)
+    root = add_comment(
+        conn,
+        report_id="plan",
+        target="plan",
+        version=1,
+        author_id="r",
+        author_name="R",
+        body="no",
+        section="same",
+        quote="Exact",
+        prefix="a",
+        suffix="b",
+        blocking=False,
+    )
+    _plan_push(conn, plan="B", expected_version=1)
+    seen = []
+    reply = add_comment(
+        conn,
+        report_id="plan",
+        parent_id=root["id"],
+        version=2,
+        author_id="agent",
+        author_name="agent",
+        body="fixed",
+        expected_version=2,
+        validate=lambda markdown, revision: seen.append((markdown, revision)),
+    )
+    assert seen == [("B", 2)]
+    assert (
+        reply["target"],
+        reply["version"],
+        reply["section"],
+        reply["quote"],
+        reply["prefix"],
+        reply["suffix"],
+        reply["blocking"],
+    ) == ("plan", 1, "same", "Exact", "a", "b", 0)
+    assert db.list_comments(conn, "plan") == []
+    assert len(db.list_comments(conn, "plan", target="plan")) == 2
+    with pytest.raises(ValueError, match="target"):
+        add_comment(
+            conn,
+            report_id="plan",
+            parent_id=root["id"],
+            target="implementation",
+            author_id="agent",
+            author_name="agent",
+            body="wrong",
+        )
+    with pytest.raises(db.StaleRevision) as exc:
+        add_comment(
+            conn,
+            report_id="plan",
+            parent_id=root["id"],
+            version=1,
+            author_id="agent",
+            author_name="agent",
+            body="stale",
+        )
+    assert (exc.value.target, exc.value.current_revision) == ("plan", 2)
+    with pytest.raises(ValueError, match="revision"):
+        add_comment(
+            conn, report_id="plan", target="plan", author_id="r", author_name="R", body="no"
+        )
+
+
+def test_plan_missing_implementation_and_read_only_artifact_plan(conn):
+    _plan_push(conn, workflow="plan_first", plan="A")
+    with pytest.raises(db.MissingDocument, match="implementation has not been attached"):
+        add_comment(conn, report_id="plan", author_id="r", author_name="R", body="no")
+    with pytest.raises(db.MissingDocument):
+        sign_version(conn, report_id="plan", version=1, signer_id="o", signer_name="O")
+    with pytest.raises(db.MissingDocument):
+        add_verdict(
+            conn, report_id="plan", version=1, reviewer_id="r", reviewer_name="R", verdict="approve"
+        )
+    push_report(conn, id="a", project="p", title="T", risk="low", body="body", plan="A")
+    assert db.target_document(conn, "a", 1, "plan") == (1, "A")
+    for action in [
+        lambda: sign_version(
+            conn,
+            report_id="a",
+            target="plan",
+            version=1,
+            expected_version=1,
+            signer_id="o",
+            signer_name="O",
+        ),
+        lambda: add_comment(
+            conn, report_id="a", target="plan", version=1, author_id="r", author_name="R", body="no"
+        ),
+        lambda: add_verdict(
+            conn,
+            report_id="a",
+            target="plan",
+            version=1,
+            reviewer_id="r",
+            reviewer_name="R",
+            verdict="approve",
+        ),
+    ]:
+        with pytest.raises(ValueError, match="artifact"):
+            action()
+
+
+def test_plan_optimistic_update_conflict_and_invalid_pushes(conn):
+    _approved_plan(conn)
+    _plan_push(conn, plan="B", expected_version=1)
+    with pytest.raises(StaleVersion) as exc:
+        _plan_push(conn, plan="C", expected_version=1, reviewers=["no"], title="bad")
+    assert exc.value.latest == 2
+    for args in [
+        dict(plan=None, inherit_plan=False),
+        dict(body=None, body_supplied=True),
+        dict(plan=" "),
+        dict(plan="B", commit="abc"),
+        dict(),
+        dict(plan="B", body=" "),
+        dict(plan="B", expected_version=None),
+    ]:
+        with pytest.raises(ValueError):
+            _plan_push(conn, **({"expected_version": 2} | args))
+    with pytest.raises(db.WorkflowMismatch, match="workflow cannot be changed"):
+        _plan_push(conn, workflow="artifact", expected_version=2, body="b", body_supplied=True)
+    assert latest_version(conn, "plan") == 2 and db.requested_reviewers(conn, "plan") == []
+    assert get_report(conn, "plan")["title"] == "Plan"
+
+
+def test_plan_list_rows_and_request_removal_use_both_targets(conn, monkeypatch):
+    _approved_plan(conn)
+    db.add_review_request(conn, "plan", "reviewer")
+    _plan_push(conn, body="body", body_supplied=True, expected_version=1)
+    sign_version(conn, report_id="plan", version=2, signer_id="owner", signer_name="O")
+    add_verdict(
+        conn,
+        report_id="plan",
+        version=2,
+        reviewer_id="other",
+        reviewer_name="Other",
+        verdict="approve",
+    )
+    assert db.remove_review_request(conn, "plan", "reviewer") == "kept"
+    monkeypatch.setattr(db, "plan_review_state", lambda *a, **k: pytest.fail("per-row query"))
+    rows = list_reports(conn)
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row["workflow"], row["plan_revision"], row["has_body"], row["open_plan_blocking"]) == (
+        "plan_first",
+        1,
+        True,
+        0,
+    )
+    assert row["plan_signer_id"] == row["implementation_signer_id"] == row["signer_id"] == "owner"
+    assert row["plan_signed_at"] and row["implementation_signed_at"] == row["signed_at"]
+    assert {v["target"] for v in db.verdicts_by_report(conn, ["plan"])["plan"]} == {
+        "plan",
+        "implementation",
+    }
+    _plan_push(conn, plan="B", expected_version=2)
+    assert db.remove_review_request(conn, "plan", "reviewer") == "removed"
+
+
+def test_plan_human_ids_lowercase(conn):
+    _plan_push(conn, workflow="plan_first", plan="A")
+    _plan_sign(conn, signer="Owner")
+    _plan_verdict(conn, reviewer="Reviewer")
+    root = add_comment(
+        conn,
+        report_id="plan",
+        target="plan",
+        version=1,
+        author_id="Reviewer",
+        author_name="R",
+        body="no",
+    )
+    resolve_thread(conn, "plan", root["id"], by="Owner")
+    assert db.lowercase_human_ids(conn) >= 5
+    assert get_signature(conn, "plan", 1, target="plan")["signer_id"] == "owner"
+    assert db.list_verdicts(conn, "plan", target="plan")[0]["reviewer_id"] == "reviewer"
+    assert db.list_comments(conn, "plan", target="plan")[0]["resolved_by"] == "owner"
+
+
+def test_plan_signature_and_verdict_guard_snapshot_separately_from_plan_revision(conn):
+    _plan_push(conn, workflow="plan_first", plan="A")
+    _plan_push(conn, plan="A", expected_version=1)
+    _plan_push(conn, plan="A", expected_version=2)
+    with pytest.raises(StaleVersion) as exc:
+        _plan_sign(conn, 1, 1)
+    assert exc.value.latest == 3
+    with pytest.raises(db.StaleRevision) as exc:
+        _plan_sign(conn, 3, 3)
+    assert (exc.value.target, exc.value.current_revision) == ("plan", 1)
+    assert get_signature(conn, "plan", 1, target="plan") is None
+    _plan_sign(conn, 1, 3)
+    _plan_verdict(conn, 1, 3)
+    assert db.plan_review_state(conn, "plan")["status"] == "approved"
+    assert db.plan_review_state(conn, "plan", 1)["status"] == "approved"
+
+
+def test_plan_comment_callback_refusal_leaves_resolution_and_rows_unchanged(conn):
+    _approved_plan(conn)
+    root = add_comment(
+        conn,
+        report_id="plan",
+        target="plan",
+        version=1,
+        author_id="r",
+        author_name="R",
+        body="concern",
+    )
+    resolve_thread(conn, "plan", root["id"])
+    before = db.list_comments(conn, "plan", target="plan")
+    with pytest.raises(ValueError, match="quote missing"):
+        add_comment(
+            conn,
+            report_id="plan",
+            parent_id=root["id"],
+            author_id="agent",
+            author_name="agent",
+            body="reply",
+            validate=lambda markdown, revision: "quote missing",
+        )
+    assert db.list_comments(conn, "plan", target="plan") == before
+    assert db.plan_review_state(conn, "plan")["status"] == "approved"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        dict(body=None),
+        dict(body=" "),
+        dict(plan=" ", body="b"),
+        dict(workflow="invalid", body="b"),
+        dict(workflow="plan_first", body="b", plan="A"),
+        dict(workflow="plan_first", body=None),
+        dict(workflow="plan_first", body=None, plan="A", commit="abc"),
+        dict(workflow="plan_first", body=None, plan="A", expected_version=1),
+    ],
+)
+def test_plan_invalid_creation_is_atomic(conn, args):
+    with pytest.raises(ValueError):
+        push_report(conn, id="invalid", project="p", title="T", risk="low", reviewers=["r"], **args)
+    assert get_report(conn, "invalid") is None
+    assert list_versions(conn, "invalid") == []
+    assert db.requested_reviewers(conn, "invalid") == []
+
+
+def test_plan_comment_invalid_explicit_target_is_not_omission(conn):
+    push_report(conn, id="a", project="p", title="T", risk="low", body="body")
+    with pytest.raises(ValueError, match="target"):
+        add_comment(conn, report_id="a", target="", author_id="r", author_name="R", body="no")
+    with pytest.raises(ValueError, match="artifact"):
+        add_comment(
+            conn, report_id="a", target="plan", version=1, author_id="r", author_name="R", body="no"
+        )
+    assert list_comments(conn, "a") == []
+
+
+def test_plan_migration_lock_timeout_rolls_back_and_retry_preserves_data(new_database_url):
+    url = new_database_url()
+    with connect(url) as conn, connect(url) as reader:
+        init_schema(conn)
+        push_report(conn, id="r", project="p", title="T", risk="low", body="body", plan="A")
+        conn.execute("ALTER TABLE reports DROP COLUMN workflow")
+        conn.execute("ALTER TABLE versions DROP COLUMN plan_revision")
+        conn.execute("ALTER TABLE versions DROP CONSTRAINT versions_content")
+        conn.execute("ALTER TABLE versions ALTER COLUMN body SET NOT NULL")
+        with reader.transaction():
+            reader.execute("SELECT * FROM versions")
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                init_schema(conn)
+            columns = conn.execute(
+                "SELECT column_name FROM information_schema.columns"
+                " WHERE table_schema=current_schema() AND table_name='reports'"
+            ).fetchall()
+            assert "workflow" not in {r["column_name"] for r in columns}
+        init_schema(conn)
+        assert db.get_version(conn, "r", 1)["body"] == "body"
+        assert db.get_version(conn, "r", 1)["plan_revision"] == 1
