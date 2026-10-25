@@ -6,6 +6,7 @@ The running app also serves the generated OpenAPI docs at `/docs` (in shared mod
 
 - [Push a report](#push-a-report)
 - [Plan-first review](#plan-first-review)
+- [Optional execution evidence](#optional-execution-evidence)
 - [Read a report](#read-a-report)
 - [Read and answer comments](#read-and-answer-comments)
 - [Wait for feedback](#wait-for-feedback)
@@ -148,6 +149,28 @@ An unchanged approved plan keeps its approval across body pushes. Supplying the 
 
 An unresolved blocking plan thread, including an older unresolved concern, pauses effective approval and implementation submission, signing and verdicts. Reopening a blocker or making a suggestion blocking also pauses it. Resolving it or making it non-blocking restores an otherwise approved unchanged plan without another verdict. Editing the plan instead always needs fresh approval. Implementation threads affect implementation approval separately. No stored signatures or verdicts are deleted.
 
+## Optional execution evidence
+
+This section documents the intended implemented Phase 3 contract, using normalized trace schema v1. `POST /api/reports` accepts optional `trace: TraceDocument | null`. Send normalized JSON, not a native provider export, file path or URL. Responses remain HTTP 201 `{id, version, url}`. Reports without traces keep their existing behavior. See [tracing.md](tracing.md) for the schema, version-pinned capture recipes, privacy limits and safe JSON assembly with curl.
+
+| Operation | `trace` behavior |
+| --- | --- |
+| Create artifact with body | Object attaches; omission/null means no trace. |
+| Create plan-first without body | Object rejected; omission/null means no trace. |
+| Submit implementation body in either workflow | Object attaches to the new snapshot; omission/null clears evidence for this new implementation. |
+| Plan-only update after implementation exists | Omission preserves the old evidence and its original binding, alongside inherited body/commit. Explicit trace, including null, is rejected. |
+| Replace or remove attached evidence | Resubmit the implementation body as a new version with an object or null; identical body bytes are allowed. |
+
+All updates supplying a trace object require `expected_version`, including artifact updates. Artifact clients without trace retain their existing guard behavior. Plan-first updates still always require the guard and the existing content rules. A trace-only update cannot replace a body or plan update. Implementation submission still requires the current plan's effective approval; a changed plan and body cannot be submitted together. Stale guards and plan-gate conflicts remain 409. Invalid evidence/content combinations return 422 and save no metadata, snapshot or trace.
+
+The server binds evidence to the snapshot where its implementation body was submitted, that snapshot's exact plan revision when present, and the submission's claimed commit when present. Absent `plan_revision` and `commit` keys are omitted from the binding, rather than serialized as null. Clients cannot set the binding. It does not prove that the claimed commit ran. A plan-only update retains the original binding even if the currently attached plan changes.
+
+Adding, replacing or removing evidence creates a fresh unsigned implementation snapshot. Earlier implementation signatures/verdicts still refer to their exact snapshots, including evidence. Plan signatures remain tied to exact plan revisions. Trace presence, recorded failures and coverage never change approval status automatically. Reopened plan blockers retain their existing hold behavior.
+
+The canonical normalized document is at most **524288 UTF-8 bytes (512 KiB)**. The whole encoded request remains **1048576 bytes (1 MiB)**, including body, plan, trace and metadata; a valid trace can still push that request over budget (413). There is no compressed/archive upload, remote-fetch endpoint or mutable attachment endpoint.
+
+Writes use the existing token and owner checks; members cannot add evidence to another member's report. API reads keep the existing authenticated-member scope; web reads keep local/shared-mode guards. Evidence is visible to the same readers as the report, with no separate access list or unguarded download route. Validation errors and logs must not echo trace text or native source records. Removing evidence from a new version does not erase history; accidental disclosure requires the instance operator's existing data-removal process.
+
 ## Read a report
 
 `GET /api/reports/$ID` returns the report metadata, status, versions and verdicts. It returns neither Markdown document, including in `versions`. Use the exact snapshot route below to read them.
@@ -175,8 +198,8 @@ An unresolved blocking plan thread, including an older unresolved concern, pause
   "plan_review": null,
   "current_version": 2,
   "versions": [
-    {"version": 1, "created_at": "2026-10-21T09:00:12+00:00", "commit": "a1b2c3d", "has_implementation": true, "plan_revision": null},
-    {"version": 2, "created_at": "2026-10-21T11:30:40+00:00", "commit": null, "has_implementation": true, "plan_revision": null}
+    {"version": 1, "created_at": "2026-10-21T09:00:12+00:00", "commit": "a1b2c3d", "has_implementation": true, "plan_revision": null, "has_trace": false},
+    {"version": 2, "created_at": "2026-10-21T11:30:40+00:00", "commit": null, "has_implementation": true, "plan_revision": null, "has_trace": false}
   ],
   "verdicts": [
     {"reviewer": "Alice", "reviewer_id": "4f0c1a", "verdict": "approve", "target": "implementation", "version": 1, "current": false, "summary": "", "created_at": "2026-10-21T10:02:00+00:00"},
@@ -203,7 +226,7 @@ For plan-first reviews, top-level `status` is the overall gate; it can also be `
 }
 ```
 
-Plan `current` verdict flags compare against that plan revision, independent of the global snapshot. Top-level `verdicts` remain implementation-only. Each version-list item adds `has_implementation` and `plan_revision`.
+Plan `current` verdict flags compare against that plan revision, independent of the global snapshot. Top-level `verdicts` remain implementation-only. Each version-list item includes `has_implementation`, `plan_revision` and `has_trace`. Metadata/list reads do not include full trace payloads; use the exact snapshot route.
 
 ### Exact snapshot readback
 
@@ -212,11 +235,14 @@ Plan `current` verdict flags compare against that plan revision, independent of 
 ```json
 {
   "version": 2, "created_at": "2026-10-21T11:30:40+00:00", "commit": "abcdef0",
-  "body": "## Verification\nTests passed.", "plan": "# Design\nUse daily proration.", "plan_revision": 1
+  "body": "## Verification\nTests passed.", "plan": "# Design\nUse daily proration.", "plan_revision": 1,
+  "trace": null
 }
 ```
 
 `body` is null before implementation attachment; `plan` is null when absent. Missing review/version gets 404. This route needs the same bearer token as other reads. Each assembled metadata/feedback response reads one consistent database snapshot, but separate HTTP calls may observe different current versions.
+
+`trace` is null when absent, otherwise a `StoredTrace` object with exactly `binding` and `document`. `binding` always contains `version` (the attachment snapshot); `plan_revision` (its original plan revision) and `commit` (the claimed commit) are included only when present. For example, an attachment at version 1 with no plan or claimed commit has `"binding": {"version": 1}`. Absent optional binding keys are omitted, not null; `document` is the validated schema-v1 `TraceDocument`. The bound plan is the exact original revision, not the latest plan or report-level agent/model/session metadata. After a plan-only update, `binding.version` can be older than the requested snapshot. See the [valid synthetic document](tracing.md#manual-reconstruction).
 
 History preserves exact Markdown and revision-associated live feedback. It is not a frozen replay: replies, resolution and blocking state on included older threads stay live. Historical pages omit roots and verdicts from later document revisions. Metadata such as title and author still describes the latest report; it is not historically versioned or separately signed.
 
@@ -295,7 +321,7 @@ curl -sS --fail-with-body -X POST "http://localhost:8000/api/reports/$ID/comment
 
 ### Select feedback target
 
-Comments and wait default to `target=implementation`. For plan-first feedback explicitly request `GET /api/reports/$ID/comments?target=plan&open=true` or `/wait?target=plan`. Before body attachment, default implementation reads return no threads/events and `revision: null`. Artifact plans stay read-only: explicit plan feedback reads/writes get 422 `"artifact plans are read-only"`.
+Comments and wait default to `target=implementation`. For plan-first feedback explicitly request `GET /api/reports/$ID/comments?target=plan&open=true` or `/wait?target=plan`. Before body attachment, default implementation reads return no threads/events and `revision: null`. Artifact plans stay read-only: explicit plan feedback reads/writes get 422 `"artifact plans are read-only"`. Execution is read-only supporting evidence, not a feedback target; the only targets remain `implementation` and `plan`.
 
 For a plan root send `{"body":"Which rounding rule?","target":"plan","revision":1}` using the current plan revision. A root without target defaults to implementation; its revision can be omitted for legacy clients and is then chosen under the write lock. Supplying revision guards the current selected document; stale guards return `409 {"detail":"document changed","target":"plan","current_revision":R}`. Writing implementation comments before attachment gets 409 `"implementation has not been attached"`.
 

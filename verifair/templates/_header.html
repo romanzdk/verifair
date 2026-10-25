@@ -4,14 +4,18 @@
     <span id="vf_status" class="badge b-{{ status }}">{% if not is_current %}Current: {% endif %}{{ STATUS_LABELS[status] }}</span>
     <span class="risk {{ report.risk }}">{{ icon("risk-" ~ report.risk, "ic14") }}{{ report.risk|capitalize }} risk</span>
     <span>by <b>{{ report.author }}</b></span>
+    {% if view_tab != 'execution' %}
     {% if report.agent or report.model %}<span>Written by <b>{{ report.agent or report.model }}</b>{% if report.agent and report.model %} ({{ report.model }}){% endif %}</span>{% endif %}
     {% if report.session_url %}<a class="ext" href="{{ report.session_url }}">session{{ icon("external-link", "ic12") }}</a>{% endif %}
+    {% endif %}
     <span>v{{ version }} · {{ version_date|date }}</span>
+    {% if view_tab != 'execution' %}
     {% if plan_first and (target == 'plan' or has_body) %}<span>{{ target_label }} · {{ STATUS_LABELS[target_status] }}</span>{% endif %}
     <span id="vf_open">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
+    {% endif %}
     {% if ticket %}<a class="ext" href="{{ report.ticket_url }}">{{ ticket }}{{ icon("external-link", "ic12") }}</a>{% endif %}
-    {% if signature %}<span>Signed by <b>{{ signature.signer_name }}</b> · {{ signature.created_at|date }}</span>
-    {% elif is_current and reviewable and (view_tab|default('report') != 'plan' or plan_first) %}
+    {% if view_tab != 'execution' and signature %}<span>Signed by <b>{{ signature.signer_name }}</b> · {{ signature.created_at|date }}</span>
+    {% elif is_current and reviewable and (view_tab|default('report') in ('report', 'implementation') or (view_tab == 'plan' and plan_first)) %}
     {% if plan_gate %}<span>The current plan must be approved before signing the implementation.</span>
     {% elif sign_refusal %}<span>{{ sign_refusal }}</span>
     {% elif user_name %}<form class="sign" id="vf_sign" hx-post="{{ url }}/sign" hx-target="#vf_header" hx-swap="outerHTML" hx-disabled-elt="find button">
@@ -22,7 +26,7 @@
     </form>{% endif %}
     {% endif %}
   </div>
-    {% if plan_first and stage == 'awaiting_implementation' and is_current %}
+    {% if view_tab != 'execution' and plan_first and stage == 'awaiting_implementation' and is_current %}
     <p class="banner">Plan approved · Awaiting implementation. Ask your agent to submit the implementation body to <code>/api/reports</code> with this review's ID <code>{{ report.id }}</code> and <code>expected_version: {{ current_version }}</code>.</p>
     {% endif %}
 </header>

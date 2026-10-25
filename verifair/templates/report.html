@@ -1,30 +1,34 @@
 {% extends "base.html" %}
 {% set drawer = true %}
-{% set is_report = view_tab|default('report') != 'plan' %}
-{% set reviewing = (is_report or plan_first) and reviewable %}
+{% set is_report = view_tab|default('report') in ('report', 'implementation') %}
+{% set on_execution = view_tab == 'execution' %}
+{% set reviewing = (is_report or (view_tab == 'plan' and plan_first)) and reviewable %}
 {% set inline_name_prompt = reviewing and is_current and not user_name and not user_from_header %}
 {% block title %}{{ report.title }} · verifair{% endblock %}
 {% block body_class %}{% if is_current and reviewing %} class="has-verdict"{% endif %}{% endblock %}
 {% block crumbs %}<a href="/p/{{ report.project|urlencode }}">{{ report.project }}</a>{{ icon("chevron-right", "ic14") }}<span class="cur">{{ report.title }}</span>{% endblock %}
 {% block content %}
 {% if not is_current %}
-<div class="banner">Viewing v{{ version }} · current is v{{ current_version }} · <a href="{{ url }}{% if plan_first %}{{ selection_query }}{% elif not is_report and versions[0].plan is not none %}?tab=plan{% endif %}">open current</a></div>
+<div class="banner">Viewing v{{ version }} · current is v{{ current_version }} · <a href="{{ url }}{% if on_execution or plan_first %}{{ selection_query }}{% elif view_tab == 'plan' and versions[0].plan is not none %}?tab=plan{% endif %}">open current</a></div>
 {% endif %}
 {% include "_header.html" %}
 <div class="body">
   <main class="main" id="vf_main">
-    {% if plan_html is not none %}
+    {% if plan_html is not none or has_trace or on_execution %}
     <nav class="tabs" aria-label="Report documents">
       {% if plan_first %}
-      <a href="{{ shown_url }}?tab=plan"{% if not is_report %} aria-current="page"{% endif %}>Plan</a>
+      <a href="{{ shown_url }}?tab=plan"{% if view_tab == 'plan' %} aria-current="page"{% endif %}>Plan</a>
       <a href="{{ shown_url }}?tab=implementation"{% if is_report %} aria-current="page"{% endif %}>Implementation</a>
       {% else %}
       <a href="{{ shown_url }}"{% if is_report %} aria-current="page"{% endif %}>Report</a>
-      <a href="{{ shown_url }}?tab=plan"{% if not is_report %} aria-current="page"{% endif %}>Plan</a>
+      {% if plan_html is not none %}<a href="{{ shown_url }}?tab=plan"{% if view_tab == 'plan' %} aria-current="page"{% endif %}>Plan</a>{% endif %}
       {% endif %}
+      {% if has_trace or on_execution %}<a href="{{ shown_url }}?tab=execution"{% if on_execution %} aria-current="page"{% endif %}>Execution</a>{% endif %}
     </nav>
     {% endif %}
-    {% if not is_report and not plan_first %}
+    {% if on_execution %}
+    {% include "_execution.html" %}
+    {% elif view_tab == 'plan' and not plan_first %}
     <p class="dismiss">Plan attached to report v{{ version }}. Read-only context; sign and review this version on the <a href="{{ shown_url }}">Report tab</a>.</p>
     <article class="content">{{ plan_html|safe }}</article>
     {% elif is_report and not has_body %}

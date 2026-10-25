@@ -57,6 +57,23 @@ function find(parts, quote, start) {
 }
 
 const cases = {
+  execution_fragment_reveals_all_ancestors() {
+    const run = { open: false, parentElement: null, closest() { return this; } };
+    const parent = { open: false, parentElement: run, closest() { return this; } };
+    const event = { open: false, parentElement: parent, closest() { return this; }, scrollIntoView() { this.scrolled = true; } };
+    scope.window.location = { hash: "#vf_trace_tool-1" };
+    document.getElementById = (id) => id === "vf_trace_tool-1" ? event : null;
+    windowEvents.get("load")();
+    assert.equal(event.open, true);
+    assert.equal(parent.open, true);
+    assert.equal(run.open, true);
+    assert.equal(event.scrolled, true);
+    event.open = parent.open = run.open = false;
+    windowEvents.get("hashchange")();
+    assert.equal(event.open && parent.open && run.open, true);
+    scope.window.location.hash = "#missing";
+    windowEvents.get("hashchange")();
+  },
   plan_general_cancel() {
     let resets = 0;
     const form = { hidden: false, reset: () => resets++, closest: () => ({}) };

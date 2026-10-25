@@ -1,0 +1,9 @@
+{"type": "thread.started", "thread_id": "thread-main"}
+{"type": "turn.started"}
+{"type": "item.started", "item": {"id": "item_0", "type": "command_execution", "command": "pytest -q", "aggregated_output": "", "exit_code": null, "status": "in_progress"}}
+{"type": "item.updated", "item": {"id": "item_0", "type": "command_execution", "command": "pytest -q", "aggregated_output": "tests passed token=fixture-secret", "exit_code": null, "status": "in_progress"}}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "pytest -q", "aggregated_output": "tests passed token=fixture-secret", "exit_code": 2, "status": "failed"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "mcp_tool_call", "server": "synthetic", "tool": "lookup", "arguments": {"env": {"SECRET": "never-copy"}, "path": "/synthetic/input"}, "result": {"content": [{"type": "text", "text": "lookup apiKey=fixture-key"}, {"type": "image", "data": "IMAGE-NEVER"}], "structured_content": {"hidden": "STRUCTURED-NEVER"}}, "error": null, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_2", "type": "reasoning", "text": "Readable summary password=fixture-password", "encrypted_content": "ENCRYPTED-NEVER", "raw_content": "RAW-NEVER"}}
+{"type": "item.completed", "item": {"id": "item_3", "type": "agent_message", "text": "Final statement, not a model HTTP call."}}
+{"type": "turn.completed", "usage": {"input_tokens": 10, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 5, "reasoning_output_tokens": 2}}

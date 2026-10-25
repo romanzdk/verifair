@@ -15,6 +15,13 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from verifair.render import slugify
+from verifair.traces import (
+    StoredTrace,
+    TraceBinding,
+    TraceDocument,
+    canonical_json,
+    validate_document,
+)
 
 log = logging.getLogger("verifair")
 
@@ -320,6 +327,11 @@ def init_schema(conn: Connection) -> None:
                 " ADD CONSTRAINT versions_plan_source FOREIGN KEY (report_id, plan_revision)"
                 " REFERENCES versions(report_id, version)"
             )
+        if ("versions", "trace") not in columns:
+            conn.execute(
+                "ALTER TABLE versions ADD COLUMN trace TEXT,"
+                " ADD CONSTRAINT versions_trace_body CHECK (trace IS NULL OR body IS NOT NULL)"
+            )
 
 
 def target_document(
@@ -421,6 +433,8 @@ def push_report(
     session_url: str | None = None,
     commit: str | None = None,
     owner_id: str | None = None,
+    trace: TraceDocument | None = None,
+    trace_supplied: bool = False,
 ) -> tuple[str, int]:
     if workflow not in (None, "artifact", "plan_first"):
         raise ValueError("invalid workflow")
@@ -429,6 +443,10 @@ def push_report(
     for name, document in (("body", body), ("plan", plan)):
         if document is not None and (not document.strip() or not storable(document)):
             raise ValueError(f"{name} must be nonblank storable Markdown")
+    if trace is not None:
+        if not body_supplied or body is None:
+            raise ValueError("trace requires supplied body")
+        trace = validate_document(trace)
     now = _now()
     links_json = json.dumps(links or [])
     if owner_id is not None:
@@ -484,6 +502,8 @@ def push_report(
             workflow = existing["workflow"]
             if workflow == "plan_first" and expected_version is None:
                 raise ValueError("expected_version is required for plan-first updates")
+            if trace is not None and expected_version is None:
+                raise ValueError("expected_version is required for trace updates")
             version = latest_version(conn, id) + 1
             conn.execute(
                 "UPDATE reports SET title=%s, risk=%s, ticket_url=%s, links=%s,"
@@ -510,6 +530,8 @@ def push_report(
             conn.execute("UPDATE reports SET workflow=%s WHERE id=%s", (workflow, id))
         plan_supplied = plan is not None or not inherit_plan
         previous = get_version(conn, id, version - 1) if version > 1 else None
+        if previous is not None and trace_supplied and not body_supplied:
+            raise ValueError("trace requires supplied body")
         if plan is None and inherit_plan and previous is not None:
             plan = previous["plan"]
         plan_revision = (
@@ -543,6 +565,18 @@ def push_report(
                 commit = previous["commit"] if previous else None
             elif body is None and commit is not None:
                 raise ValueError("commit requires supplied body")
+        stored_trace = None
+        if trace is not None:
+            stored_trace = canonical_json(
+                StoredTrace(
+                    binding=TraceBinding(
+                        version=version, plan_revision=plan_revision, commit=commit
+                    ),
+                    document=trace,
+                )
+            )
+        elif not body_supplied and previous is not None:
+            stored_trace = previous["trace"]
         owner = author_id if author_id is not None else (existing or {}).get("author_id")
         if reviewers:
             conn.cursor().executemany(
@@ -552,9 +586,9 @@ def push_report(
             )
         conn.execute(
             "INSERT INTO versions (report_id, version, body, plan, plan_revision, created_at,"
-            ' "commit")'
-            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (id, version, body, plan, plan_revision, now, commit),
+            ' "commit", trace)'
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (id, version, body, plan, plan_revision, now, commit, stored_trace),
         )
     log.info("report pushed id=%s project=%s version=%d", id, project, version)
     return id, version
@@ -570,6 +604,13 @@ def get_version(conn: Connection, id: str, version: int) -> Row | None:
     ).fetchone()
 
 
+def get_trace(conn: Connection, report_id: str, version: int) -> StoredTrace | None:
+    row = get_version(conn, report_id, version)
+    if row is None or row["trace"] is None:
+        return None
+    return StoredTrace.model_validate_json(row["trace"])
+
+
 def latest_version(conn: Connection, id: str) -> int:
     row = conn.execute(
         "SELECT MAX(version) AS v FROM versions WHERE report_id=%s", (id,)
@@ -579,7 +620,9 @@ def latest_version(conn: Connection, id: str) -> int:
 
 def list_versions(conn: Connection, id: str) -> list[Row]:
     return conn.execute(
-        "SELECT * FROM versions WHERE report_id=%s ORDER BY version", (id,)
+        'SELECT report_id, version, body, plan, plan_revision, created_at, "commit",'
+        " trace IS NOT NULL AS has_trace FROM versions WHERE report_id=%s ORDER BY version",
+        (id,),
     ).fetchall()
 
 

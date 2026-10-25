@@ -1,0 +1,21 @@
+{
+  "info": {
+    "id": "ses_legacy",
+    "version": "1.19.4"
+  },
+  "messages": [
+    {
+      "info": {
+        "id": "msg_legacy",
+        "role": "assistant",
+        "sessionID": "ses_legacy"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "Legacy"
+        }
+      ]
+    }
+  ]
+}

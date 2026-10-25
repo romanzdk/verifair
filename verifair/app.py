@@ -190,10 +190,24 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):
+        errors = error.errors()
+        if request.url.path == "/api/reports":
+            for detail in errors:
+                loc = tuple(detail["loc"])
+                if (
+                    loc[:2] == ("body", "trace")
+                    or loc == ("body",)
+                    or detail["type"] == "json_invalid"
+                    or isinstance(detail.get("input"), (dict, list))
+                ):
+                    detail.pop("input", None)
+                    detail.pop("ctx", None)
+                    if detail["type"] == "extra_forbidden":
+                        detail["loc"] = loc[:-1]
         # the errors echo the input, and ensure_ascii escapes a lone surrogate there that
         # JSONResponse's UTF-8 encoding would turn into a 500. A NaN or Infinity in the
         # input has no strict JSON form, so then the echo is left out.
-        errors = jsonable_encoder(error.errors())
+        errors = jsonable_encoder(errors)
         try:
             body = json.dumps({"detail": errors}, separators=(",", ":"), allow_nan=False)
         except ValueError:

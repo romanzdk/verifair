@@ -8,6 +8,7 @@ import pytest
 
 from verifair import db, notify, web
 from verifair.app import CSP as APP_CSP
+from verifair.traces import validate_document
 
 H = {"Authorization": "Bearer t"}
 REFUSED_COPY = "Add a summary, or start a comment thread of your own and leave it open."
@@ -56,6 +57,421 @@ def _document_nav(page):
     assert nav is not None
     assert nav[1].count('aria-current="page"') == 1
     return nav[1]
+
+
+def _viewer_trace(*, runs=None, events=None):
+    return validate_document(
+        {
+            "schema_version": 1,
+            "runs": runs
+            or [
+                {
+                    "id": "recording",
+                    "agent": "codex",
+                    "origin": "recorded",
+                    "source_format": "codex-jsonl",
+                    "source_version": "0.9",
+                    "coverage": "partial",
+                    "warnings": ["Only this session was captured."],
+                }
+            ],
+            "events": events
+            or [
+                {
+                    "id": "tool-1",
+                    "run_id": "recording",
+                    "ordinal": 1,
+                    "kind": "tool",
+                    "title": "Run checks",
+                    "status": "completed",
+                    "model": "trace-model",
+                    "output": "Tool finished; inspect the evidence.",
+                }
+            ],
+        }
+    )
+
+
+def _seed_execution(settings, *, workflow="artifact", trace=None):
+    with closing(db.connect(settings.database_url)) as conn:
+        if workflow == "plan_first":
+            db.push_report(
+                conn,
+                id="execution",
+                project="p",
+                title="Execution",
+                risk="low",
+                body=None,
+                body_supplied=False,
+                workflow=workflow,
+                plan="## Bound plan\nOriginal approved text.",
+            )
+            db.sign_version(
+                conn,
+                report_id="execution",
+                version=1,
+                target="plan",
+                expected_version=1,
+                signer_id="owner000",
+                signer_name="Owner",
+            )
+            db.add_verdict(
+                conn,
+                report_id="execution",
+                version=1,
+                target="plan",
+                reviewer_id="judge000",
+                reviewer_name="Judge",
+                verdict="approve",
+            )
+        _, version = db.push_report(
+            conn,
+            id="execution",
+            project="p",
+            title="Execution",
+            risk="low",
+            body=SAMPLE,
+            expected_version=1 if workflow == "plan_first" else None,
+            trace=trace or _viewer_trace(),
+            commit="bound-commit",
+            agent="LATEST_AGENT",
+            model="LATEST_MODEL",
+            session_url="https://latest.example/session",
+            reviewers=["carol000"],
+        )
+        assert db.get_trace(conn, "execution", version) is not None
+    return version
+
+
+@pytest.mark.parametrize("workflow", ["artifact", "plan_first"])
+def test_execution_tab_is_read_only_in_both_workflows(client, settings, workflow):
+    version = _seed_execution(settings, workflow=workflow)
+    for name in (None, "Reader"):
+        if name:
+            client.cookies.set("vf_name", name)
+        response = client.get("/r/execution?tab=execution")
+        assert response.status_code == 200
+        nav = _document_nav(response.text)
+        assert '<a href="/r/execution?tab=execution" aria-current="page">Execution</a>' in nav
+        assert (">Plan</a>" in nav) == (workflow == "plan_first")
+        assert (">Implementation</a>" in nav) == (workflow == "plan_first")
+        assert (">Report</a>" in nav) == (workflow == "artifact")
+        assert response.context["target"] == "implementation"
+        assert response.context["version"] == version
+        for forbidden in (
+            "hx-post=",
+            "data-section=",
+            "data-comment-section",
+            'class="cform"',
+            'id="vf_popover"',
+            'id="vf_verdict"',
+            'id="vf_sign"',
+            'class="name-prompt"',
+            "has-verdict",
+            "Remove review request",
+            'class="addrev"',
+        ):
+            assert forbidden not in response.text
+        document_url = (
+            "/r/execution?tab=implementation" if workflow == "plan_first" else "/r/execution"
+        )
+        assert f'href="{document_url}">Review ' in response.text
+    document = client.get(document_url)
+    assert 'id="vf_sign"' in document.text and 'id="vf_verdict"' in document.text
+    assert f'name="version" value="{version}"' in document.text
+    assert f'name="revision" value="{version}"' in document.text
+    assert 'name="target" value="implementation"' in document.text
+    assert '<a href="/r/execution?tab=execution">Execution</a>' in _document_nav(document.text)
+
+
+def test_execution_shared_reviewer_controls_are_hidden(shared_client, shared_settings, as_user):
+    as_user("other@example.com", "Other")
+    _seed_execution(shared_settings)
+    assert 'class="addrev"' in shared_client.get("/r/execution").text
+    page = shared_client.get("/r/execution?tab=execution").text
+    assert "hx-post=" not in page and 'class="addrev"' not in page
+
+
+@pytest.mark.parametrize("workflow", ["artifact", "plan_first"])
+def test_execution_history_keeps_selection_for_untraced_snapshots(client, settings, workflow):
+    traced_version = _seed_execution(settings, workflow=workflow)
+    with closing(db.connect(settings.database_url)) as conn:
+        db.push_report(
+            conn,
+            id="execution",
+            project="p",
+            title="Execution",
+            risk="low",
+            body="## Intent\nNew document without evidence.",
+            expected_version=traced_version,
+            agent="HISTORY_LATEST_AGENT",
+            model="HISTORY_LATEST_MODEL",
+            session_url="https://history-latest.example/session",
+        )
+    latest = traced_version + 1
+    history = client.get(f"/r/execution/v/{traced_version}?tab=execution")
+    assert "Run checks" in history.text
+    assert "HISTORY_LATEST" not in history.text and "https://history-latest" not in history.text
+    assert 'href="/r/execution?tab=execution">open current</a>' in history.text
+    for version in range(1, latest + 1):
+        response = client.get(f"/r/execution/v/{version}?tab=execution")
+        nav = _document_nav(response.text)
+        prefix = "/r/execution" if version == latest else f"/r/execution/v/{version}"
+        assert f'href="{prefix}?tab=execution" aria-current="page">Execution</a>' in nav
+        rail = response.text.split('<aside class="side"')[1].split("</aside>")[0]
+        for n in range(1, latest + 1):
+            href = "/r/execution" if n == latest else f"/r/execution/v/{n}"
+            assert f'href="{href}?tab=execution"' in rail
+        assert ("No execution trace attached to this version" in response.text) == (
+            version != traced_version
+        )
+    assert ">Execution</a>" not in client.get("/r/execution").text
+    assert (
+        "No execution trace attached to this version"
+        in client.get("/r/execution?tab=execution").text
+    )
+    for path in ("/r/missing?tab=execution", "/r/execution/v/99?tab=execution"):
+        assert client.get(path).status_code == 404
+
+
+def test_execution_explicit_empty_url_does_not_fall_back_to_report(client):
+    push(client)
+    response = client.get("/r/prorate?tab=execution")
+    assert response.status_code == 200
+    assert "No execution trace attached to this version" in response.text
+    assert "Full new price." not in response.text
+    assert '?tab=execution" aria-current="page">Execution</a>' in _document_nav(response.text)
+    assert 'href="/r/prorate">Review Report</a>' in response.text
+
+
+def test_execution_uses_bound_plan_after_later_plan_update(client, settings):
+    _seed_execution(settings, workflow="plan_first")
+    with closing(db.connect(settings.database_url)) as conn:
+        before = db.get_trace(conn, "execution", 2)
+        db.push_report(
+            conn,
+            id="execution",
+            project="p",
+            title="Execution",
+            risk="low",
+            body=None,
+            body_supplied=False,
+            plan="## New plan\nLater replacement text.",
+            expected_version=2,
+        )
+        assert db.get_trace(conn, "execution", 3) == before
+    for path in ("/r/execution?tab=execution", "/r/execution/v/2?tab=execution"):
+        response = client.get(path)
+        assert "Original approved text." in response.text
+        assert "Later replacement text." not in response.text
+        assert "Plan used for this implementation" in response.text
+        assert "Original plan revision 1" in response.text
+        assert "Attached to version 2" in response.text and "bound-commit" in response.text
+        assert 'href="/r/execution?tab=plan">Current plan revision 3</a>' in response.text
+        assert "older plan" in response.text
+        assert "all steps covered" not in response.text.lower()
+    plan = client.get("/r/execution?tab=plan").text
+    assert 'name="target" value="plan"' in plan
+    assert 'name="revision" value="3"' in plan
+
+
+def test_execution_provenance_and_unknown_telemetry_are_explicit(client, settings):
+    runs = [
+        {
+            "id": "recording",
+            "agent": "codex",
+            "origin": "recorded",
+            "source_format": "jsonl",
+            "source_version": "1.2",
+            "coverage": "partial",
+            "warnings": ["Missing earlier turns."],
+        },
+        {
+            "id": "manual",
+            "agent": "other",
+            "origin": "reconstructed",
+            "source_format": "manual",
+            "coverage": "unknown",
+            "warnings": [],
+            "basis": "Rebuilt from a human note.",
+        },
+    ]
+    events = [
+        {
+            "id": "done",
+            "run_id": "recording",
+            "ordinal": 1,
+            "kind": "tool",
+            "title": "Check command",
+            "status": "completed",
+            "model": "trace-model",
+            "started_at": "2026-10-25T10:00:00Z",
+            "ended_at": "2026-10-25T10:00:02Z",
+            "exit_code": 0,
+        },
+        {
+            "id": "failed",
+            "run_id": "recording",
+            "ordinal": 2,
+            "kind": "tool",
+            "title": "Failed command",
+            "status": "failed",
+            "exit_code": 2,
+            "truncated": True,
+        },
+        {
+            "id": "running",
+            "run_id": "recording",
+            "ordinal": 3,
+            "kind": "tool",
+            "title": "Active command",
+            "status": "running",
+            "started_at": "2026-10-25T10:00:03Z",
+        },
+        {
+            "id": "note",
+            "run_id": "manual",
+            "ordinal": 1,
+            "kind": "summary",
+            "title": "Human note",
+            "status": "unknown",
+        },
+    ]
+    _seed_execution(settings, trace=_viewer_trace(runs=runs, events=events))
+    page = client.get("/r/execution?tab=execution").text
+    for expected in (
+        "Imported recording (uploader-supplied)",
+        "Agent-written reconstruction",
+        "Missing earlier turns.",
+        "Coverage: partial",
+        "Coverage: unknown",
+        "Rebuilt from a human note.",
+        "trace-model",
+        "jsonl",
+        "1.2",
+        "Not recorded",
+        "Duration: 2 s",
+        "failed",
+        "running",
+        "Truncated",
+        "Exit code",
+        ">2</",
+        "not necessarily individual model API requests",
+        "No plan was bound",
+    ):
+        assert expected in page
+    for misleading in (
+        "LATEST_AGENT",
+        "LATEST_MODEL",
+        "https://latest.example/session",
+        "tests passed",
+    ):
+        assert misleading not in page
+    assert "does not prove" in page and "server authentication" in page
+    assert page.index("Capture source: jsonl") < page.index('<div class="execution-layout')
+    assert page.index("Missing earlier turns.") < page.index('<div class="execution-layout')
+    for event_id in ("failed", "running", "note"):
+        event_html = page.split(f'id="vf_trace_{event_id}"')[1].split("</details>")[0]
+        assert "Duration: Not recorded" in event_html
+
+
+def test_execution_tree_respects_explicit_parentage_and_event_order(client, settings):
+    base_run = _viewer_trace().runs[0].model_dump()
+    runs = [
+        base_run,
+        base_run | {"id": "nested", "parent_run_id": "recording", "parent_event_id": "parent"},
+        base_run | {"id": "run-child", "parent_run_id": "nested"},
+        base_run | {"id": "unlinked"},
+    ]
+    events = [
+        {
+            "id": "later",
+            "run_id": "recording",
+            "ordinal": 9,
+            "parent_id": "parent",
+            "kind": "tool",
+            "title": "Later child",
+            "status": "unknown",
+        },
+        {
+            "id": "parent",
+            "run_id": "recording",
+            "ordinal": 1,
+            "kind": "assistant",
+            "title": "Parent step",
+            "status": "unknown",
+        },
+        {
+            "id": "earlier",
+            "run_id": "recording",
+            "ordinal": 3,
+            "parent_id": "parent",
+            "kind": "tool",
+            "title": "Earlier child",
+            "status": "unknown",
+        },
+        *[
+            {
+                "id": f"event-{run}",
+                "run_id": run,
+                "ordinal": 1,
+                "kind": "assistant",
+                "title": run,
+                "status": "unknown",
+            }
+            for run in ("nested", "run-child", "unlinked")
+        ],
+    ]
+    _seed_execution(settings, trace=_viewer_trace(runs=runs, events=events))
+    response = client.get("/r/execution?tab=execution")
+    tree = response.context["execution_tree"]
+    assert [node["run"].id for node in tree] == ["recording", "unlinked"]
+    parent = tree[0]["children"][0]
+    assert parent["event"].id == "parent"
+    assert [node["event"].id for node in parent["children"][:2]] == ["earlier", "later"]
+    assert parent["children"][2]["run"].id == "nested"
+    assert parent["children"][2]["children"][-1]["run"].id == "run-child"
+    assert response.text.index('id="vf_trace_earlier"') < response.text.index('id="vf_trace_later"')
+    assert '<details class="execution-node" id="vf_trace_parent">' in response.text
+    assert 'href="#vf_trace_parent"' in response.text
+    assert "separate roots" in response.text and "cross-run causality" in response.text
+
+
+def test_execution_fields_are_plain_text_and_bound_plan_uses_safe_renderer(client, settings):
+    hostile = "</summary><script>alert(1)</script> javascript:alert(2) /private/session.jsonl"
+    run = _viewer_trace().runs[0].model_dump() | {
+        "source_format": "javascript:evil",
+        "warnings": [hostile],
+    }
+    event = _viewer_trace().events[0].model_dump() | {
+        "title": hostile,
+        "input": hostile,
+        "output": '<img src="https://evil.example/pixel" onerror="evil()">',
+        "explanation": hostile,
+        "source_ref": "javascript:evil /private/session.jsonl",
+        "model": hostile,
+    }
+    _seed_execution(
+        settings, workflow="plan_first", trace=_viewer_trace(runs=[run], events=[event])
+    )
+    with closing(db.connect(settings.database_url)) as conn:
+        conn.execute(
+            "UPDATE versions SET plan = %s WHERE report_id = 'execution' AND version = 1",
+            ("## Original\n**Safe bold**\n\n<script>evil()</script>\n\n[bad](javascript:evil)",),
+        )
+    page = client.get("/r/execution?tab=execution").text
+    assert "&lt;/summary&gt;&lt;script&gt;alert(1)&lt;/script&gt;" in page
+    assert "&lt;img src=&#34;https://evil.example/pixel&#34;" in page
+    assert "<strong>Safe bold</strong>" in page and "&lt;script&gt;evil()&lt;/script&gt;" in page
+    for forbidden in (
+        "<script>alert",
+        "<script>evil",
+        '<img src="https://evil.example',
+        'href="javascript:',
+        'href="/private',
+        'src="/private',
+    ):
+        assert forbidden not in page
 
 
 def test_plan_template_is_read_only(client):

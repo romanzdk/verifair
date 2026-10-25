@@ -1,0 +1,129 @@
+{
+  "info": {
+    "id": "ses_parent",
+    "projectID": "prj_synthetic",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1792886400001,
+      "updated": 1792886401001
+    },
+    "location": {
+      "directory": "/synthetic/project"
+    },
+    "title": "PRIVATE_TITLE"
+  },
+  "messages": [
+    {
+      "id": "msg_user",
+      "type": "user",
+      "text": "NEVER_PROMPT",
+      "time": {
+        "created": 1792886400000
+      }
+    },
+    {
+      "id": "msg_first",
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "model-test",
+        "providerID": "synthetic"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Visible answer api_key=SECRET_TEXT",
+          "native": {
+            "encrypted": "NEVER_NATIVE"
+          }
+        },
+        {
+          "type": "reasoning",
+          "text": "Exposed summary Bearer SECRET_REASON",
+          "native": {
+            "signature": "NEVER_SIGNATURE"
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_shell",
+          "name": "shell",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "echo token=SECRET_COMMAND",
+              "workdir": "/synthetic/work",
+              "env": {
+                "TOKEN": "NEVER_ENV"
+              }
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "output password=SECRET_OUTPUT"
+              },
+              {
+                "type": "file",
+                "uri": "data:image/png;base64,NEVER_IMAGE",
+                "mime": "image/png"
+              }
+            ],
+            "metadata": {
+              "exit": 0,
+              "private": "NEVER_METADATA"
+            }
+          },
+          "time": {
+            "created": 1792886400002,
+            "ran": 1792886400022,
+            "completed": 1792886400072
+          }
+        }
+      ],
+      "time": {
+        "created": 1792886400001,
+        "streamed": 1792886400021,
+        "completed": 1792886400081
+      },
+      "retry": {
+        "attempt": 1,
+        "at": 1792886399991,
+        "error": {
+          "type": "unknown",
+          "message": "NEVER_RETRY_ERROR"
+        }
+      }
+    },
+    {
+      "id": "msg_compact",
+      "type": "compaction",
+      "status": "completed",
+      "reason": "auto",
+      "summary": "Compact summary secret=SECRET_COMPACT",
+      "model": {
+        "id": "model-test",
+        "providerID": "synthetic"
+      },
+      "metadata": {
+        "keepID": "msg_first"
+      },
+      "native": {
+        "messages": [
+          "NEVER_HIDDEN_CONTEXT"
+        ]
+      },
+      "time": {
+        "created": 1792886400091
+      }
+    }
+  ]
+}

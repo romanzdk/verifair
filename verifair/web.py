@@ -30,6 +30,7 @@ from verifair.render import (
     split_sections,
     threads_by_section,
 )
+from verifair.traces import execution_tree
 
 log = logging.getLogger("verifair")
 router = APIRouter()
@@ -846,8 +847,31 @@ def _report_page(id, request, conn, user, tab, version=None):
         version = db.latest_version(conn, id) if version is None else version
         if db.get_version(conn, id, version) is None:
             raise HTTPException(404, "version not found")
-        target = _selected_target(conn, report, version, tab)
+        target = (
+            "implementation" if tab == "execution" else _selected_target(conn, report, version, tab)
+        )
         ctx = _response_context(request, conn, id, user, target, version)
+        ctx["has_trace"] = next(v["has_trace"] for v in ctx["versions"] if v["version"] == version)
+        if tab == "execution":
+            trace = db.get_trace(conn, id, version)
+            bound_plan = (
+                db.get_version(conn, id, trace.binding.plan_revision)
+                if trace is not None and trace.binding.plan_revision is not None
+                else None
+            )
+            ctx |= {
+                "view_tab": "execution",
+                "selection_query": "?tab=execution",
+                "selected_url": f"{ctx['url']}?tab=execution",
+                "reviewable": False,
+                "trace": trace,
+                "execution_tree": execution_tree(trace.document) if trace else [],
+                "bound_plan_html": render_markdown(bound_plan["plan"]) if bound_plan else None,
+                "current_plan_revision": ctx["versions"][0]["plan_revision"],
+                "review_url": _document_url(
+                    report, "implementation", None if ctx["is_current"] else version
+                ),
+            }
         ctx["active_project"] = report["project"]
         return _page(request, conn, user, "report.html", ctx)
 

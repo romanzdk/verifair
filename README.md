@@ -36,6 +36,7 @@ verifair is a small web service where agents push markdown change-review reports
 - **Verdicts with rules.** Approve or request changes. Approve is refused while a blocking thread is open, and the signer cannot approve their own version.
 - **Versions.** The agent pushes a new version after feedback. Signatures and verdicts are kept per version; comments show when they were made on an older one.
 - **Plan first, when needed.** Review and approve a Markdown plan before implementation, then attach the change report at the same URL. Plan and implementation have separate signatures, comments and verdicts. Direct report submission still works.
+- **Optional execution evidence (Phase 3).** Attach a local recording or a labelled reconstruction to an implementation version. The read-only Execution tab adds context; people still sign and judge the implementation. See the [intended implemented contract and version-pinned capture recipes](docs/tracing.md).
 - **Built for agents.** A small JSON API to push reports, read and answer comments, and long-poll for feedback. Ships with an [agent skill](#agent-skill).
 - **An Inbox for people.** Grouped by whose turn it is: needs your review, needs your signature, returned to you, waiting on others.
 - **Two modes.** Local mode for one person or a small trusted group. Shared mode for a team behind an SSO proxy, with members, admins and per-member agent tokens.
@@ -176,6 +177,7 @@ Full reference: [docs/api.md](docs/api.md) (push, read, comments, wait, errors).
 | --- | --- |
 | [docs/api.md](docs/api.md) | Push a report, read it, read and answer comments, wait for feedback, errors, required sections, provenance |
 | [docs/reviewing.md](docs/reviewing.md) | Inbox and personal views, signing, blocking threads |
+| [docs/tracing.md](docs/tracing.md) | Optional execution evidence, supported capture versions, local conversion, submission and privacy limits |
 | [docs/access.md](docs/access.md) | Local and shared mode, members and admins, agent tokens, report ownership, moderation, switching from local to shared |
 | [docs/configuration.md](docs/configuration.md) | All environment variables |
 | [docs/deployment.md](docs/deployment.md) | Run from source, Docker, deploying behind a proxy, Postgres, backup and restore, upgrading an HTTP deployment |
