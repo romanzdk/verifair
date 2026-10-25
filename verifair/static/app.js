@@ -277,6 +277,15 @@ document.body.addEventListener("htmx:oobAfterSwap", (event) => {
 
 function revealComment() {
   const target = document.getElementById(window.location.hash.slice(1));
+  if (window.location.hash.startsWith("#vf_trace_")) {
+    let disclosure = target?.closest("details");
+    while (disclosure) {
+      disclosure.open = true;
+      disclosure = disclosure.parentElement?.closest("details");
+    }
+    target?.scrollIntoView();
+    return;
+  }
   const thread = target?.closest("details.thread");
   if (thread) {
     thread.open = true;

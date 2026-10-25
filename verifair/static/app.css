@@ -500,6 +500,35 @@ body.has-verdict .side { padding-bottom: 112px; }
 .verdict .mine { color: var(--s-approved); font-weight: 600; }
 .app-main > .name-prompt { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; margin: 0; border-radius: 0; }
 
+.execution { overflow-wrap: anywhere; }
+.execution-binding, .execution-fields dl { margin: 12px 0; }
+.execution dt { color: var(--text-muted); font-size: 12px; margin-top: 8px; }
+.execution dd { margin: 0; min-width: 0; }
+.execution-source { padding: 8px 0; border-top: 1px solid var(--border); }
+.execution-warning { color: var(--warn-text); }
+.execution-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
+.execution-layout > * { min-width: 0; }
+.execution-plan { padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-side); }
+.execution summary { cursor: pointer; padding: 6px 4px; border-radius: 4px; }
+.execution summary:hover { background: var(--bg-hover); }
+.execution-plan > summary { font-weight: 600; }
+.execution-plan .content { overflow-wrap: anywhere; }
+.execution-plan .content h2 { display: block; }
+.execution-tree ul { list-style: none; padding: 0; margin: 0; }
+.execution-tree ul ul { padding-left: 6px; margin-left: 2px; border-left: 1px solid var(--border); }
+.execution-node { min-width: 0; border-top: 1px solid var(--border); }
+.execution-node:target { outline: 2px solid var(--accent); outline-offset: -2px; }
+.execution-fields { padding: 4px; }
+.execution-fields pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; max-width: 100%; }
+.execution-badge { display: block; color: var(--text-muted); font-size: 12px; }
+.execution-kind { color: var(--text-muted); }
+.execution-status { font-weight: 600; }
+@media (min-width: 1280px) {
+  .execution-layout.with-plan { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .execution-plan { grid-column: 2; grid-row: 1; }
+  .execution-tree { grid-column: 1; grid-row: 1; }
+}
+
 @media (max-width: 720px) {
   .head, .main { padding-left: 16px; padding-right: 16px; }
   .verdict { padding: 12px 16px; }

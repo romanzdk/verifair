@@ -1,0 +1,47 @@
+{
+  "info": {
+    "id": "ses_child",
+    "projectID": "prj_synthetic",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1792886400001,
+      "updated": 1792886401001
+    },
+    "location": {
+      "directory": "/synthetic/project"
+    },
+    "title": "PRIVATE_TITLE",
+    "parentID": "ses_parent"
+  },
+  "messages": [
+    {
+      "id": "msg_child",
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "model-test",
+        "providerID": "synthetic"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Child answer"
+        }
+      ],
+      "time": {
+        "created": 1792886400001,
+        "streamed": 1792886400021,
+        "completed": 1792886400081
+      }
+    }
+  ]
+}

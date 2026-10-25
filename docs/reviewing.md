@@ -28,7 +28,7 @@ Your id is at the bottom of the sidebar, with a button to copy it. Give it to yo
 
 Direct artifact submissions open on **Report** at `/r/<id>`. When the selected version has an attached plan, use **Plan** (`/r/<id>?tab=plan`) to read it, then return to **Report** to sign, comment or give a verdict. In this workflow the plan is read-only context: it has no separate comments, signing controls or independent approval. A report verdict is not separate approval of the plan.
 
-Version history shows the plan saved with each version, including at `/r/<id>/v/<n>?tab=plan`. Replacing or removing a plan leaves older snapshots intact. History links keep Plan selected when the destination has a plan; a version without one opens Report and has no document tabs. Report/Plan links work with Tab/Enter, browser Back and JavaScript disabled. Comment deep links open Report.
+Version history shows the plan saved with each version, including at `/r/<id>/v/<n>?tab=plan`. Replacing or removing a plan leaves older snapshots intact. History links keep Plan selected when the destination has a plan; a version without one opens Report. Execution is available separately when evidence is attached, as described below. Report/Plan links work with Tab/Enter, browser Back and JavaScript disabled. Comment deep links open Report.
 
 Attaching, replacing or removing a plan creates a new unsigned report version, even if the implementation body is unchanged. Sign that version on Report before anyone can give a verdict. Earlier signatures and verdicts remain in history and do not approve the new version. See [Optional plan](api.md#optional-plan) for submission.
 
@@ -48,6 +48,20 @@ An unresolved blocking plan thread pauses implementation attachment, updates, si
 Changing a plan after implementation exists preserves the body and its commit in a new snapshot. The plan must be approved again before implementation review can proceed, and that new snapshot needs a fresh implementation signature and verdict. Every body-containing snapshot has a separate implementation review, even when its body was inherited unchanged.
 
 History pages show the exact stored Markdown and the signature and verdicts associated with that document revision. Earlier threads may appear as stale concerns; roots from later revisions are excluded. Threads show their live replies, resolution and blocking state, rather than a frozen view of feedback at snapshot creation. Prior and superseded verdicts remain available. **Current review** status, when shown, describes today's gate separately from historical content. Metadata such as title and links keeps its latest value; only document Markdown is versioned.
+
+## Execution
+
+This section describes the intended implemented Phase 3 behavior. When the selected snapshot has evidence, **Execution** appears beside **Report** (or **Implementation**) and **Plan** when present. Open `/r/<id>?tab=execution` or a historical `/r/<id>/v/<n>?tab=execution`. History keeps Execution selected even for versions without evidence. An explicit Execution URL without evidence says **No execution trace attached to this version** and links to the document; it never silently selects another tab. Reports without evidence otherwise keep their normal navigation and review behavior.
+
+Execution is read-only context, with a link back to the implementation's review controls. It has no signing, verdict, reviewer-management or comment forms. Presence, failure or missing coverage in a trace never changes approval automatically. To raise a concern, return to the implementation; plan concerns still belong on Plan. The existing plan-first approval gate and reopened-blocker holds remain in force.
+
+Start with the attachment version, reported commit, original plan revision when present, capture source and coverage warnings. A reported commit is the uploader's claim, not proof that those bytes ran. Each run is labelled **Imported recording (uploader-supplied)** or **Agent-written reconstruction**; neither label authenticates its source. A completed call does not prove correct behavior or a passing test. Assistant steps are not necessarily individual model API requests.
+
+Expand the indented call tree to read kind, title, status and known timing. Details show any recorded plain-text input/output, explanation, exit code and source reference. Missing data says **Not recorded**, rather than implying zero duration or success. Parent links appear only when the source explicitly provides them; separate roots and file order do not establish cross-run causality. Stable event links reveal their ancestors when opened.
+
+**Plan used for this implementation** shows the exact bound plan, not today's latest plan. On desktop it can sit beside the tree; on mobile it precedes it. A later revision is linked separately with an explanation that the evidence was attached against the older plan. A plan-only update can therefore show an older trace binding alongside a newer current plan. No plan is a valid state, and there is no automatic score claiming all plan steps were covered.
+
+The tree expands with keyboard controls, visible focus and text status labels, and remains usable without JavaScript. It supports light/dark themes and 320px layouts; long output wraps or scrolls inside its panel. For local capture, submission and privacy limits, see [tracing.md](tracing.md). Evidence has the report's existing readers; removing it from a new version does not erase older evidence.
 
 ## Request a review
 

@@ -2,6 +2,7 @@
   {% set on_plan = view_tab|default('report') == 'plan' %}
   {% set readonly_plan = on_plan and not plan_first %}
   {% set anchor_url = shown_url if readonly_plan else '' %}
+  {% if view_tab != 'execution' %}
   {% with s = open_count - blocking_count %}<p class="dismiss" id="vf_blocking">{{ blocking_count }} blocking · {{ s }} suggestion{{ "s" if s != 1 }}</p>{% endwith %}
   <h4>On this page</h4>
   <ul>
@@ -34,8 +35,9 @@
     {% for v in verdict_history %}<li>{{ v.reviewer_name }} {{ 'approved' if v.verdict == 'approve' else 'requested changes on' }} <a href="{{ v.url }}">{{ v.label }}</a>{% if v.summary %} · {{ v.summary }}{% endif %}</li>{% endfor %}
   </ul></details>
   {% endif %}
+  {% endif %}
   <h4>Versions</h4>
   <ul>
-    {% for v in versions %}<li{% if v.version == version %} class="on"{% endif %}><a href="{{ url }}{% if v.version != current_version %}/v/{{ v.version }}{% endif %}{% if plan_first %}{{ selection_query }}{% elif on_plan and v.plan is not none %}?tab=plan{% endif %}">v{{ v.version }}{% if plan_first %} · Plan revision {{ v.plan_revision }}{% if v.body is none %} · No implementation{% endif %}{% endif %} · {{ v.created_at|date }}{% if v.commit %} · <code>{{ v.commit[:7] }}</code>{% endif %}</a></li>{% endfor %}
+    {% for v in versions %}<li{% if v.version == version %} class="on"{% endif %}><a href="{{ url }}{% if v.version != current_version %}/v/{{ v.version }}{% endif %}{% if view_tab == 'execution' or plan_first %}{{ selection_query }}{% elif on_plan and v.plan is not none %}?tab=plan{% endif %}">v{{ v.version }}{% if plan_first %} · Plan revision {{ v.plan_revision }}{% if v.body is none %} · No implementation{% endif %}{% endif %} · {{ v.created_at|date }}{% if v.commit %} · <code>{{ v.commit[:7] }}</code>{% endif %}</a></li>{% endfor %}
   </ul>
 </aside>

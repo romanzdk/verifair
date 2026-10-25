@@ -91,9 +91,25 @@ Every push creates a global snapshot, even with identical text. Plan revision is
 
 An open blocking plan thread, including an old unresolved concern, pauses attachment and implementation signing/verdicts. Reopening or promoting a suggestion to blocking also pauses it. Resolving or making it non-blocking restores approval for an otherwise approved unchanged plan. Changed plans always need fresh approval. Preserve all prior history.
 
+### Optional execution evidence
+
+The intended implemented Phase 3 contract accepts normalized schema-v1 evidence with an implementation body. Tracing is optional; all no-trace recipes above remain valid. Read [tracing.md](../../docs/tracing.md) for pinned Claude Code, Codex, OpenCode v2 and Pi formats, local conversion flags, privacy limits, a synthetic reconstruction and safe JSON/curl assembly. Native provider records are not accepted by the report API.
+
+Use only explicitly selected local captures; never discover sessions, start an agent or upload evidence automatically. The importer writes local JSON, not a report. Default conversion excludes prompts, prose, arguments/results and rationale. `--include-details` is an explicit choice with incomplete redaction. Inspect the normalized output for secrets and confidential content before including it in the normal report request; names and timestamps can also be sensitive. Never print tokens. Evidence shares the report's readers and historical copies survive removal from a later version.
+
+Recorded runs are uploader-supplied recordings, not authenticated telemetry. Reconstructed runs require `origin: reconstructed`, `source_format: manual` and a nonblank `basis`; never invent observed tools, outputs, timing, models, exit codes, token usage or parentage. Reconstructed tool status stays `unknown`. Completion is not proof that tests passed. No hidden thinking is captured or reconstructed.
+
+- On artifact creation with body, an object attaches evidence; omission/null means none. A plan-first creation without body rejects an object and accepts omission/null.
+- With every newly supplied implementation body, an object attaches evidence to that snapshot; omission/null clears evidence for that new implementation. Resend the body, even identical bytes, to replace or remove evidence later.
+- A plan-only update after implementation exists must omit `trace`; it preserves evidence with its original attachment version, plan revision and claimed commit. Explicit null or an object is rejected. Do not send a trace-only update.
+- Before an update carrying a trace object, reread metadata and include `expected_version` even in artifact flow. All plan-first updates retain their mandatory guard and current-plan approval gate. A stale/gate 409 needs a fresh state read, never a blind retry or bypass.
+- The normalized document allows 16 runs, 1000 events, depth 16 and 524288 UTF-8 bytes; the whole request, including body and plan, stays within 1048576 bytes. Oversize combined requests get 413. Select fewer events explicitly with `--last-events`, or reduce details; never silently discard evidence to fit.
+
+Adding, replacing or removing evidence makes a fresh unsigned implementation snapshot. Plan signatures remain tied to exact revisions. Recorded failures, coverage and trace presence never change computed approval automatically. Execution is read-only, not a comment/signature/verdict target; use the implementation's existing controls for concerns and signing. Targets remain only `plan` and `implementation`.
+
 ### Read exact content and identity
 
-`GET /api/reports/$ID/versions/$N` returns `{version, created_at, commit, body, plan, plan_revision}` with exact immutable Markdown. Metadata GET omits Markdown and adds `workflow`, `stage`, `implementation_status`, and `plan_review` (`revision/status/signed_by/signed_at/open_blocking/verdicts`). Versions add `has_implementation` and `plan_revision`. Legacy signature/verdict fields describe implementation; before attachment they are null/empty. Plan history is separate under `plan_review`; verdict `current` flags use that target's revision.
+`GET /api/reports/$ID/versions/$N` returns `{version, created_at, commit, body, plan, plan_revision, trace}` with exact immutable Markdown. `trace` is null or `{binding: {version, plan_revision, commit}, document: TraceDocument}`; the server sets its original binding. Metadata GET omits Markdown and full traces and adds `workflow`, `stage`, `implementation_status`, and `plan_review` (`revision/status/signed_by/signed_at/open_blocking/verdicts`). Versions add `has_implementation`, `plan_revision` and `has_trace`. Legacy signature/verdict fields describe implementation; before attachment they are null/empty. Plan history is separate under `plan_review`; verdict `current` flags use that target's revision.
 
 Use top-level `status` for the overall gate. It can be `unsigned`, `awaiting_review`, `changes_requested`, `awaiting_implementation` or `approved`; implementation can still say approved while a reopened plan pauses the overall review. History keeps exact documents and revision-associated live feedback; later replies and current resolution/blocking state on older included threads are live, not a frozen replay. Report metadata remains latest-value.
 

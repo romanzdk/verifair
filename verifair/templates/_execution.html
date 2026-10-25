@@ -1,0 +1,69 @@
+{% macro tree(nodes) %}
+<ul>
+  {% for node in nodes %}
+  <li>
+    {% if node.run %}
+    {% set run = node.run %}
+    <details class="execution-node" id="vf_run_{{ run.id }}" open>
+      <summary><b>Run {{ run.id }}</b> · {{ run.agent }}</summary>
+    {% else %}
+    {% set event = node.event %}
+    <details class="execution-node" id="vf_trace_{{ event.id }}">
+      <summary><span class="execution-kind">{{ event.kind }}</span> <b>{{ event.title }}</b> · <span class="execution-status">{{ event.status }}</span> · Duration: {{ node.duration if node.duration is not none else 'Not recorded' }}</summary>
+      <div class="execution-fields">
+        <p><a href="#vf_trace_{{ event.id }}">Link to event {{ event.id }}</a></p>
+        <dl>
+          <dt>Model</dt><dd>{{ event.model if event.model is not none else 'Not recorded' }}</dd>
+          <dt>Started</dt><dd>{{ event.started_at.isoformat() if event.started_at is not none else 'Not recorded' }}</dd>
+          <dt>Ended</dt><dd>{{ event.ended_at.isoformat() if event.ended_at is not none else 'Not recorded' }}</dd>
+          <dt>Exit code</dt><dd>{{ event.exit_code if event.exit_code is not none else 'Not recorded' }}</dd>
+          {% for field, label in [('input', 'Input'), ('output', 'Output'), ('explanation', 'Explanation'), ('source_ref', 'Source reference')] %}
+          <dt>{{ label }}</dt><dd>{% if event[field] is not none %}<pre tabindex="0" aria-label="{{ label }} for {{ event.title }}">{{ event[field] }}</pre>{% else %}Not recorded{% endif %}</dd>
+          {% endfor %}
+        </dl>
+        {% if event.truncated %}<p class="execution-warning">Truncated: some event content was omitted.</p>{% endif %}
+      </div>
+    {% endif %}
+      {% if node.children %}{{ tree(node.children) }}{% endif %}
+    </details>
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+<div class="execution" id="vf_execution">
+  <p class="dismiss">Read-only context. <a href="{{ review_url }}">Review {{ 'Implementation' if plan_first else 'Report' }}</a>.</p>
+  {% if trace is none %}
+  <p class="banner">No execution trace attached to this version.</p>
+  {% else %}
+  <dl class="execution-binding">
+    <dt>Attachment</dt><dd>Attached to version {{ trace.binding.version }}</dd>
+    <dt>Reported commit</dt><dd><code>{{ trace.binding.commit if trace.binding.commit is not none else 'Not recorded' }}</code></dd>
+    <dt>Original plan</dt><dd>{% if trace.binding.plan_revision is not none %}Original plan revision {{ trace.binding.plan_revision }}{% else %}No plan was bound to this implementation.{% endif %}</dd>
+  </dl>
+  {% for run in trace.document.runs %}
+  <div class="execution-source">
+    <p><b>Run {{ run.id }}</b> · {{ run.agent }}<span class="execution-badge">{{ 'Imported recording (uploader-supplied)' if run.origin == 'recorded' else 'Agent-written reconstruction' }}</span></p>
+    <p>Capture source: {{ run.source_format }} · Source version: {{ run.source_version if run.source_version is not none else 'Not recorded' }}</p>
+    <p class="execution-warning">Coverage: {{ run.coverage }}</p>
+    {% for warning in run.warnings %}<p class="execution-warning">{{ warning }}</p>{% endfor %}
+    {% if run.basis is not none %}<p>Reconstruction basis: {{ run.basis }}</p>{% endif %}
+  </div>
+  {% endfor %}
+  <p class="execution-warning">Coverage is partial or unknown. These provenance labels do not imply server authentication of the capture. Recorded tool completion does not prove that a feature or test is correct.</p>
+  <p class="dismiss">Assistant steps are not necessarily individual model API requests. Unlinked sessions are separate roots; file order does not establish cross-run causality.</p>
+  <div class="execution-layout{% if bound_plan_html is not none %} with-plan{% endif %}">
+    {% if bound_plan_html is not none %}
+    <details class="execution-plan" open>
+      <summary>Plan used for this implementation</summary>
+      <p class="dismiss">Original plan revision {{ trace.binding.plan_revision }}.</p>
+      {% if current_plan_revision is not none and current_plan_revision != trace.binding.plan_revision %}
+      <p class="dismiss">Execution was attached against an older plan. <a href="{{ url }}?tab=plan">Current plan revision {{ current_plan_revision }}</a>.</p>
+      {% endif %}
+      <article class="content">{{ bound_plan_html|safe }}</article>
+    </details>
+    {% endif %}
+    <div class="execution-tree" aria-label="Execution call tree">{{ tree(execution_tree) }}</div>
+  </div>
+  {% endif %}
+</div>

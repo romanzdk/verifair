@@ -21,6 +21,7 @@ import pytest
         "verdict_draft_survives_gate_refresh",
         "resolved_comment_deep_link",
         "load_reveals_fragment_and_focuses_autofocus",
+        "execution_fragment_reveals_all_ancestors",
     ],
 )
 def test_actual_javascript_anchor_ranges(case):

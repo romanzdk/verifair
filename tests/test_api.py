@@ -95,7 +95,8 @@ def test_push_plan_presence_semantics(client, settings):
     metadata = client.get("/api/reports/prorate", headers=H).json()
     assert "plan" not in metadata and "body" not in metadata
     assert all(
-        set(v) == {"version", "created_at", "commit", "has_implementation", "plan_revision"}
+        set(v)
+        == {"version", "created_at", "commit", "has_implementation", "plan_revision", "has_trace"}
         for v in metadata["versions"]
     )
 
@@ -1441,7 +1442,8 @@ def _approve_plan(settings, revision=1):
         )
 
 
-def test_plan_first_api_roundtrip(strict_client, settings):
+@pytest.mark.parametrize("with_trace", [False, True], ids=["legacy", "trace"])
+def test_plan_first_api_roundtrip(strict_client, settings, with_trace):
     plan = "  # Návrh 🦊\r\n\nOne paragraph.  \n"
     created = _plan_push(strict_client, workflow="plan_first", plan=plan)
     assert (created.status_code, created.json()) == (
@@ -1472,6 +1474,7 @@ def test_plan_first_api_roundtrip(strict_client, settings):
         "body": None,
         "plan": plan,
         "plan_revision": 1,
+        "trace": None,
     }
     _approve_plan(settings)
     ready = strict_client.get("/api/reports/prorate", headers=H).json()
@@ -1480,7 +1483,10 @@ def test_plan_first_api_roundtrip(strict_client, settings):
         "awaiting_implementation",
     )
     body = "## Verification\nPassed.\n\n## Rollback\nRevert.\n\n## Security impact\nNone.\n"
-    attached = _plan_push(strict_client, expected_version=1, body=body, commit="abcdef0")
+    evidence = {"trace": _trace_document()} if with_trace else {}
+    attached = _plan_push(
+        strict_client, expected_version=1, body=body, commit="abcdef0", **evidence
+    )
     assert attached.json() == created.json() | {"version": 2}
     metadata = strict_client.get("/api/reports/prorate", headers=H).json()
     assert (metadata["stage"], metadata["status"], metadata["implementation_status"]) == (
@@ -1494,6 +1500,16 @@ def test_plan_first_api_roundtrip(strict_client, settings):
     assert metadata["plan_review"]["verdicts"][0]["target"] == "plan"
     assert metadata["verdicts"] == []
     second = strict_client.get("/api/reports/prorate/versions/2", headers=H).json()
+    envelope = (
+        {
+            "binding": {"version": 2, "plan_revision": 1, "commit": "abcdef0"},
+            "document": _trace_document(),
+        }
+        if with_trace
+        else None
+    )
+    assert second["trace"] == envelope
+    assert [v["has_trace"] for v in metadata["versions"]] == [False, with_trace]
     assert (second["body"], second["plan"], second["commit"], second["plan_revision"]) == (
         body,
         plan,
@@ -1527,6 +1543,18 @@ def test_plan_first_api_roundtrip(strict_client, settings):
     with closing(db.connect(settings.database_url)) as conn:
         db.resolve_thread(conn, "prorate", blocker["id"])
     assert strict_client.get("/api/reports/prorate", headers=H).json()["status"] == "approved"
+    assert (
+        _comment(strict_client, parent_id=blocker["id"], target="plan", revision=1).status_code
+        == 201
+    )
+    reopened = strict_client.get("/api/reports/prorate", headers=H).json()
+    assert (reopened["status"], reopened["implementation_status"]) == (
+        "changes_requested",
+        "approved",
+    )
+    held = _plan_push(strict_client, expected_version=2, body=body, **evidence)
+    assert held.status_code == 409
+    assert strict_client.get("/api/reports/prorate", headers=H).json() == reopened
     revised = _plan_push(strict_client, expected_version=2, plan="# Revised\nDifferent.")
     assert revised.json()["version"] == 3
     latest = strict_client.get("/api/reports/prorate", headers=H).json()
@@ -1539,6 +1567,7 @@ def test_plan_first_api_roundtrip(strict_client, settings):
     assert latest["verdicts"][0]["current"] is False
     assert strict_client.get("/api/reports/prorate/versions/1", headers=H).json() == first
     third = strict_client.get("/api/reports/prorate/versions/3", headers=H).json()
+    assert third["trace"] == envelope
     assert (third["body"], third["commit"]) == (body, "abcdef0")
     assert strict_client.get("/api/reports/prorate/versions/99", headers=H).status_code == 404
     assert strict_client.get("/api/reports/missing/versions/1", headers=H).status_code == 404
@@ -1984,3 +2013,336 @@ def test_push_notification_keeps_its_snapshot_during_concurrent_push(
     assert latest["current_version"] == 3
     if workflow == "plan_first":
         assert (latest["stage"], latest["plan_review"]["revision"]) == ("plan", 3)
+
+
+def _trace_document():
+    return {
+        "schema_version": 1,
+        "runs": [
+            {
+                "id": "run-1",
+                "agent": "codex",
+                "origin": "recorded",
+                "source_format": "codex-jsonl",
+                "coverage": "partial",
+                "warnings": ["Only the supplied records were captured."],
+            }
+        ],
+        "events": [
+            {
+                "id": "event-1",
+                "run_id": "run-1",
+                "ordinal": 1,
+                "kind": "tool",
+                "title": "pytest",
+                "status": "failed",
+                "exit_code": 1,
+                "output": "One failed check is evidence, not a review verdict.",
+                "truncated": False,
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize("initial", ["omitted", "null", "object"])
+@pytest.mark.parametrize("replacement", ["omitted", "null", "object"])
+def test_trace_artifact_write_matrix(client, initial, replacement):
+    values = {"omitted": {}, "null": {"trace": None}, "object": {"trace": _trace_document()}}
+    created = push(client, commit="abcdef0", **values[initial])
+    assert (created.status_code, created.json()) == (
+        201,
+        {"id": "prorate", "version": 1, "url": "http://localhost:8000/r/prorate"},
+    )
+    first = client.get("/api/reports/prorate/versions/1", headers=H).json()
+    assert first["trace"] == (
+        {"binding": {"version": 1, "commit": "abcdef0"}, "document": _trace_document()}
+        if initial == "object"
+        else None
+    )
+    update = push(client, id="prorate", expected_version=1, **values[replacement])
+    assert (update.status_code, update.json()) == (201, created.json() | {"version": 2})
+    second = client.get("/api/reports/prorate/versions/2", headers=H).json()
+    assert second["trace"] == (
+        {"binding": {"version": 2}, "document": _trace_document()}
+        if replacement == "object"
+        else None
+    )
+    assert client.get("/api/reports/prorate/versions/1", headers=H).json() == first
+    metadata = client.get("/api/reports/prorate", headers=H).json()
+    assert [v["has_trace"] for v in metadata["versions"]] == [
+        initial == "object",
+        replacement == "object",
+    ]
+    assert metadata["status"] == "unsigned"
+    assert all(
+        set(v)
+        == {"version", "created_at", "commit", "has_implementation", "plan_revision", "has_trace"}
+        for v in metadata["versions"]
+    )
+    assert "events" not in json.dumps(metadata) and "Only the supplied" not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize("initial", [{}, {"trace": None}], ids=["omitted", "null"])
+def test_trace_plan_first_initial_empty_evidence(client, initial):
+    response = _plan_push(client, workflow="plan_first", plan="# Plan", **initial)
+    assert response.status_code == 201
+    assert client.get("/api/reports/prorate/versions/1", headers=H).json()["trace"] is None
+
+
+@pytest.mark.parametrize("trace", [None, "object"], ids=["null", "object"])
+def test_trace_plan_only_explicit_evidence_rejected_atomically(client, settings, trace):
+    assert _plan_push(client, workflow="plan_first", plan="# Plan").status_code == 201
+    _approve_plan(settings)
+    assert (
+        _plan_push(
+            client, expected_version=1, body=SAMPLE, trace=_trace_document(), commit="abcdef0"
+        ).status_code
+        == 201
+    )
+    before = client.get("/api/reports/prorate", headers=H).json()
+    response = _plan_push(
+        client,
+        expected_version=2,
+        plan="# Changed",
+        title="Must not change",
+        trace=_trace_document() if trace else None,
+    )
+    assert (response.status_code, response.json()) == (
+        422,
+        {"detail": "trace requires supplied body"},
+    )
+    assert client.get("/api/reports/prorate", headers=H).json() == before
+    snapshot = client.get("/api/reports/prorate/versions/2", headers=H).json()
+    assert snapshot["trace"]["binding"] == {"version": 2, "plan_revision": 1, "commit": "abcdef0"}
+
+
+@pytest.mark.parametrize("replacement", [{}, {"trace": None}, "object"])
+def test_trace_plan_first_implementation_replacement(client, settings, replacement):
+    assert _plan_push(client, workflow="plan_first", plan="# Plan").status_code == 201
+    _approve_plan(settings)
+    assert (
+        _plan_push(client, expected_version=1, body=SAMPLE, trace=_trace_document()).status_code
+        == 201
+    )
+    if replacement == "object":
+        replacement = {"trace": _trace_document()}
+    assert _plan_push(client, expected_version=2, body=SAMPLE, **replacement).status_code == 201
+    latest = client.get("/api/reports/prorate/versions/3", headers=H).json()
+    assert latest["trace"] == (
+        {"binding": {"version": 3, "plan_revision": 1}, "document": _trace_document()}
+        if replacement.get("trace") is not None
+        else None
+    )
+
+
+def test_trace_write_guards_leave_report_unchanged(client, settings):
+    assert (
+        _plan_push(
+            client, workflow="plan_first", plan="# Plan", trace=_trace_document()
+        ).status_code
+        == 422
+    )
+    assert client.get("/api/reports/prorate", headers=H).status_code == 404
+    assert _plan_push(client, workflow="plan_first", plan="# Plan").status_code == 201
+    before = client.get("/api/reports/prorate", headers=H).json()
+    for changes, status in [
+        ({"expected_version": 1, "body": SAMPLE}, 409),
+        ({"expected_version": 99, "body": SAMPLE}, 409),
+        ({"expected_version": 1}, 422),
+    ]:
+        response = _plan_push(client, trace=_trace_document(), **changes)
+        assert response.status_code == status
+        assert client.get("/api/reports/prorate", headers=H).json() == before
+    assert push(client, id="artifact", trace=_trace_document()).status_code == 201
+    before = client.get("/api/reports/artifact", headers=H).json()
+    for changes, status in [({}, 422), ({"expected_version": 99}, 409)]:
+        assert push(client, id="artifact", trace=_trace_document(), **changes).status_code == status
+        assert client.get("/api/reports/artifact", headers=H).json() == before
+    assert push(client, id="artifact").status_code == 201
+    assert client.get("/api/reports/artifact/versions/2", headers=H).json()["trace"] is None
+
+
+@pytest.mark.parametrize("replacement", [{}, {"trace": None}, "object"])
+def test_trace_replacement_leaves_historical_review_immutable(client, settings, replacement):
+    assert push(client, trace=_trace_document()).status_code == 201
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    assert client.post("/r/prorate/sign", data={"version": 1}).status_code == 200
+    client.cookies.set("vf_id", "reviewer")
+    client.cookies.set("vf_name", "Reviewer")
+    assert (
+        client.post("/r/prorate/verdict", data={"verdict": "approve", "version": 1}).status_code
+        == 200
+    )
+    assert client.get("/api/reports/prorate", headers=H).json()["status"] == "approved"
+    first = client.get("/api/reports/prorate/versions/1", headers=H).json()
+    if replacement == "object":
+        replacement = {"trace": _trace_document()}
+    assert push(client, id="prorate", expected_version=1, **replacement).status_code == 201
+    metadata = client.get("/api/reports/prorate", headers=H).json()
+    assert (metadata["status"], metadata["signed_by"]) == ("unsigned", None)
+    assert metadata["verdicts"][0]["current"] is False
+    assert client.get("/api/reports/prorate/versions/1", headers=H).json() == first
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.get_signature(conn, "prorate", 1) is not None
+        assert db.get_signature(conn, "prorate", 2) is None
+
+
+@pytest.mark.parametrize(
+    "path,status",
+    [
+        ("prorate/versions/nope", 422),
+        ("prorate/versions/99", 404),
+        ("missing/versions/1", 404),
+        ("pro%00rate/versions/1", 404),
+    ],
+)
+def test_trace_snapshot_retains_error_statuses(client, path, status):
+    assert push(client, trace=_trace_document()).status_code == 201
+    assert client.get(f"/api/reports/{path}", headers=H).status_code == status
+    assert client.get("/api/reports/prorate/versions/1").status_code == 401
+    assert (
+        push(client, auth={}, id="prorate", expected_version=1, trace=_trace_document()).status_code
+        == 401
+    )
+
+
+def test_trace_shared_owner_and_authenticated_read_rules(shared_client, alice, bob, admin):
+    assert push(shared_client, auth=alice, trace=_trace_document()).status_code == 201
+    first = shared_client.get("/api/reports/prorate/versions/1", headers=alice).json()
+    before = shared_client.get("/api/reports/prorate", headers=alice).json()
+    for auth in (bob, admin):
+        assert shared_client.get("/api/reports/prorate/versions/1", headers=auth).json() == first
+        denied = push(
+            shared_client, auth=auth, id="prorate", expected_version=1, trace=_trace_document()
+        )
+        assert (denied.status_code, denied.json()) == (403, {"detail": NOT_OWNER})
+    injection = push(
+        shared_client, auth=alice, id="other", author_id="bob@example.com", trace=_trace_document()
+    )
+    assert (injection.status_code, injection.json()) == (
+        403,
+        {"detail": "author_id must be the token owner."},
+    )
+    assert shared_client.get("/api/reports/prorate", headers=alice).json() == before
+    assert push(shared_client, auth=H, id="local", trace=_trace_document()).status_code == 401
+    for path, data in [("sign", {"version": 1}), ("verdict", {"version": 1, "verdict": "approve"})]:
+        denied = shared_client.post(
+            f"/r/prorate/{path}",
+            data=data,
+            headers=alice | {"X-Forwarded-Email": ""},
+        )
+        assert denied.status_code == 401
+    assert shared_client.get("/api/reports/prorate", headers=alice).json() == before
+
+
+def test_trace_revoked_and_inactive_tokens_cannot_read_or_write(
+    shared_client, shared_settings, alice, bob
+):
+    assert push(shared_client, auth=alice, trace=_trace_document()).status_code == 201
+    with closing(db.connect(shared_settings.database_url)) as conn:
+        [token] = db.list_tokens(conn, "alice@example.com")
+        db.revoke_token(conn, token["id"])
+        db.update_user(conn, "bob@example.com", active=False)
+    for auth in (alice, bob):
+        assert shared_client.get("/api/reports/prorate/versions/1", headers=auth).status_code == 401
+        assert (
+            push(
+                shared_client, auth=auth, id="prorate", expected_version=1, trace=_trace_document()
+            ).status_code
+            == 401
+        )
+    with closing(db.connect(shared_settings.database_url)) as conn:
+        assert db.latest_version(conn, "prorate") == 1
+
+
+@pytest.mark.parametrize(
+    "case,location",
+    [
+        ("nested", ["body", "trace", "events", 0, "ordinal"]),
+        ("event-model", ["body", "trace", "events", 0]),
+        ("run-model", ["body", "trace", "runs", 0]),
+        ("document-model", ["body", "trace"]),
+        ("timestamp", ["body", "trace", "events", 0, "started_at"]),
+        ("binding", ["body", "trace"]),
+        ("extra-field", ["body", "trace", "events", 0]),
+        ("native", ["body", "trace", "schema_version"]),
+        ("trace-type", ["body", "trace"]),
+        ("root", ["body"]),
+        ("json", None),
+    ],
+)
+def test_trace_validation_never_echoes_input_or_context(client, settings, caplog, case, location):
+    caplog.set_level("DEBUG")
+    secret = "TRACE_SECRET_MARKER_7f36"
+    trace = _trace_document()
+    trace["events"][0]["output"] = secret
+    if case == "nested":
+        trace["events"][0]["ordinal"] = secret
+    elif case == "event-model":
+        trace["events"][0]["kind"] = "assistant"
+    elif case == "run-model":
+        trace["runs"][0].update(origin="reconstructed", source_format=secret)
+    elif case == "document-model":
+        trace["events"][0]["run_id"] = "missing"
+    elif case == "timestamp":
+        trace["events"][0]["started_at"] = secret
+    elif case == "binding":
+        trace["binding"] = {"version": 999, "commit": secret}
+    elif case == "extra-field":
+        trace["events"][0][secret] = "extra"
+    elif case == "native":
+        trace = {"type": "session_meta", "payload": {"session": secret}}
+    elif case == "trace-type":
+        trace = secret
+    payload = {"project": "p", "title": "T", "risk": "low", "body": "B", "trace": trace}
+    if case == "root":
+        payload = [payload]
+    encoded = json.dumps(payload)
+    if case == "json":
+        encoded = encoded[:-1] + ","
+    response = client.post(
+        "/api/reports", content=encoded, headers=H | {"Content-Type": "application/json"}
+    )
+    assert response.status_code == 422
+    assert secret not in response.text and secret not in caplog.text
+    errors = response.json()["detail"]
+    assert all("input" not in e and "ctx" not in e for e in errors)
+    assert all("type" in e and "msg" in e for e in errors)
+    if location is not None:
+        assert location in [e["loc"] for e in errors]
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.list_reports(conn) == []
+
+
+def test_trace_sanitization_preserves_legacy_field_error_details(client):
+    response = push(client, title="")
+    assert response.status_code == 422
+    error = response.json()["detail"][0]
+    assert error["loc"] == ["body", "title"]
+    assert error["input"] == ""
+
+
+@pytest.mark.parametrize("missing", ["project", "title", "risk"])
+def test_missing_report_sibling_never_echoes_trace(client, settings, caplog, missing):
+    trace = _trace_document()
+    trace["events"][0].update(
+        input="PRIVATE_TRACE_INPUT", output="PRIVATE_TRACE_OUTPUT", explanation="PRIVATE_TRACE_WHY"
+    )
+    payload = {"project": "p", "title": "T", "risk": "low", "body": "B", "trace": trace}
+    del payload[missing]
+    response = client.post("/api/reports", json=payload, headers=H)
+    assert response.status_code == 422
+    [error] = response.json()["detail"]
+    assert error["loc"] == ["body", missing] and error["type"] == "missing"
+    assert "input" not in error and "ctx" not in error
+    assert "PRIVATE_TRACE" not in response.text + caplog.text
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.list_reports(conn) == []
+
+
+@pytest.mark.parametrize("fraction,status", [("123456", 201), ("1234567", 422)])
+def test_trace_timestamp_precision_bound(client, fraction, status):
+    trace = _trace_document()
+    trace["events"][0]["started_at"] = f"2026-10-25T12:30:00.{fraction}Z"
+    assert push(client, trace=trace).status_code == status

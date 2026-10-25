@@ -30,6 +30,7 @@ from verifair.db import (
     resolve_thread,
     update_user,
 )
+from verifair.traces import TraceDocument
 
 
 @pytest.fixture
@@ -745,3 +746,143 @@ def test_plan_legacy_comment_validation_uses_locked_current_markdown(url, monkey
     saved = results[1 if push_first else 0]
     assert checked == [("new body", 2) if push_first else ("b", 1)]
     assert saved["version"] == checked[0][1]
+
+
+@pytest.fixture
+def trace_document():
+    return TraceDocument.model_validate(
+        {
+            "schema_version": 1,
+            "runs": [
+                {
+                    "id": "run",
+                    "agent": "codex",
+                    "origin": "recorded",
+                    "source_format": "test",
+                    "coverage": "partial",
+                    "warnings": [],
+                }
+            ],
+            "events": [
+                {
+                    "id": "event",
+                    "run_id": "run",
+                    "ordinal": 1,
+                    "kind": "tool",
+                    "title": "pytest",
+                    "status": "completed",
+                    "exit_code": 0,
+                }
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("workflow", ["artifact", "plan_first"])
+def test_trace_concurrent_pushes_one_expected_version_has_one_winner(url, trace_document, workflow):
+    with closing(connect(url)) as conn:
+        if workflow == "plan_first":
+            _plan_seed(conn)
+            report_id = "plan"
+        else:
+            _push(conn, id="r1")
+            report_id = "r1"
+
+    def push(conn, i):
+        try:
+            db.push_report(
+                conn,
+                id=report_id,
+                project="p",
+                title=f"winner{i}",
+                risk="high",
+                body=f"body{i}",
+                commit=f"commit{i}",
+                links=[f"link{i}"],
+                expected_version=1,
+                trace=trace_document,
+                trace_supplied=True,
+            )
+            return "saved", i
+        except db.StaleVersion as exc:
+            return "stale", exc.latest
+
+    results = _race(url, push)
+    assert sorted(result[0] for result in results) == ["saved", "stale"]
+    winner = next(result[1] for result in results if result[0] == "saved")
+    assert next(result[1] for result in results if result[0] == "stale") == 2
+    with closing(connect(url)) as conn:
+        report = db.get_report(conn, report_id)
+        assert (report["title"], report["links"]) == (f"winner{winner}", f'["link{winner}"]')
+        assert db.latest_version(conn, report_id) == 2
+        snapshot = db.get_version(conn, report_id, 2)
+        assert snapshot["body"] == f"body{winner}"
+        stored = db.get_trace(conn, report_id, 2)
+        assert stored.binding.version == 2
+        assert stored.binding.commit == f"commit{winner}"
+        assert stored.binding.plan_revision == (1 if workflow == "plan_first" else None)
+        assert stored.document == trace_document
+        assert db.get_trace(conn, report_id, 1) is None
+
+
+@pytest.mark.parametrize("implementation", [False, True])
+def test_trace_reopened_plan_gate_rejects_waiting_write_atomically(
+    url, monkeypatch, trace_document, implementation
+):
+    with closing(connect(url)) as conn:
+        _plan_seed(conn)
+        if implementation:
+            db.push_report(
+                conn,
+                id="plan",
+                project="p",
+                title="Plan",
+                risk="low",
+                body="old",
+                expected_version=1,
+                commit="old",
+                trace=trace_document,
+                trace_supplied=True,
+            )
+        root = db.add_comment(
+            conn,
+            report_id="plan",
+            target="plan",
+            version=1,
+            author_id="r",
+            author_name="R",
+            body="blocker",
+        )
+        db.resolve_thread(conn, "plan", root["id"])
+        previous = 2 if implementation else 1
+        before = db.get_report(conn, "plan"), db.get_version(conn, "plan", previous)
+
+    def reopen(conn):
+        return db.reopen_thread(conn, "plan", root["id"])
+
+    def write(conn):
+        with pytest.raises(db.PlanNotApproved) as exc:
+            db.push_report(
+                conn,
+                id="plan",
+                project="p",
+                title="rejected",
+                risk="high",
+                body="new",
+                commit="new",
+                links=["rejected"],
+                reviewers=["bad"],
+                expected_version=previous,
+                trace=trace_document,
+                trace_supplied=True,
+            )
+        assert exc.value.plan_revision == 1
+
+    _ordered_plan_race(url, monkeypatch, reopen, write)
+    with closing(connect(url)) as conn:
+        assert (db.get_report(conn, "plan"), db.get_version(conn, "plan", previous)) == before
+        assert db.latest_version(conn, "plan") == previous
+        assert db.get_version(conn, "plan", previous + 1) is None
+        assert db.get_trace(conn, "plan", previous + 1) is None
+        assert db.requested_reviewers(conn, "plan") == []
+        assert db.plan_review_state(conn, "plan")["status"] == "changes_requested"

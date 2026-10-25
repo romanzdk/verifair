@@ -31,6 +31,7 @@ from verifair.render import (
     split_sections,
 )
 from verifair.rules import NO_OWNER, compute_status, latest_verdicts, review_stage
+from verifair.traces import TraceDocument
 
 NOT_OWNER = "This report belongs to another member."
 SHARED_TOKEN = "The shared token is not accepted in shared mode. Use a member agent token."
@@ -141,6 +142,7 @@ class ReportIn(Input):
     model: Annotated[str, Field(max_length=60)] | None = None
     session_url: HttpUrl | None = None
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{7,40}$")
+    trace: TraceDocument | None = None
 
 
 class CommentIn(Input):
@@ -296,6 +298,8 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             model=body.model,
             session_url=body.session_url,
             commit=body.commit,
+            trace=body.trace,
+            trace_supplied="trace" in body.model_fields_set,
             owner_id=owner["id"] if owner is not None else None,
         )
     except db.NoOwner:
@@ -391,6 +395,7 @@ def _report_json(conn: db.Connection, id: str, *, snapshot_version: int | None =
                 "created_at": v["created_at"],
                 "commit": v["commit"],
                 "has_implementation": v["body"] is not None,
+                "has_trace": v["has_trace"],
                 "plan_revision": v["plan_revision"],
             }
             for v in db.list_versions(conn, id)
@@ -409,7 +414,7 @@ def get_version(id: str, n: int, conn: Conn):
         return {
             key: snapshot[key]
             for key in ("version", "created_at", "commit", "body", "plan", "plan_revision")
-        }
+        } | {"trace": json.loads(snapshot["trace"]) if snapshot["trace"] is not None else None}
 
 
 def _poll_wait(

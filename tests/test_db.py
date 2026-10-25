@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -42,6 +43,7 @@ from verifair.db import (
     update_user,
 )
 from verifair.deps import get_conn
+from verifair.traces import StoredTrace, TraceDocument
 
 
 def _idle(conn):
@@ -1478,3 +1480,473 @@ def test_plan_migration_lock_timeout_rolls_back_and_retry_preserves_data(new_dat
         init_schema(conn)
         assert db.get_version(conn, "r", 1)["body"] == "body"
         assert db.get_version(conn, "r", 1)["plan_revision"] == 1
+
+
+@pytest.fixture
+def trace_document():
+    return TraceDocument.model_validate(
+        {
+            "schema_version": 1,
+            "runs": [
+                {
+                    "id": "run",
+                    "agent": "codex",
+                    "origin": "recorded",
+                    "source_format": "test",
+                    "coverage": "partial",
+                    "warnings": [],
+                }
+            ],
+            "events": [
+                {
+                    "id": "event",
+                    "run_id": "run",
+                    "ordinal": 1,
+                    "kind": "tool",
+                    "title": "pytest",
+                    "status": "failed",
+                    "exit_code": 1,
+                }
+            ],
+        }
+    )
+
+
+def test_trace_migration_preserves_snapshots_and_approvals(conn):
+    push_report(conn, id="legacy", project="p", title="T", risk="low", body="body", plan="A")
+    signature = sign_version(conn, report_id="legacy", version=1, signer_id="o", signer_name="O")
+    verdict = add_verdict(
+        conn, report_id="legacy", version=1, reviewer_id="r", reviewer_name="R", verdict="approve"
+    )
+    conn.execute("ALTER TABLE versions DROP COLUMN IF EXISTS trace CASCADE")
+    before = db.get_version(conn, "legacy", 1)
+    init_schema(conn)
+    init_schema(conn)
+    after = db.get_version(conn, "legacy", 1)
+    assert after.pop("trace") is None
+    assert after == before
+    assert get_signature(conn, "legacy", 1) == signature
+    assert db.list_verdicts(conn, "legacy") == [verdict]
+    column = conn.execute(
+        "SELECT data_type, is_nullable FROM information_schema.columns"
+        " WHERE table_schema=current_schema() AND table_name='versions' AND column_name='trace'"
+    ).fetchone()
+    assert column == {"data_type": "text", "is_nullable": "YES"}
+    _plan_push(conn, workflow="plan_first", plan="A")
+    with pytest.raises(psycopg.errors.CheckViolation), conn.transaction():
+        conn.execute("UPDATE versions SET trace='{}' WHERE report_id='plan'")
+
+
+def test_trace_migration_rolls_back_with_transaction(conn):
+    conn.execute("ALTER TABLE versions DROP COLUMN IF EXISTS trace CASCADE")
+    with pytest.raises(RuntimeError), conn.transaction():
+        init_schema(conn)
+        assert db.get_version(conn, "missing", 1) is None
+        assert conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()"
+            " AND table_name='versions' AND column_name='trace'"
+        ).fetchone()
+        raise RuntimeError("abort migration")
+    assert (
+        conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()"
+            " AND table_name='versions' AND column_name='trace'"
+        ).fetchone()
+        is None
+    )
+    init_schema(conn)
+
+
+@pytest.mark.parametrize("trace_args", [{}, {"trace": None, "trace_supplied": True}])
+def test_trace_initial_plan_allows_omission_and_null(conn, trace_args):
+    _plan_push(conn, workflow="plan_first", plan="A", **trace_args)
+    assert db.get_version(conn, "plan", 1)["trace"] is None
+    assert db.get_trace(conn, "plan", 1) is None
+
+
+def test_trace_object_requires_supplied_implementation(conn, trace_document):
+    with pytest.raises(ValueError, match="body"):
+        _plan_push(conn, workflow="plan_first", plan="A", trace=trace_document, trace_supplied=True)
+    assert get_report(conn, "plan") is None
+    assert latest_version(conn, "plan") == 0
+
+
+@pytest.mark.parametrize("plan", [None, "A"])
+def test_trace_artifact_creation_binds_server_snapshot(conn, trace_document, plan):
+    push_report(
+        conn,
+        id="r",
+        project="p",
+        title="T",
+        risk="low",
+        body="body",
+        plan=plan,
+        commit="abc",
+        agent="other",
+        model="unrelated",
+        trace=trace_document,
+        trace_supplied=True,
+    )
+    stored = db.get_trace(conn, "r", 1)
+    assert stored.binding.version == 1
+    assert stored.binding.plan_revision == (1 if plan else None)
+    assert stored.binding.commit == "abc"
+    assert stored.document == trace_document
+    assert StoredTrace.model_validate_json(db.get_version(conn, "r", 1)["trace"]) == stored
+    assert db.get_trace(conn, "r", 99) is None
+    assert db.get_trace(conn, "missing", 1) is None
+
+
+@pytest.mark.parametrize("workflow", ["artifact", "plan_first"])
+@pytest.mark.parametrize("trace_args", [{}, {"trace": None, "trace_supplied": True}])
+def test_trace_new_body_without_evidence_clears_only_new_snapshot(
+    conn, trace_document, workflow, trace_args
+):
+    if workflow == "plan_first":
+        _approved_plan(conn)
+        _plan_push(
+            conn,
+            body="body",
+            body_supplied=True,
+            expected_version=1,
+            trace=trace_document,
+            trace_supplied=True,
+        )
+        report_id, previous = "plan", 2
+    else:
+        push_report(
+            conn,
+            id="r",
+            project="p",
+            title="T",
+            risk="low",
+            body="body",
+            trace=trace_document,
+            trace_supplied=True,
+        )
+        report_id, previous = "r", 1
+    old = db.get_version(conn, report_id, previous)["trace"]
+    push_report(
+        conn,
+        id=report_id,
+        project="p",
+        title="T",
+        risk="low",
+        body="body",
+        expected_version=previous,
+        **trace_args,
+    )
+    assert db.get_version(conn, report_id, previous + 1)["trace"] is None
+    assert db.get_version(conn, report_id, previous)["trace"] == old
+
+
+def test_trace_plan_only_preserves_exact_envelope_body_commit_and_plan_reference(
+    conn, trace_document
+):
+    _approved_plan(conn)
+    _plan_push(
+        conn,
+        body="  body\r\n",
+        body_supplied=True,
+        expected_version=1,
+        commit="abc",
+        trace=trace_document,
+        trace_supplied=True,
+    )
+    original = db.get_version(conn, "plan", 2)
+    stored = db.get_trace(conn, "plan", 2)
+    noncanonical = json.dumps(json.loads(original["trace"]), indent=2)
+    conn.execute(
+        "UPDATE versions SET trace=%s WHERE report_id='plan' AND version=2", (noncanonical,)
+    )
+    _plan_push(conn, plan="B", expected_version=2, agent="different", model="different")
+    current = db.get_version(conn, "plan", 3)
+    assert (current["trace"], current["body"], current["commit"], current["plan_revision"]) == (
+        noncanonical,
+        "  body\r\n",
+        "abc",
+        3,
+    )
+    assert db.get_trace(conn, "plan", 3) == stored
+    assert stored.binding.plan_revision == 1
+    assert (
+        db.get_version(conn, "plan", stored.binding.plan_revision)["plan"] == "# Návrh\r\nExact  \n"
+    )
+
+
+@pytest.mark.parametrize("explicit_null", [False, True])
+@pytest.mark.parametrize("implementation", [False, True])
+def test_trace_explicit_plan_only_update_is_atomic(
+    conn, trace_document, explicit_null, implementation
+):
+    _approved_plan(conn)
+    if implementation:
+        _plan_push(
+            conn,
+            body="body",
+            body_supplied=True,
+            expected_version=1,
+            trace=trace_document,
+            trace_supplied=True,
+        )
+    version = 2 if implementation else 1
+    before = get_report(conn, "plan"), db.get_version(conn, "plan", version)
+    with pytest.raises(ValueError, match="body"):
+        _plan_push(
+            conn,
+            plan="B",
+            expected_version=version,
+            title="rejected",
+            links=["bad"],
+            reviewers=["bad"],
+            trace=None if explicit_null else trace_document,
+            trace_supplied=True,
+        )
+    assert (get_report(conn, "plan"), db.get_version(conn, "plan", version)) == before
+    assert latest_version(conn, "plan") == version
+    assert db.requested_reviewers(conn, "plan") == []
+
+
+@pytest.mark.parametrize("workflow", ["artifact", "plan_first"])
+def test_trace_resubmission_binds_new_unsigned_snapshot(conn, trace_document, workflow):
+    if workflow == "plan_first":
+        _approved_plan(conn)
+        report_id, previous = "plan", 1
+    else:
+        report_id, previous = "r", 0
+    for offset in (1, 2):
+        push_report(
+            conn,
+            id=report_id,
+            project="p",
+            title="T",
+            risk="low",
+            body="same body",
+            expected_version=previous + offset - 1 if previous + offset > 1 else None,
+            commit="abc",
+            trace=trace_document,
+            trace_supplied=True,
+        )
+        if offset == 1:
+            sign_version(
+                conn, report_id=report_id, version=previous + 1, signer_id="o", signer_name="O"
+            )
+            add_verdict(
+                conn,
+                report_id=report_id,
+                version=previous + 1,
+                reviewer_id="r",
+                reviewer_name="R",
+                verdict="approve",
+            )
+    assert db.get_trace(conn, report_id, previous + 1).binding.version == previous + 1
+    assert db.get_trace(conn, report_id, previous + 2).binding.version == previous + 2
+    assert get_signature(conn, report_id, previous + 2) is None
+    assert [v["version"] for v in db.list_verdicts(conn, report_id)] == [previous + 1]
+
+
+def test_trace_artifact_plan_replacement_uses_new_binding(conn, trace_document):
+    push_report(
+        conn,
+        id="r",
+        project="p",
+        title="T",
+        risk="low",
+        body="body",
+        plan="A",
+        trace=trace_document,
+        trace_supplied=True,
+    )
+    push_report(
+        conn,
+        id="r",
+        project="p",
+        title="T",
+        risk="low",
+        body="body",
+        plan="B",
+        expected_version=1,
+        trace=trace_document,
+        trace_supplied=True,
+    )
+    stored = db.get_trace(conn, "r", 2)
+    assert (stored.binding.version, stored.binding.plan_revision, stored.binding.commit) == (
+        2,
+        2,
+        None,
+    )
+    assert db.get_trace(conn, "r", 1).binding.plan_revision == 1
+
+
+def test_trace_artifact_update_requires_expected_version(conn, trace_document):
+    push_report(conn, id="r", project="p", title="T", risk="low", body="body")
+    before = get_report(conn, "r")
+    with pytest.raises(ValueError, match="expected_version"):
+        push_report(
+            conn,
+            id="r",
+            project="p",
+            title="bad",
+            risk="high",
+            body="body",
+            trace=trace_document,
+            trace_supplied=True,
+            links=["bad"],
+        )
+    assert get_report(conn, "r") == before
+    assert latest_version(conn, "r") == 1
+    assert push_report(conn, id="r", project="p", title="T", risk="low", body="legacy") == ("r", 2)
+
+
+@pytest.mark.parametrize("invalid", ["invalid", "binding", "mutated"])
+def test_trace_invalid_document_is_revalidated_without_echo_and_no_writes(
+    conn, trace_document, invalid
+):
+    if invalid == "binding":
+        value = {"binding": {"version": 99}, "document": trace_document.model_dump()}
+    elif invalid == "mutated":
+        trace_document.events[0].title = "private-content\x00"
+        value = trace_document
+    else:
+        value = {"private-content": "secret"}
+    with pytest.raises(ValueError) as exc:
+        push_report(
+            conn,
+            id="r",
+            project="p",
+            title="T",
+            risk="low",
+            body="body",
+            trace=value,
+            trace_supplied=True,
+        )
+    assert "private-content" not in str(exc.value)
+    assert "secret" not in str(exc.value)
+    assert get_report(conn, "r") is None
+    assert latest_version(conn, "r") == 0
+
+
+def test_trace_owner_rejection_leaves_snapshot_and_metadata_unchanged(conn, trace_document):
+    push_report(
+        conn,
+        id="r",
+        project="p",
+        title="T",
+        risk="low",
+        body="body",
+        owner_id="owner",
+        trace=trace_document,
+        trace_supplied=True,
+    )
+    before = get_report(conn, "r"), db.get_version(conn, "r", 1)
+    with pytest.raises(db.NotOwner):
+        push_report(
+            conn,
+            id="r",
+            project="p",
+            title="bad",
+            risk="high",
+            body="bad",
+            owner_id="other",
+            expected_version=1,
+            trace=trace_document,
+            trace_supplied=True,
+        )
+    assert (get_report(conn, "r"), db.get_version(conn, "r", 1)) == before
+    assert latest_version(conn, "r") == 1
+
+
+def test_trace_list_projection_retains_callers_fields_without_payload(conn, trace_document):
+    push_report(
+        conn,
+        id="r",
+        project="p",
+        title="T",
+        risk="low",
+        body="body",
+        plan="A",
+        commit="abc",
+        trace=trace_document,
+        trace_supplied=True,
+    )
+    push_report(conn, id="r", project="p", title="T", risk="low", body="new")
+    rows = list_versions(conn, "r")
+    assert [v["has_trace"] for v in rows] == [True, False]
+    assert all("trace" not in row for row in rows)
+    assert [
+        (v["report_id"], v["version"], v["body"], v["plan"], v["plan_revision"], v["commit"])
+        for v in rows
+    ] == [("r", 1, "body", "A", 1, "abc"), ("r", 2, "new", "A", 1, None)]
+    assert all(v["created_at"] for v in rows)
+
+
+def test_trace_get_reads_only_requested_snapshot(conn):
+    push_report(conn, id="r", project="p", title="T", risk="low", body="old")
+    push_report(conn, id="r", project="p", title="T", risk="low", body="new")
+    conn.execute("UPDATE versions SET trace='invalid-json' WHERE report_id='r' AND version=1")
+    assert db.get_trace(conn, "r", 2) is None
+
+
+def test_trace_migration_holds_advisory_lock_and_restart_avoids_exclusive_lock(new_database_url):
+    url = new_database_url()
+    with connect(url) as conn, connect(url) as observer:
+        init_schema(conn)
+        conn.execute("ALTER TABLE versions DROP COLUMN trace")
+        with conn.transaction():
+            init_schema(conn)
+            with observer.transaction():
+                acquired = observer.execute(
+                    "SELECT pg_try_advisory_xact_lock(%s) AS acquired", (db.SCHEMA_LOCK,)
+                ).fetchone()["acquired"]
+                assert acquired is False
+            assert conn.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()"
+                " AND table_name='versions' AND column_name='trace'"
+            ).fetchone()
+        with observer.transaction():
+            observer.execute("SELECT * FROM versions")
+            with conn.transaction():
+                init_schema(conn)
+                assert (
+                    conn.execute(
+                        "SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid()"
+                        " AND relation='versions'::regclass AND mode='AccessExclusiveLock'"
+                    ).fetchone()
+                    is None
+                )
+
+
+@pytest.mark.parametrize("trace_args", [{}, {"trace": None, "trace_supplied": True}])
+def test_trace_artifact_creation_without_evidence(conn, trace_args):
+    push_report(conn, id="r", project="p", title="T", risk="low", body="body", **trace_args)
+    assert db.get_trace(conn, "r", 1) is None
+    assert db.get_version(conn, "r", 1)["trace"] is None
+
+
+def test_trace_canonical_storage_omits_optional_nulls_and_preserves_unicode(conn, trace_document):
+    trace_document.events[0].output = "Příliš 🦊"
+    push_report(conn, id="r", project="p", title="T", risk="low", body="body", trace=trace_document)
+    raw = db.get_version(conn, "r", 1)["trace"]
+    assert raw == (
+        '{"binding":{"version":1},"document":{"events":[{"exit_code":1,"id":"event",'
+        '"kind":"tool","ordinal":1,"output":"Příliš 🦊","run_id":"run",'
+        '"status":"failed","title":"pytest","truncated":false}],'
+        '"runs":[{"agent":"codex","coverage":"partial","id":"run","origin":"recorded",'
+        '"source_format":"test","warnings":[]}],"schema_version":1}}'
+    )
+    stored = db.get_trace(conn, "r", 1)
+    assert (stored.binding.version, stored.binding.plan_revision, stored.binding.commit) == (
+        1,
+        None,
+        None,
+    )
+
+
+def test_trace_existing_artifact_object_requires_guard_without_presence_flag(conn, trace_document):
+    push_report(conn, id="r", project="p", title="T", risk="low", body="body")
+    with pytest.raises(ValueError, match="expected_version"):
+        push_report(
+            conn, id="r", project="p", title="bad", risk="low", body="body", trace=trace_document
+        )
+    assert get_report(conn, "r")["title"] == "T"
+    assert latest_version(conn, "r") == 1

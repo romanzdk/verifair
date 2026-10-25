@@ -562,6 +562,18 @@ def test_a_normal_push_still_works(client):
     )
 
 
+@pytest.mark.parametrize("field", ["title", "risk", "links"])
+@pytest.mark.parametrize(
+    "container", [{"trace": {"output": "PRIVATE_TRACE"}}, [{"trace": {"output": "PRIVATE_TRACE"}}]]
+)
+def test_report_container_errors_never_echo_nested_trace(client, field, container):
+    payload = {"project": "p", "title": "T", "risk": "low", "body": "B", field: container}
+    response = client.post("/api/reports", json=payload, headers={"Authorization": "Bearer t"})
+    assert response.status_code == 422
+    assert "PRIVATE_TRACE" not in response.text
+    assert all("input" not in error for error in response.json()["detail"])
+
+
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_plan_counts_toward_request_body_limit(client, settings, chunked):
     payload = REPORT | {"body": "b" * (LIMIT // 2), "plan": "p" * (LIMIT // 2)}
@@ -581,3 +593,57 @@ def test_plan_counts_toward_request_body_limit(client, settings, chunked):
     assert (
         client.post("/api/reports", json=REPORT | {"plan": "# Small"}, headers=H).status_code == 201
     )
+
+
+@pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+@pytest.mark.parametrize(
+    "over_document_budget", [False, True], ids=["combined-1MiB", "trace-512KiB"]
+)
+def test_trace_and_combined_request_byte_limits(client, settings, chunked, over_document_budget):
+    trace = {
+        "schema_version": 1,
+        "runs": [
+            {
+                "id": "run-1",
+                "agent": "codex",
+                "origin": "recorded",
+                "source_format": "jsonl",
+                "coverage": "partial",
+                "warnings": [],
+            }
+        ],
+        "events": [
+            {
+                "id": f"event-{i}",
+                "run_id": "run-1",
+                "ordinal": i + 1,
+                "kind": "tool",
+                "title": "check",
+                "status": "unknown",
+                "output": "é" * 16000,
+            }
+            for i in range(17 if over_document_budget else 8)
+        ],
+    }
+    payload = REPORT | {
+        "body": "small" if over_document_budget else "b" * 850000,
+        "trace": trace,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False).encode()
+    assert (len(encoded) < LIMIT) is over_document_budget
+    assert (len(json.dumps(trace, ensure_ascii=False).encode()) > 524288) is over_document_budget
+    response = client.post(
+        "/api/reports",
+        content=iter([encoded[:300000], encoded[300000:]]) if chunked else encoded,
+        headers=H | {"Content-Type": "application/json"},
+    )
+    assert ("content-length" not in response.request.headers) is chunked
+    assert response.status_code == (422 if over_document_budget else 413)
+    if over_document_budget:
+        [error] = response.json()["detail"]
+        assert error["loc"] == ["body", "trace"]
+        assert "input" not in error and "ctx" not in error
+    else:
+        assert response.json() == TOO_LARGE
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.list_reports(conn) == []
