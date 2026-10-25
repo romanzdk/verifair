@@ -246,6 +246,12 @@ const wide = window.matchMedia?.("(min-width: 1024px)");
 wide?.addEventListener("change", () => {
   if (wide.matches && !document.querySelector(".app.drawer")) closeNav();
 });
+// focus stays on the menu button when the drawer opens, and Tab from there skips the drawer
+document.getElementById("vf_nav")?.addEventListener("toggle", (event) => {
+  if (event.newState === "open" && !event.target.querySelector("details.me[open]")) {
+    event.target.querySelector("a[href]")?.focus();
+  }
+});
 document.addEventListener("focusout", (event) => {
   const to = event.relatedTarget;
   if (to && event.target.closest("#vf_nav") && !to.closest("#vf_nav, [popovertarget=vf_nav]")) closeNav();

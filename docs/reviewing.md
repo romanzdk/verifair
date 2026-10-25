@@ -98,16 +98,16 @@ https://verifair.example.com/r/prorate
 
 Someone added after the version was signed gets `Bob asked you to review "<title>" (v3, signed by Alice).` as the first line.
 
-Local identities belong to a browser. With the auth proxy described in [deployment.md](deployment.md#deploying), the trusted identity header supplies the same ID across devices. In local mode, signing a report without an owner records the signer as the owner, and **My changes** also lists unowned reports whose `author` equals your identity. In shared mode only `author_id` counts, and a report without an owner is frozen (see [Report ownership](access.md#report-ownership)).
+Local identities belong to a browser. In shared mode, sign-in supplies the same id (your email) on every device. In local mode, signing a report without an owner records the signer as the owner, and **My changes** also lists unowned reports whose `author` equals your identity. In shared mode only `author_id` counts, and a report without an owner is frozen (see [Report ownership](access.md#report-ownership)).
 
 ## Signing
 
 - A version must be signed before anyone can approve or request changes on it. Until then the status is `unsigned`.
 - The first signature on a version is kept. Signing again does nothing.
-- Without `VERIFAIR_IDENTITY_HEADER`, anyone who has set a name can sign. The name is only a cookie, so this is a convenience, not a control.
-- With `VERIFAIR_IDENTITY_HEADER`, only the owner can sign: `author_id` must equal the header value (for example the email). A report with no `author_id` cannot be signed: `This report has no owner. Push it again with an agent token under a new id.`
+- In local mode, anyone who has set a name can sign. The name is only a cookie, so this is a convenience, not a control.
+- In shared mode, only the owner can sign: `author_id` must equal the signed-in member's email. A report with no `author_id` cannot be signed: `This report has no owner. Push it again with an agent token under a new id.`
 - The person who signed a version cannot approve it or request changes on it. Someone else has to.
-- Only with the identity header behind an auth proxy is signing a real control. See [deployment.md](deployment.md#deploying).
+- Only in shared mode, with sign-in, is signing a real control. See [access.md](access.md#set-up-shared-mode).
 
 ## Blocking threads
 

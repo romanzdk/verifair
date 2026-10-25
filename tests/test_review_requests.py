@@ -4,13 +4,13 @@ from contextlib import closing
 from dataclasses import replace
 
 import pytest
-from fastapi.testclient import TestClient
+from conftest import SessionClient, signed_in
 
 from verifair import db
 
 BODY = "## Intent\nCharge by day.\n\n## Judge this\nIs a **day** the right [unit](https://e.com)?"
-ALICE = {"X-Forwarded-Email": "alice@example.com"}
-BOB = {"X-Forwarded-Email": "bob@example.com"}
+ALICE = signed_in("alice@example.com")
+BOB = signed_in("bob@example.com")
 HX = {"HX-Request": "true"}
 REFUSED = "Pick an active member who does not own this report."
 KEPT = "carol already gave a verdict on this version, so the request stays."
@@ -139,7 +139,7 @@ def test_a_reviewer_with_a_verdict_on_this_version_stays(shared_client, team):
     add(shared_client, "bob@example.com")
     add(shared_client, "carol@example.com")
     shared_client.post("/r/r/sign", data={"version": 1}, headers=ALICE)
-    carol = {"X-Forwarded-Email": "carol@example.com"}
+    carol = signed_in("carol@example.com")
     shared_client.post("/r/r/verdict", data={"version": 1, "verdict": "approve"}, headers=carol)
     page = rail(shared_client.get("/r/r", headers=ALICE).text)
     assert "/reviewers/bob%40example.com/remove" in page
@@ -251,7 +251,7 @@ def outbox(monkeypatch):
 def mail(shared_settings, make_app, team, outbox):
     settings = replace(shared_settings, smtp_url="smtp://mail:1025", email_from="vf@example.com")
     app = make_app(settings)
-    return TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
+    return SessionClient(app, headers={"Sec-Fetch-Site": "same-origin"})
 
 
 def sent(outbox):
@@ -398,7 +398,7 @@ def test_no_email_without_smtp(shared_client, team, outbox):
 
 def test_no_email_in_local_mode(settings, make_app, outbox):
     app = make_app(replace(settings, smtp_url="smtp://mail:1025", email_from="vf@example.com"))
-    client = TestClient(app, headers={"Sec-Fetch-Site": "same-origin"})
+    client = SessionClient(app, headers={"Sec-Fetch-Site": "same-origin"})
     with closing(db.connect(settings.database_url)) as conn:
         db.push_report(conn, project="p", title="T", risk="low", body=BODY, id="r")
         db.add_review_request(conn, "r", "bob@example.com")

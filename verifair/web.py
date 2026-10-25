@@ -128,9 +128,8 @@ NoNul = AfterValidator(db.no_nul)
 Body = Annotated[str, Form(max_length=20000), NoNul]
 LAST_ADMIN = "There must be at least one active admin."
 MEMBER_EXISTS = "That member already exists."
-MEMBER_INPUT = "Enter an id (1–200 characters) and a name (1–60 characters)."
-MEMBER_PLAIN = "Use a plain id such as jane@example.com."
-MEMBER_AGENT = "The id agent is reserved for agents."
+MEMBER_INPUT = "Enter an email (1–200 characters) and a name (1–60 characters)."
+MEMBER_EMAIL = "Enter an email such as jane@example.com."
 NOT_MEMBER = "You are not a member of this workspace yet. Ask an admin to add {id}."
 DEACTIVATED = "Your access to this workspace was turned off. Ask an admin to reactivate {id}."
 LABEL_INPUT = "Enter a label (1–60 characters)."
@@ -152,14 +151,19 @@ def plain_id(value: str) -> bool:
     return PLAIN_ID.fullmatch(value) is not None and value.lower() not in (".", "..", "agent")
 
 
+def email_id(value: str) -> bool:
+    # sign-in emails must be ASCII, so a member id that is not could never sign in
+    return "@" in value and value.isascii() and plain_id(value)
+
+
 def _shared(request: Request) -> bool:
-    return request.app.state.settings.identity_header is not None
+    return request.app.state.settings.shared
 
 
 async def current_user(request: Request) -> tuple[str, str | None]:
     member = request.state.member
-    request.state.user_from_header = _shared(request)
-    if request.state.user_from_header:
+    request.state.signed_in = _shared(request)
+    if request.state.signed_in:
         if member is None:
             raise HTTPException(401, "sign in required")
         return member["id"], member["name"]
@@ -184,7 +188,7 @@ Member = Annotated[db.Row, Depends(access_member)]
 
 
 def _secure(request: Request) -> bool:
-    return request.app.state.settings.base_url.startswith("https")
+    return request.app.state.settings.https
 
 
 def _with_id_cookie(request: Request, response):
@@ -253,7 +257,7 @@ def _shell(request: Request, conn: db.Connection, user: tuple[str, str | None], 
     return _nav(work or _work(request, conn, user[0])) | {
         "user_id": user[0],
         "user_name": user[1],
-        "user_from_header": request.state.user_from_header,
+        "signed_in": request.state.signed_in,
         "shared": _shared(request),
         "member": member,
         "is_admin": member is not None and member["role"] == "admin",
@@ -335,7 +339,7 @@ def _links(report: db.Row) -> list[tuple[str, str]]:
 
 def _sign_refusal(request: Request, report: db.Row, user_id: str) -> str | None:
     owner, author = report["author_id"], report["author"]
-    if not request.state.user_from_header:
+    if not request.state.signed_in:
         return None
     if owner is None:
         return rules.NO_OWNER
@@ -1417,7 +1421,7 @@ def remove_review(
 @router.post("/me")
 def set_name(request: Request, name: Annotated[str, Form()], next: Annotated[str, Form()] = "/"):
     if _shared(request):
-        raise HTTPException(403, "identity is set by the proxy")
+        raise HTTPException(403, "your name comes from the members list")
     name = name.strip()
     if not next.startswith("/") or next.startswith(("//", "/\\")):
         next = "/"
@@ -1511,10 +1515,9 @@ def add_member(
     clean_id, clean_name = id.strip().lower(), name.strip()
     if not (_fits(clean_id, 200) and _fits(clean_name, 60)):
         return refuse(MEMBER_INPUT, 422)
-    if clean_id == "agent":
-        return refuse(MEMBER_AGENT, 422)
-    if not plain_id(clean_id):
-        return refuse(MEMBER_PLAIN, 422)
+    # before lower-casing, since "\u212a".lower() is an ASCII "k"
+    if not (id.strip().isascii() and email_id(clean_id)):
+        return refuse(MEMBER_EMAIL, 422)
     try:
         db.add_user(conn, id=clean_id, name=clean_name, role=role)
     except ValueError:
@@ -1532,9 +1535,15 @@ def update_member(
     member: Member,
     role: Annotated[Literal["admin", "member"] | None, Form()] = None,
     active: Annotated[Literal["0", "1"] | None, Form()] = None,
+    reset: Annotated[Literal["1"] | None, Form()] = None,
 ):
     if member["role"] != "admin":
         return _denied(request, ADMIN_ONLY)
+    if reset:
+        if not db.reset_sign_in(conn, id):
+            raise HTTPException(404, "member not found")
+        log.info("access action=reset_sign_in actor=%s target=%s", user[0], id)
+        return RedirectResponse("/access/members", 303)
     try:
         row, revoked = db.update_user(
             conn, id, role=role, active=None if active is None else active == "1"

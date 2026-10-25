@@ -5,18 +5,19 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from conftest import signed_in
 from fastapi import HTTPException
 from psycopg.pq import TransactionStatus
 
 from verifair import db, web
 
-ADMIN = {"X-Forwarded-Email": "admin@example.com"}
+ADMIN = signed_in("admin@example.com")
 LAST_ADMIN = "There must be at least one active admin."
 EXISTS = "That member already exists."
 COPY_ONCE = "Copy it now. It will not be shown again."
 LOCAL_NOTE = (
-    "Access management needs a sign-in proxy. Start verifair with"
-    " <code>VERIFAIR_IDENTITY_HEADER</code> set to the header your proxy sends."
+    "Access management needs shared mode with sign-in. Start verifair with"
+    " <code>VERIFAIR_OIDC_ISSUER</code> set to your sign-in provider."
 )
 ALREADY_CREATED = (
     "This token was already created. Its secret was shown only once."
@@ -96,7 +97,7 @@ def test_admin_adds_promotes_deactivates_and_reactivates(shared_client, conn, ca
     assert (r.status_code, r.headers["location"]) == (303, "/access/members")
     carol = db.get_user(conn, "carol@example.com")
     assert (carol["name"], carol["role"], carol["active"]) == ("Carol C", "member", 1)
-    who = {"X-Forwarded-Email": "carol@example.com"}
+    who = signed_in("carol@example.com")
     assert shared_client.get("/", headers=who).status_code == 200
     token, old = _token(conn, "carol@example.com")
 
@@ -116,9 +117,16 @@ def test_admin_adds_promotes_deactivates_and_reactivates(shared_client, conn, ca
     assert update(role="admin")["role"] == "admin"
     assert update(role="member")["role"] == "member"
     assert update(active="0")["active"] == 0
-    assert shared_client.get("/access/tokens", headers=who).status_code == 403
+    ended = shared_client.get("/access/tokens", headers=who, follow_redirects=False)
+    assert (ended.status_code, ended.headers["location"]) == (303, "/login?next=%2Faccess%2Ftokens")
+    assert (
+        shared_client.get("/access/tokens", headers=signed_in("carol@example.com")).status_code
+        == 403
+    )
     assert db.get_token(conn, old["id"])["revoked_at"] is not None
     assert update(active="1")["active"] == 1
+    assert shared_client.get("/", headers=who, follow_redirects=False).status_code == 303
+    who = signed_in("carol@example.com")
     assert shared_client.get("/access/tokens", headers=who).status_code == 200
     assert db.get_token(conn, old["id"])["revoked_at"] is not None
     api = shared_client.get("/api/reports/x", headers={"Authorization": f"Bearer {token}"})
@@ -151,15 +159,16 @@ def test_admin_adds_promotes_deactivates_and_reactivates(shared_client, conn, ca
 def test_add_member_validates_id_and_name(shared_client, conn, data):
     r = shared_client.post("/access/users", data=data | {"role": "member"}, headers=ADMIN)
     assert r.status_code == 422
-    assert "Enter an id (1–200 characters) and a name (1–60 characters)." in r.text
+    assert "Enter an email (1–200 characters) and a name (1–60 characters)." in r.text
     assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
 
 
 def test_add_member_accepts_the_limits(shared_client, conn):
-    data = {"id": "e" * 200, "name": "E" * 60, "role": "admin"}
+    email = "e" * 188 + "@example.com"
+    data = {"id": email, "name": "E" * 60, "role": "admin"}
     r = shared_client.post("/access/users", data=data, headers=ADMIN, follow_redirects=False)
     assert r.status_code == 303
-    assert db.get_user(conn, "e" * 200)["role"] == "admin"
+    assert db.get_user(conn, email)["role"] == "admin"
 
 
 def test_last_admin_cannot_demote_or_deactivate_themselves(shared_client, conn):
@@ -188,7 +197,10 @@ def test_admin_may_deactivate_themselves_when_another_admin_exists(shared_client
         follow_redirects=False,
     )
     assert r.status_code == 303
-    assert shared_client.get("/access/tokens", headers=ADMIN).status_code == 403
+    after = shared_client.get("/access/tokens", headers=ADMIN, follow_redirects=False)
+    assert after.status_code == 303
+    again = signed_in("admin@example.com")
+    assert shared_client.get("/access/tokens", headers=again).status_code == 403
 
 
 def test_new_token_is_shown_once_and_never_logged(shared_client, conn, as_user, caplog):
@@ -286,7 +298,7 @@ def test_settings_links_by_role_and_mode(shared_client, as_user, conn, client):
         assert 'href="/access/tokens"' in member, path
         assert 'href="/access/members"' not in member, path
         local = client.get(path).text
-        assert "/access" not in local and "Settings need a sign-in proxy" in local, path
+        assert "/access" not in local and "Settings need shared mode with sign-in" in local, path
 
 
 def test_report_context_refuses_moderation_without_a_member_in_shared_mode(conn):
@@ -349,33 +361,25 @@ def test_browser_check_refusals_on_access_keep_the_security_headers(shared_clien
     "id",
     [
         "../tokens/x/revoke",
-        "a/b",
-        "a\\b",
-        "a\nb",
-        "a\x00b",
-        "a\x7fb",
-        "a b",
-        "a\tb",
+        "a/b@x.com",
+        "a\\b@x.com",
+        "a\nb@x.com",
+        "a\x00b@x.com",
+        "a\x7fb@x.com",
+        "a b@x.com",
+        "a\tb@x.com",
         ".",
         "..",
+        "bob",
+        "agent",
+        " AGENT ",
+        "jän@example.com",
     ],
 )
-def test_add_member_refuses_ids_that_are_not_plain(shared_client, conn, id):
+def test_add_member_refuses_ids_that_are_not_emails(shared_client, conn, id):
     r = shared_client.post("/access/users", data={"id": id, "name": "X"}, headers=ADMIN)
     assert r.status_code == 422
-    assert "Use a plain id such as jane@example.com." in r.text
-    assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
-
-
-@pytest.mark.parametrize("id", ["agent", "Agent", " AGENT "])
-def test_add_member_says_the_agent_id_is_reserved(shared_client, conn, id):
-    r = shared_client.post("/access/users", data={"id": id, "name": "X"}, headers=ADMIN)
-    assert r.status_code == 422
-    error = (
-        '<p class="error" id="vf_member_error" role="alert">The id agent is reserved for agents.'
-    )
-    assert f"{error}</p>" in r.text
-    assert "Use a plain id" not in r.text.split('id="add-member"')[1].split("<label")[0]
+    assert "Enter an email such as jane@example.com." in r.text
     assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
 
 
@@ -384,7 +388,7 @@ def test_member_id_with_plus_and_at_round_trips_through_row_actions(shared_clien
     r = shared_client.post("/access/users", data={"id": id, "name": "Jane"}, headers=ADMIN)
     assert r.status_code == 200 and id in r.text
     action = "/access/users/jane%2Bci%40example.com"
-    assert r.text.count(f'action="{action}"') == 2
+    assert r.text.count(f'action="{action}"') == 3
     for data, expected in (({"role": "admin"}, ("admin", 1)), ({"active": "0"}, ("admin", 0))):
         r = shared_client.post(action, data=data, headers=ADMIN, follow_redirects=False)
         assert r.status_code == 303
@@ -395,7 +399,7 @@ def test_member_id_with_plus_and_at_round_trips_through_row_actions(shared_clien
 def test_existing_id_with_a_slash_is_encoded_in_row_actions(shared_client, conn):
     db.add_user(conn, id="team/ops", name="Ops", role="member")
     page = shared_client.get("/access/members", headers=ADMIN).text
-    assert page.count('action="/access/users/team%2Fops"') == 2
+    assert page.count('action="/access/users/team%2Fops"') == 3
     r = shared_client.post(
         "/access/users/team%2Fops", data={"role": "admin"}, headers=ADMIN, follow_redirects=False
     )
@@ -426,7 +430,7 @@ def test_access_table_cells_carry_their_labels(shared_client, conn):
     tokens = shared_client.get("/access/tokens", headers=ADMIN).text
     members = shared_client.get("/access/members", headers=ADMIN).text
     labels = ("Owner", "Label", "Token id", "Created", "Last used", "Status")
-    for page, names in ((tokens, labels), (members, ("Id", "Name", "Role", "Status"))):
+    for page, names in ((tokens, labels), (members, ("Email", "Name", "Role", "Status"))):
         for label in names:
             assert f'<td data-label="{label}">' in page, label
     assert '<td data-label="Status"><span class="badge b-approved">Active</span></td>' in members
@@ -447,7 +451,8 @@ def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, con
     assert '<button class="btn sm" aria-label="Save role for bob@example.com">Save</button>' in page
     assert (
         '<button class="btn sm danger" aria-label="Deactivate bob@example.com"'
-        ' data-confirm="Deactivate bob@example.com? Their agent tokens will be revoked.">'
+        ' data-confirm="Deactivate bob@example.com?'
+        ' They are signed out and their agent tokens are revoked.">'
         "Deactivate</button>"
     ) in page
     assert (
@@ -475,14 +480,15 @@ def test_row_buttons_are_named_and_destructive_ones_ask_first(shared_client, con
     assert "!confirm(message)" in js and "event.preventDefault()" in js
 
 
-PLAIN = "Use a plain id such as jane@example.com."
-MEMBER_INPUT = "Enter an id (1–200 characters) and a name (1–60 characters)."
+PLAIN = "Enter an email such as jane@example.com."
+MEMBER_INPUT = "Enter an email (1–200 characters) and a name (1–60 characters)."
 
 
 @pytest.mark.parametrize(
     ("data", "status", "copy"),
     [
         ({"id": "a b", "name": "Eve Q", "role": "admin"}, 422, PLAIN),
+        ({"id": "\u212aate@example.com", "name": "Kate", "role": "admin"}, 422, PLAIN),
         ({"id": "Admin@example.com", "name": "Again", "role": "admin"}, 409, EXISTS),
         ({"id": "eve@example.com", "name": " ", "role": "admin"}, 422, MEMBER_INPUT),
     ],
@@ -498,7 +504,7 @@ def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, da
         '<form method="post" action="/access/users#add-member" class="panel addform" '
     )
     assert (
-        f'name="id" value="{data["id"]}" autofocus'
+        f'name="id" type="email" value="{data["id"]}" autofocus'
         ' aria-invalid="true" aria-describedby="vf_member_error"'
     ) in card
     assert f'name="name" value="{data["name"]}"' in card
@@ -509,7 +515,11 @@ def test_add_member_errors_show_in_the_card_and_keep_the_input(shared_client, da
 def test_add_member_inputs_check_the_id_in_the_browser(shared_client):
     page = shared_client.get("/access/members", headers=ADMIN).text
     card = page.split('id="add-member"')[1].split("</form>")[0]
-    assert f'name="id" value="" maxlength="200" pattern="[^\\s\\/\\\\]+" title="{PLAIN}"' in card
+    assert (
+        f'name="id" type="email" value="" maxlength="200" pattern="[^\\s\\/\\\\]+@[^\\s\\/\\\\]+"'
+        f' title="{PLAIN}"'
+    ) in card
+    assert "<th>Email</th>" in page and 'data-label="Email"' in page
     assert 'name="name" value="" maxlength="60"' in card
     assert '<option value="member" selected>' in card
     assert 'class="error"' not in card and "autofocus" not in page
@@ -526,17 +536,18 @@ def test_denied_page_has_a_heading_and_links_back(shared_client, conn, as_user):
             True,
             True,
         ),
-        (shared_client.get("/", headers={"X-Forwarded-Email": "x@example.com"}), False, False),
-        (shared_client.get("/", headers={"X-Forwarded-Email": "gone@example.com"}), False, False),
+        (shared_client.get("/", headers=signed_in("x@example.com")), False, False),
+        (shared_client.get("/", headers=signed_in("gone@example.com")), False, False),
     ]:
         assert r.status_code == 403
         assert '<main class="app-page denied">' in r.text and "<h1>No access</h1>" in r.text
+        assert '<a class="brand" href="/"><img class="mark" src="/static/logo.svg"' in r.text
         assert 'href="/static/app.css"' in r.text and "landing" not in r.text
         assert ('<a href="/">' in r.text) is home
         assert ('<a href="/access/tokens">Back to Agent tokens</a>' in r.text) is back
         assert "<script" not in r.text and 'class="topbar"' not in r.text
-    signin = shared_client.get("/", headers={"X-Forwarded-Email": ""})
-    assert signin.status_code == 401 and '<a href="/">Go to Inbox</a>' in signin.text
+    signin = shared_client.post("/me", headers={"Cookie": ""})
+    assert signin.status_code == 401 and '<a class="btn p" href="/login">Sign in</a>' in signin.text
     assert '<main class="app-page denied">' in signin.text and "<script" not in signin.text
 
 
@@ -608,7 +619,7 @@ def test_tokens_page_has_the_new_token_menu_and_the_agent_env(shared_client, con
 
 
 def test_api_use_stamps_last_used_outside_the_wait_transaction(shared_client, conn, monkeypatch):
-    bob = {"X-Forwarded-Email": "bob@example.com"}
+    bob = signed_in("bob@example.com")
     db.add_user(conn, id="bob@example.com", name="Bob", role="member")
     token, used = _token(conn, "bob@example.com", "used")
     _, unused = _token(conn, "bob@example.com", "unused")
@@ -659,3 +670,48 @@ def test_access_form_with_a_nul_character_is_422(shared_client, conn, path, data
 def test_nul_character_in_an_access_path_is_404(shared_client):
     for path in ("/access/users/admin%00@example.com", "/access/tokens/x%00/revoke"):
         assert shared_client.post(path, headers=ADMIN).status_code == 404, path
+
+
+def test_admin_resets_a_members_sign_in(shared_client, conn, as_user, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    bob = as_user("bob@example.com")
+    carol = as_user("carol@example.com")
+    assert db.link_account(conn, "bob@example.com", "bob-sub")["oidc_sub"] == "bob-sub"
+    page = shared_client.get("/access/members", headers=ADMIN)
+    assert 'aria-label="Reset sign-in for bob@example.com"' in page.text
+    assert 'aria-label="Reset sign-in for admin@example.com"' not in page.text
+    for headers, status in [
+        (carol, 403),
+        (ADMIN | {"Sec-Fetch-Site": "cross-site"}, 403),
+    ]:
+        r = shared_client.post(
+            "/access/users/bob@example.com", data={"reset": "1"}, headers=headers
+        )
+        assert r.status_code == status
+    assert db.get_user(conn, "bob@example.com")["oidc_sub"] == "bob-sub"
+    assert shared_client.get("/", headers=bob).status_code == 200
+    r = shared_client.post(
+        "/access/users/bob@example.com",
+        data={"reset": "1"},
+        headers=ADMIN,
+        follow_redirects=False,
+    )
+    assert (r.status_code, r.headers["location"]) == (303, "/access/members")
+    user = db.get_user(conn, "bob@example.com")
+    assert (user["oidc_sub"], user["active"], user["role"]) == (None, 1, "member")
+    assert shared_client.get("/", headers=bob, follow_redirects=False).status_code == 303
+    assert shared_client.get("/", headers=signed_in("bob@example.com")).status_code == 200
+    assert shared_client.get("/", headers=carol).status_code == 200
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("access ")]
+    assert lines == ["access action=reset_sign_in actor=admin@example.com target=bob@example.com"]
+    missing = shared_client.post(
+        "/access/users/nobody@example.com", data={"reset": "1"}, headers=ADMIN
+    )
+    assert missing.status_code == 404
+
+
+def test_a_pasted_email_with_non_breaking_spaces_is_trimmed(shared_client):
+    data = {"id": " Eve@example.com ", "name": "Eve", "role": "member"}
+    r = shared_client.post("/access/users", data=data, headers=ADMIN, follow_redirects=False)
+    assert r.status_code == 303
+    assert "eve@example.com" in shared_client.get("/access/members", headers=ADMIN).text

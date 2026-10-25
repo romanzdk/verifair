@@ -39,7 +39,7 @@ verifair is a small web service where agents push markdown change-review reports
 - **Optional execution evidence (Phase 3).** Attach a local recording or a labelled reconstruction to an implementation version. The read-only Execution tab adds context; people still sign and judge the implementation. See the [intended implemented contract and version-pinned capture recipes](docs/tracing.md).
 - **Built for agents.** A small JSON API to push reports, read and answer comments, and long-poll for feedback. Ships with an [agent skill](#agent-skill).
 - **An Inbox for people.** Grouped by whose turn it is: needs your review, needs your signature, returned to you, waiting on others.
-- **Two modes.** Local mode for one person or a small trusted group. Shared mode for a team behind an SSO proxy, with members, admins and per-member agent tokens.
+- **Two modes.** Local mode for one person or a small trusted group. Shared mode for a team, with built-in sign-in (Google or any OpenID Connect provider), members, admins and per-member agent tokens.
 - **Small and plain.** FastAPI, Jinja and htmx, no JavaScript build step, strict CSP. State lives in Postgres, so you can run several replicas. Light and dark theme, works on a phone.
 - **Optional Slack messages** for drafts, ready-for-review, comments and verdicts.
 - **Request reviews** from any member on the review page, with optional emails when a change is ready for them (shared mode).
@@ -178,9 +178,9 @@ Full reference: [docs/api.md](docs/api.md) (push, read, comments, wait, errors).
 | [docs/api.md](docs/api.md) | Push a report, read it, read and answer comments, wait for feedback, errors, required sections, provenance |
 | [docs/reviewing.md](docs/reviewing.md) | Inbox and personal views, signing, blocking threads |
 | [docs/tracing.md](docs/tracing.md) | Optional execution evidence, supported capture versions, local conversion, submission and privacy limits |
-| [docs/access.md](docs/access.md) | Local and shared mode, members and admins, agent tokens, report ownership, moderation, switching from local to shared |
+| [docs/access.md](docs/access.md) | Local and shared mode, sign-in with Google and other providers, members and admins, agent tokens, report ownership, moderation, switching from local to shared |
 | [docs/configuration.md](docs/configuration.md) | All environment variables |
-| [docs/deployment.md](docs/deployment.md) | Run from source, Docker, deploying behind a proxy, Postgres, backup and restore, upgrading an HTTP deployment |
+| [docs/deployment.md](docs/deployment.md) | Run from source, Docker, deploying behind HTTPS, Postgres, backup and restore, upgrading an HTTP deployment |
 | [docs/report-template.md](docs/report-template.md) | The report layout, as a full example |
 
 ## Configuration
@@ -190,8 +190,12 @@ Full reference: [docs/api.md](docs/api.md) (push, read, comments, wait, errors).
 | `VERIFAIR_DATABASE_URL` | required | Postgres connection URL |
 | `VERIFAIR_API_TOKEN` | required in local mode | Bearer token agents use in local mode |
 | `VERIFAIR_BASE_URL` | `http://localhost:8000` | Public URL for links and notifications |
-| `VERIFAIR_IDENTITY_HEADER` | unset | Header with the user id from your auth proxy. Turns on shared mode |
-| `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: the first admin |
+| `VERIFAIR_OIDC_ISSUER` | unset | Sign-in provider, for example `https://accounts.google.com`. Turns on shared mode |
+| `VERIFAIR_OIDC_CLIENT_ID` | unset | Shared mode: OAuth client ID |
+| `VERIFAIR_OIDC_CLIENT_SECRET` | unset | Shared mode: OAuth client secret |
+| `VERIFAIR_SESSION_SECRET` | unset | Shared mode: signs the session cookie, at least 32 characters, same on every replica |
+| `VERIFAIR_OIDC_ALLOWED_DOMAINS` | unset | Shared mode: email domains that may sign in, for example `example.com`. Required with Google |
+| `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: email of the first admin |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | H2 headings every report must have |
 | `VERIFAIR_DB_POOL_SIZE` | `10` | Database connections per process |
 | `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook |
@@ -200,10 +204,10 @@ Details: [docs/configuration.md](docs/configuration.md).
 
 ## Deployment
 
-verifair needs Postgres 18 and HTTPS for any browser access outside `localhost`. For a team, run it in shared mode behind an auth proxy (for example oauth2-proxy with SSO) that sets the identity header, and make sure only the proxy can reach it.
+verifair needs Postgres 18 and HTTPS for any browser access outside `localhost`. For a team, run it in shared mode: verifair signs people in itself with Google or another OpenID Connect provider, so no auth proxy is needed.
 
 - [Run from source](docs/deployment.md#run-from-source) and [Docker](docs/deployment.md#docker)
-- [Deploying](docs/deployment.md#deploying): proxy, TLS, Postgres, replicas, probes, backup and restore
+- [Deploying](docs/deployment.md#deploying): sign-in, TLS, Postgres, replicas, probes, backup and restore
 - [Set up shared mode](docs/access.md#set-up-shared-mode) and [switch from local to shared mode](docs/access.md#switching-from-local-to-shared-mode)
 
 ## Related projects

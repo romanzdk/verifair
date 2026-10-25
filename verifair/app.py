@@ -2,19 +2,21 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote, urlsplit
 
 import psycopg
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
 
-from verifair import api, db, web
-from verifair.config import Settings
+from verifair import api, auth, db, web
+from verifair.config import Settings, check_oidc
 from verifair.deps import borrow, run_with_conn
 
 TOO_LARGE = {"detail": "request body too large"}
@@ -25,7 +27,8 @@ CSP = (
 MAX_BODY = 1024 * 1024
 READYZ_TIMEOUT = 2
 log = logging.getLogger("verifair")
-SIGN_IN = "Sign in through your company login to use verifair."
+SIGN_IN = "Sign in to use verifair."
+PUBLIC = ("/healthz", "/readyz", "/login", "/auth/callback", "/logout", "/signed-out")
 DB_UNAVAILABLE = "The database is not available. Try again in a moment."
 # connection exceptions, and the server shutting down or not accepting connections yet
 CONNECTION_LOST = ("08", "57P")
@@ -34,26 +37,52 @@ STARTUP_LOCKED = (
 )
 
 
-async def _membership_denial(request: Request, settings: Settings):
-    values = request.headers.getlist(settings.identity_header)
-    user_id = values[0].strip().lower() if len(values) == 1 else ""
-    message, status = SIGN_IN, 401
-    if len(values) > 1:
-        reason = "duplicate-header"
-    elif user_id in ("", "agent"):
-        reason = "missing-header"
-    else:
-        user = await run_with_conn(request.app, db.get_user, user_id)
-        if user is not None and user["active"]:
-            request.state.member = user
-            return None
-        reason = "not-member" if user is None else "inactive"
-        status = 403
-        message = (web.NOT_MEMBER if user is None else web.DEACTIVATED).format(id=user_id)
+def _sign_in_again(request: Request, reason: str, cookie: str | None):
     log.info("membership denied reason=%s path=%r", reason, request.url.path)
-    return web.templates.TemplateResponse(
-        request, "denied.html", {"message": message, "home": status == 401}, status_code=status
+    # raw_path keeps an encoded slash in a project name encoded
+    raw = request.scope.get("raw_path", b"").decode("latin-1") or request.url.path
+    target = raw + (f"?{request.url.query}" if request.url.query else "")
+    if request.method in ("GET", "HEAD") and "HX-Request" not in request.headers:
+        response = RedirectResponse(f"/login?next={quote(target, safe='')}", 303)
+    else:
+        # the page the person is on, not the htmx or form URL that answered 401
+        page = request.headers.get("HX-Current-URL") or request.headers.get("Referer")
+        try:
+            parts = urlsplit(page) if page else None
+        except ValueError:
+            parts = urlsplit("/")
+        if parts:
+            target = parts.path + (f"?{parts.query}" if parts.query else "")
+        elif request.method not in ("GET", "HEAD"):
+            target = "/"
+        next = auth.safe_next(target)
+        response = auth.page(request, "No access", SIGN_IN, 401, signin=True, next=next)
+    if cookie:
+        # a refused cookie that stays would send a failed sign-in back here in a loop
+        auth.clear_cookie(request, response, auth.SESSION_COOKIE)
+    return response
+
+
+async def _membership_denial(request: Request, settings: Settings):
+    cookie = request.cookies.get(auth.cookie_name(settings, auth.SESSION_COOKIE))
+    session = auth.read_session(settings.session_secret, cookie) if cookie else None
+    if session is None:
+        return _sign_in_again(request, "bad-session" if cookie else "no-session", cookie)
+    user_id, issued = session
+    user = await run_with_conn(request.app, db.get_user, user_id)
+    valid_after = user and user["sessions_valid_after"]
+    if valid_after and issued < datetime.fromisoformat(valid_after).timestamp():
+        return _sign_in_again(request, "signed-out", cookie)
+    if user is not None and user["active"]:
+        request.state.member = user
+        return None
+    log.info(
+        "membership denied reason=%s path=%r",
+        "not-member" if user is None else "inactive",
+        request.url.path,
     )
+    message = (web.NOT_MEMBER if user is None else web.DEACTIVATED).format(id=user_id)
+    return auth.page(request, "No access", message, 403, signout=True)
 
 
 class BodyLimit:
@@ -96,19 +125,21 @@ class BodyLimit:
 
 
 def create_app(settings: Settings) -> FastAPI:
+    check_oidc(settings)
     admin_id = settings.bootstrap_admin_id
-    if admin_id and not settings.identity_header:
+    if admin_id and not settings.shared:
         raise RuntimeError(
-            "VERIFAIR_BOOTSTRAP_ADMIN_ID is set but VERIFAIR_IDENTITY_HEADER is not."
-            " Set the header to run in shared mode."
+            "VERIFAIR_BOOTSTRAP_ADMIN_ID is set but VERIFAIR_OIDC_ISSUER is not."
+            " Set up sign-in to run in shared mode."
         )
-    if admin_id and not web.plain_id(admin_id):
+    if admin_id and not web.email_id(admin_id):
         raise RuntimeError(
-            "VERIFAIR_BOOTSTRAP_ADMIN_ID must be a plain id such as jane@example.com"
+            "VERIFAIR_BOOTSTRAP_ADMIN_ID must be the email the admin signs in with,"
+            " such as jane@example.com"
         )
-    if settings.identity_header and settings.api_token:
+    if settings.shared and settings.api_token:
         log.warning("VERIFAIR_API_TOKEN is ignored in shared mode. Agents need member tokens.")
-    if settings.smtp_url and not settings.identity_header:
+    if settings.smtp_url and not settings.shared:
         log.warning("VERIFAIR_SMTP_URL is ignored in local mode. Emails need shared mode.")
     pool = db.open_pool(settings.database_url, settings.db_pool_size)
     try:
@@ -116,20 +147,20 @@ def create_app(settings: Settings) -> FastAPI:
         # together run the checks and the bootstrap one after another
         with pool.connection() as conn, conn.transaction():
             db.init_schema(conn)
-            if not settings.identity_header and db.list_users(conn):
+            if not settings.shared and db.list_users(conn):
                 raise RuntimeError(
-                    "This database has members. Set VERIFAIR_IDENTITY_HEADER to run in shared mode."
+                    "This database has members. Set VERIFAIR_OIDC_ISSUER to run in shared mode."
                 )
-            if settings.identity_header and admin_id:
+            if settings.shared and admin_id:
                 if db.bootstrap_admin(conn, admin_id):
                     log.info("bootstrap admin created id=%s", admin_id.lower())
                 else:
                     log.info("bootstrap skipped: members exist")
-            if settings.identity_header and not db.list_users(conn):
+            if settings.shared and not db.list_users(conn):
                 raise RuntimeError(
                     "VERIFAIR_BOOTSTRAP_ADMIN_ID is required to create the first admin"
                 )
-            if settings.identity_header and (changed := db.lowercase_human_ids(conn)):
+            if settings.shared and (changed := db.lowercase_human_ids(conn)):
                 log.info("lowercased ids rows=%d", changed)
     except psycopg.errors.LockNotAvailable as error:
         pool.close()
@@ -148,9 +179,14 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.pool = pool
     app.state.mailed = set()
     app.state.pool_slots = asyncio.Semaphore(settings.db_pool_size)
+    app.state.oidc_transport = None
+    app.state.oidc_config = None
+    app.state.oidc_failure = None
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.include_router(api.router)
     app.include_router(web.router)
+    if settings.shared:
+        app.include_router(auth.router)
 
     @app.middleware("http")
     async def web_guard(request: Request, call_next):
@@ -162,8 +198,8 @@ def create_app(settings: Settings) -> FastAPI:
         try:
             if (
                 response is None
-                and settings.identity_header
-                and not (is_api or path in ("/healthz", "/readyz") or path.startswith("/static/"))
+                and settings.shared
+                and not (is_api or path in PUBLIC or path.startswith("/static/"))
             ):
                 response = await _membership_denial(request, settings)
             if response is None and request.method == "POST" and not is_api:
