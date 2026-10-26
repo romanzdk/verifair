@@ -325,6 +325,66 @@ def test_web_post_without_sec_fetch_site_is_refused(settings, make_app):
     assert "vf_name" not in r.cookies
 
 
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://0.0.0.0:8000", "http://localhost:8000", "http://127.0.0.2", "http://[::1]:8000"],
+)
+def test_loopback_web_post_without_sec_fetch_site_is_allowed_from_own_origin(
+    settings, make_app, base_url
+):
+    browser = TestClient(make_app(settings), base_url=base_url)
+    r = browser.post(
+        "/me", data={"name": "Alice"}, headers={"Origin": base_url}, follow_redirects=False
+    )
+    assert r.status_code == 303
+
+
+@pytest.mark.parametrize(
+    ("base_url", "origin"),
+    [
+        ("http://0.0.0.0:8000", None),
+        ("http://0.0.0.0:8000", "null"),
+        ("http://0.0.0.0:8000", "https://evil.example"),
+        ("http://0.0.0.0:8000", "http://0.0.0.0:8001"),
+        ("http://0.0.0.0:8000", "https://0.0.0.0:8000"),
+        ("http://verifair.internal", "http://verifair.internal"),
+        ("http://127.evil.example", "http://127.evil.example"),
+        ("http://192.168.1.10:8000", "http://192.168.1.10:8000"),
+        ("http://[::]:8000", "http://[::]:8001"),
+        ("http://localhost.:8000", "http://localhost.:8000"),
+    ],
+)
+def test_web_post_without_sec_fetch_site_is_refused_unless_loopback_own_origin(
+    settings, make_app, base_url, origin
+):
+    browser = TestClient(make_app(settings), base_url=base_url)
+    headers = {"Origin": origin} if origin else {}
+    r = browser.post("/me", data={"name": "Mallory"}, headers=headers, follow_redirects=False)
+    assert (r.status_code, r.json()) == (403, {"detail": "browser request required"})
+
+
+def test_loopback_own_origin_does_not_override_a_cross_site_header(settings, make_app):
+    browser = TestClient(make_app(settings), base_url="http://0.0.0.0:8000")
+    r = browser.post(
+        "/me",
+        data={"name": "Mallory"},
+        headers={"Origin": "http://0.0.0.0:8000", "Sec-Fetch-Site": "cross-site"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 403
+
+
+def test_shared_mode_has_no_loopback_origin_fallback(shared_settings, make_app):
+    browser = TestClient(make_app(shared_settings), base_url="http://localhost:8000")
+    r = browser.post(
+        "/me",
+        data={"name": "Mallory"},
+        headers={"Origin": "http://localhost:8000"} | signed_in("admin@example.com"),
+        follow_redirects=False,
+    )
+    assert (r.status_code, r.json()) == (403, {"detail": "browser request required"})
+
+
 def test_api_post_is_exempt_from_origin_check(client):
     r = client.post("/api/reports", json=REPORT, headers=H | {"Sec-Fetch-Site": "cross-site"})
     assert r.status_code == 201
