@@ -25,12 +25,22 @@ Older versions kept their data in a SQLite file, `verifair.db`. This version doe
 
 ## Docker
 
+CI publishes the image to `ghcr.io/romanzdk/verifair` for `linux/amd64` and `linux/arm64`:
+
+| Tag | Published on |
+| --- | --- |
+| `main`, `sha-<commit>` | every push to `main` |
+| `1.2.3`, `latest` | a `v1.2.3` git tag |
+
+Deploy a version tag or `sha-<commit>`, not `main` or `latest`, so a restart does not pull a different version. To build it yourself, run `docker build -t verifair .`.
+
 ```bash
-docker build -t verifair .
 docker run --rm -e VERIFAIR_API_TOKEN=change-me \
   -e VERIFAIR_DATABASE_URL=postgresql://verifair:verifair@host.docker.internal:5432/verifair \
-  -p 127.0.0.1:8000:8000 verifair
+  -p 127.0.0.1:8000:8000 ghcr.io/romanzdk/verifair:main
 ```
+
+The image runs as user `10001`, not root, so it works with Kubernetes `runAsNonRoot: true`.
 
 This needs a running Postgres. `host.docker.internal` reaches a Postgres on your own machine (Docker Desktop). On Linux, or for another server, replace it with the database host.
 
