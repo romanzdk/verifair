@@ -42,7 +42,7 @@ docker run --rm -e VERIFAIR_API_TOKEN=change-me \
   -p 127.0.0.1:8000:8000 ghcr.io/romanzdk/verifair:1.2.3
 ```
 
-The image runs as user `10001`, not root, so it works with Kubernetes `runAsNonRoot: true`.
+The image runs as user `10001`, not root, so it works with Kubernetes `runAsNonRoot: true`. With `readOnlyRootFilesystem: true`, mount an `emptyDir` at `/tmp`, because `uv run` writes there at start.
 
 This needs a running Postgres. `host.docker.internal` reaches a Postgres on your own machine (Docker Desktop). On Linux, or for another server, replace it with the database host.
 
