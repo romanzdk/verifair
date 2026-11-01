@@ -1715,6 +1715,36 @@ def test_header_labels_only_use_plain_project_names(client):
     assert ">my.repo_2-x#8<" in header and header.count('class="ext"') == 2
 
 
+@pytest.mark.parametrize(
+    ("ticket_url", "label"),
+    [
+        ("https://x.atlassian.net/browse/DATA-12?atlOrigin=abc", "DATA-12"),
+        ("https://github.com/o/r/issues/12#issuecomment-99", "12"),
+        ("https://gitlab.example.com/g/p/-/issues/7/", "7"),
+        ("https://youtrack.example.com/issue/DATA-1", "DATA-1"),
+        ("https://t/%E2%80%AEevil", "ticket"),
+        ("https://t/" + "a" * 100, "a" * 100),
+        ("https://t/" + "a" * 101, "ticket"),
+    ],
+)
+def test_ticket_label_comes_from_the_url_path(ticket_url, label):
+    assert web._ticket_label(ticket_url) == label
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://gitlab.example.com/g/p/-/merge_requests/\u07c1\u07c2",
+        "https://github.com/o/r/pull/\uff11\uff12",
+        "https://github.com/o/r/pull/" + "1" * 11,
+        "https://gitlab.example.com/g/%E2%80%AEp/-/merge_requests/9",
+    ],
+)
+def test_code_links_need_plain_names_and_numbers(url):
+    report = {"ticket_url": None}
+    assert web._code_links(report, [("x", url)]) == []
+
+
 def test_header_shows_one_link_per_merge_request(client):
     push(
         client,

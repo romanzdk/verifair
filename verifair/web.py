@@ -332,7 +332,7 @@ NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
 
 
 def _ticket_label(url: str) -> str:
-    label = url.rstrip("/").rsplit("/", 1)[-1]
+    label = urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1]
     return label if re.fullmatch(NAME, label) else "ticket"
 
 
@@ -343,7 +343,9 @@ def _links(report: db.Row) -> list[tuple[str, str]]:
     return links
 
 
-CODE_LINK = re.compile(rf"/({NAME})(?:/-)?/(merge_requests|pull|pulls|pull-requests)/(\d+)(?:/|$)")
+CODE_LINK = re.compile(
+    rf"/({NAME})(?:/-)?/(merge_requests|pull|pulls|pull-requests)/([0-9]{{1,10}})(?:/|$)"
+)
 
 
 def _code_link(url: str) -> tuple[str, str] | None:
