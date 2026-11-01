@@ -25,6 +25,9 @@ print(json.dumps({
     "risk": "high",
     "body": body,
     "ticket_url": "https://example.com/tickets/BILL-412",
+    "links": [
+        {"label": "Merge request !231", "url": "https://example.com/code/merge_requests/231"}
+    ],
     "author": "Alice",
     "agent": "example-agent",
     "model": "example-model-1",

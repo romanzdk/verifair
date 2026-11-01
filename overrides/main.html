@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block libs %}
+  {{ super() }}
+  {#- Material loads an unpinned mermaid@11 from unpkg unless `mermaid` is already set, so a failed load sets a no-op stand-in -#}
+  {% if page and 'class="mermaid"' in page.content %}
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js" integrity="sha384-EOXBFmc3gx5mb+vn0vPvvGqACToJD24hhacX5Yx+8NUUQrHIle/Qi5Bg9o3zKwW2" crossorigin="anonymous" onerror="window.mermaid = {initialize() {}, render: () => new Promise(() => {})}"></script>
+  {% endif %}
+{% endblock %}

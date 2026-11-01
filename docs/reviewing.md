@@ -59,6 +59,10 @@ Start with the attachment version, reported commit, original plan revision when 
 
 Expand the indented call tree to read kind, title, status and known timing. Details show any recorded plain-text input/output, explanation, exit code and source reference. Missing data says **Not recorded**, rather than implying zero duration or success. Parent links appear only when the source explicitly provides them; separate roots and file order do not establish cross-run causality. Stable event links reveal their ancestors when opened.
 
+![Execution tab: attachment version, reported commit and plan revision, two imported Claude Code runs with partial coverage warnings, and the call tree with a failed pytest run opened next to the plan used for this implementation](images/execution.png)
+
+<img src="images/mobile-execution.png" width="260" alt="Execution tab on a phone: the run labels and warnings, then the collapsed plan above the call tree">
+
 **Plan used for this implementation** shows the exact bound plan, not today's latest plan. On desktop it can sit beside the tree; on mobile it precedes it. A later revision is linked separately with an explanation that the evidence was attached against the older plan. A plan-only update can therefore show an older trace binding alongside a newer current plan. No plan is a valid state, and there is no automatic score claiming all plan steps were covered.
 
 The tree expands with keyboard controls, visible focus and text status labels, and remains usable without JavaScript. It supports light/dark themes and 320px layouts; long output wraps or scrolls inside its panel. For local capture, submission and privacy limits, see [tracing.md](tracing.md). Evidence has the report's existing readers; removing it from a new version does not erase older evidence.
