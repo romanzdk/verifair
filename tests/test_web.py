@@ -1632,6 +1632,58 @@ UNSIGNED_COPY = "The author has not signed this version yet."
 SELF_COPY = "You signed this report. Someone else has to approve it."
 
 
+def _header(html):
+    start = html.index('id="vf_header"')
+    return html[start : html.index("</header>", start)]
+
+
+def test_header_shows_merge_and_pull_request_links_only(client):
+    push(
+        client,
+        links=[
+            {"label": "CI run", "url": "https://ci.example.com/jobs/7"},
+            {
+                "label": "Merge request !231",
+                "url": "https://gitlab.example.com/g/p/-/merge_requests/231",
+            },
+            {"label": "PR <12>", "url": "https://github.com/o/r/pull/12"},
+            {"label": "Bitbucket", "url": "https://bitbucket.org/o/r/pull-requests/3"},
+            {"label": "Gitea", "url": "https://gitea.example.com/o/r/pulls/4"},
+            {"label": "Pulls page", "url": "https://github.com/o/r/pulls"},
+        ],
+    )
+    header = _header(client.get("/r/prorate").text)
+    assert header.index("BILL-412") < header.index("Merge request !231")
+    for url in (
+        "https://gitlab.example.com/g/p/-/merge_requests/231",
+        "https://github.com/o/r/pull/12",
+        "https://bitbucket.org/o/r/pull-requests/3",
+        "https://gitea.example.com/o/r/pulls/4",
+    ):
+        assert f'<a class="ext" href="{url}">' in header
+    assert "PR &lt;12&gt;" in header and "PR <12>" not in header
+    assert "https://ci.example.com/jobs/7" not in header
+    assert 'href="https://github.com/o/r/pulls"' not in header
+    page = client.get("/r/prorate").text
+    links_line = page[page.index('<p class="links">') :]
+    assert "https://ci.example.com/jobs/7" in links_line and "Merge request !231" in links_line
+
+
+def test_header_keeps_code_links_after_signing_and_on_execution(client):
+    push(
+        client, links=[{"label": "Merge request !231", "url": "https://x/g/p/-/merge_requests/231"}]
+    )
+    client.cookies.set("vf_name", "Signer")
+    assert "Merge request !231" in sign(client).text.split("</header>")[0]
+    assert "Merge request !231" in _header(client.get("/r/prorate?tab=execution").text)
+
+
+def test_header_without_code_links_is_unchanged(client):
+    push(client, links=[{"label": "Dashboard", "url": "https://grafana.example.com/d/1"}])
+    header = _header(client.get("/r/prorate").text)
+    assert header.count('class="ext"') == 1 and "grafana" not in header
+
+
 def test_sign_moves_unsigned_to_awaiting_review(client):
     push(client)
     assert api_report(client)["status"] == "unsigned"

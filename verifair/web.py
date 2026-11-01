@@ -337,6 +337,15 @@ def _links(report: db.Row) -> list[tuple[str, str]]:
     return links
 
 
+CODE_LINK = re.compile(r"/(merge_requests|pull|pulls|pull-requests)/\d+/?$")
+
+
+def _code_links(report: db.Row) -> list[tuple[str, str]]:
+    """Merge and pull request links, shown in the header next to the ticket."""
+    links = json.loads(report["links"])
+    return [(link["label"], link["url"]) for link in links if CODE_LINK.search(link["url"])]
+
+
 def _sign_refusal(request: Request, report: db.Row, user_id: str) -> str | None:
     owner, author = report["author_id"], report["author"]
     if not request.state.signed_in:
@@ -503,6 +512,7 @@ def report_context(
         "has_body": shown["body"] is not None,
         "plan_html": render_markdown(shown["plan"]) if shown["plan"] is not None else None,
         "ticket": _ticket_label(report["ticket_url"]) if report["ticket_url"] else None,
+        "code_links": _code_links(report),
         "version": version,
         "version_date": shown["created_at"],
         "current_version": current,
