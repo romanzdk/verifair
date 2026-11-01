@@ -388,7 +388,7 @@ table.t form { margin: 0; }
 .sign { display: contents; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--text-muted); align-items: center; }
 .meta b { color: var(--text); font-weight: 600; }
-.meta a.ext { display: inline-flex; align-items: center; gap: 2px; color: var(--link); }
+.meta a.ext { display: inline-flex; align-items: center; gap: 2px; color: var(--link); text-decoration: underline dotted; text-underline-offset: 3px; }
 .badge {
   display: inline-flex; align-items: center; justify-self: start; height: 20px; padding: 0 8px; border-radius: 999px;
   font: 500 12px/16px var(--font); white-space: nowrap; background: var(--s-unsigned-bg); color: var(--s-unsigned);

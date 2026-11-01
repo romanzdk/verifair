@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote as url_quote
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -326,8 +326,14 @@ def _require_report(conn: db.Connection, id: str) -> db.Row:
     return report
 
 
+# Header labels come from URLs, so they are limited to plain names: agent text with spaces,
+# separators or bidi characters must not read like a signature or another link
+NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
+
+
 def _ticket_label(url: str) -> str:
-    return url.rstrip("/").rsplit("/", 1)[-1]
+    label = urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1]
+    return label if re.fullmatch(NAME, label) else "ticket"
 
 
 def _links(report: db.Row) -> list[tuple[str, str]]:
@@ -335,6 +341,38 @@ def _links(report: db.Row) -> list[tuple[str, str]]:
     if report["ticket_url"]:
         links.insert(0, (_ticket_label(report["ticket_url"]), report["ticket_url"]))
     return links
+
+
+CODE_LINK = re.compile(
+    rf"/({NAME})(?:/-)?/(merge_requests|pull|pulls|pull-requests)/([0-9]{{1,10}})(?:/|$)"
+)
+
+
+def _code_link(url: str) -> tuple[str, str] | None:
+    """A merge or pull request URL as (short label, identity), else None."""
+    parts = urlsplit(url)
+    match = CODE_LINK.search(parts.path)
+    if not match:
+        return None
+    repo, kind, number = match.groups()
+    short = f"{repo}{'!' if kind == 'merge_requests' else '#'}{number}"
+    return short, parts.netloc + parts.path[: match.end(3)]
+
+
+def _code_links(report: db.Row, links: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
+    """Merge and pull request links for the header, as (short label, agent label, url).
+
+    The short label comes from the URL like the ticket's, so agent text cannot pose as
+    header facts such as "Signed by"."""
+    ticket = report["ticket_url"] and _code_link(report["ticket_url"])
+    seen = {ticket[1]} if ticket else set()
+    code_links = []
+    for label, url in links:
+        found = _code_link(url)
+        if found and found[1] not in seen:
+            seen.add(found[1])
+            code_links.append((found[0], label, url))
+    return code_links
 
 
 def _sign_refusal(request: Request, report: db.Row, user_id: str) -> str | None:
@@ -480,6 +518,7 @@ def report_context(
             )
     url = f"/r/{url_quote(id)}"
     reviewable = markdown is not None and not readonly_plan
+    links = _links(report)
     return {
         "report": report,
         "url": url,
@@ -503,6 +542,7 @@ def report_context(
         "has_body": shown["body"] is not None,
         "plan_html": render_markdown(shown["plan"]) if shown["plan"] is not None else None,
         "ticket": _ticket_label(report["ticket_url"]) if report["ticket_url"] else None,
+        "code_links": _code_links(report, links),
         "version": version,
         "version_date": shown["created_at"],
         "current_version": current,
@@ -525,7 +565,7 @@ def report_context(
             for v in verdicts
         ],
         "versions": db.list_versions(conn, id)[::-1],
-        "links": _links(report),
+        "links": links,
         "my_verdict": judged.get(user_id),
         "verdict_block": "The current plan must be approved before reviewing the implementation."
         if gate

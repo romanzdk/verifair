@@ -418,6 +418,7 @@ def test_html_responses_carry_csp(client):
     for path in ["/r/t", "/healthz", "/static/app.js", "/api/reports/t"]:
         r = client.get(path, headers=H)
         assert r.headers["x-content-type-options"] == "nosniff", path
+        assert r.headers["referrer-policy"] == "same-origin", path
 
 
 def _seed_local_mode_ids(settings, make_app):

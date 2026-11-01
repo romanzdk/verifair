@@ -236,6 +236,7 @@ def create_app(settings: Settings) -> FastAPI:
             log.error("database unavailable path=%r: %s: %s", path, type(error).__name__, error)
             response = PlainTextResponse(DB_UNAVAILABLE, 503, headers={"Retry-After": "5"})
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "same-origin"
         if path == "/access" or path.startswith("/access/"):
             response.headers["Cache-Control"] = "no-store"
         if response.headers.get("content-type", "").startswith("text/html"):
