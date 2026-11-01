@@ -1644,38 +1644,57 @@ def test_header_shows_merge_and_pull_request_links_only(client):
             {"label": "CI run", "url": "https://ci.example.com/jobs/7"},
             {
                 "label": "Merge request !231",
-                "url": "https://gitlab.example.com/g/p/-/merge_requests/231",
+                "url": "https://gitlab.example.com/g/billing-service/-/merge_requests/231",
             },
-            {"label": "PR <12>", "url": "https://github.com/o/r/pull/12"},
-            {"label": "Bitbucket", "url": "https://bitbucket.org/o/r/pull-requests/3"},
-            {"label": "Gitea", "url": "https://gitea.example.com/o/r/pulls/4"},
+            {"label": "PR <12>", "url": "https://github.com/o/verifair/pull/12/files"},
+            {"label": "Bitbucket", "url": "https://bitbucket.org/o/web/pull-requests/3?tab=diff"},
+            {"label": "Gitea", "url": "https://gitea.example.com/o/api/pulls/4#issuecomment-1"},
             {"label": "Pulls page", "url": "https://github.com/o/r/pulls"},
+            {"label": "Fake", "url": "https://evil.example/?next=/pull/3"},
         ],
     )
     header = _header(client.get("/r/prorate").text)
-    assert header.index("BILL-412") < header.index("Merge request !231")
-    for url in (
-        "https://gitlab.example.com/g/p/-/merge_requests/231",
-        "https://github.com/o/r/pull/12",
-        "https://bitbucket.org/o/r/pull-requests/3",
-        "https://gitea.example.com/o/r/pulls/4",
+    assert header.index("BILL-412") < header.index("billing-service!231")
+    for url, short in (
+        (
+            "https://gitlab.example.com/g/billing-service/-/merge_requests/231",
+            "billing-service!231",
+        ),
+        ("https://github.com/o/verifair/pull/12/files", "verifair#12"),
+        ("https://bitbucket.org/o/web/pull-requests/3?tab=diff", "web#3"),
+        ("https://gitea.example.com/o/api/pulls/4#issuecomment-1", "api#4"),
     ):
-        assert f'<a class="ext" href="{url}">' in header
-    assert "PR &lt;12&gt;" in header and "PR <12>" not in header
-    assert "https://ci.example.com/jobs/7" not in header
+        assert f'href="{url}"' in header and f">{short}<" in header
+    assert 'title="PR &lt;12&gt;"' in header and "PR <12>" not in header
+    assert "ci.example.com" not in header and "evil.example" not in header
     assert 'href="https://github.com/o/r/pulls"' not in header
     page = client.get("/r/prorate").text
     links_line = page[page.index('<p class="links">') :]
     assert "https://ci.example.com/jobs/7" in links_line and "Merge request !231" in links_line
 
 
-def test_header_keeps_code_links_after_signing_and_on_execution(client):
+def test_header_code_links_ignore_spoofed_labels_and_duplicates(client):
+    mr = "https://gitlab.example.com/g/p/-/merge_requests/9"
     push(
-        client, links=[{"label": "Merge request !231", "url": "https://x/g/p/-/merge_requests/231"}]
+        client,
+        ticket_url="https://github.com/o/r/pull/1",
+        links=[
+            {"label": "Signed by Security Team", "url": mr},
+            {"label": "again", "url": mr},
+            {"label": "BILL-412", "url": "https://github.com/o/r/pull/1"},
+        ],
     )
+    header = _header(client.get("/r/prorate").text)
+    assert header.count(f'href="{mr}"') == 1 and ">p!9<" in header
+    assert ">Signed by Security Team<" not in header
+    assert header.count('href="https://github.com/o/r/pull/1"') == 1
+
+
+def test_header_keeps_code_links_after_signing_and_on_execution(client):
+    push(client, links=[{"label": "MR", "url": "https://x/g/p/-/merge_requests/231"}])
     client.cookies.set("vf_name", "Signer")
-    assert "Merge request !231" in sign(client).text.split("</header>")[0]
-    assert "Merge request !231" in _header(client.get("/r/prorate?tab=execution").text)
+    assert ">p!231<" in sign(client).text.split("</header>")[0]
+    assert ">p!231<" in _header(client.get("/r/prorate?tab=execution").text)
 
 
 def test_header_without_code_links_is_unchanged(client):

@@ -14,7 +14,7 @@
     <span id="vf_open">{{ open_count }} open thread{{ "s" if open_count != 1 }}</span>
     {% endif %}
     {% if ticket %}<a class="ext" href="{{ report.ticket_url }}">{{ ticket }}{{ icon("external-link", "ic12") }}</a>{% endif %}
-    {% for label, href in code_links %}<a class="ext" href="{{ href }}">{{ label }}{{ icon("external-link", "ic12") }}</a>{% endfor %}
+    {% for short, label, href in code_links %}<a class="ext" href="{{ href }}" title="{{ label }}">{{ short }}{{ icon("external-link", "ic12") }}</a>{% endfor %}
     {% if view_tab != 'execution' and signature %}<span>Signed by <b>{{ signature.signer_name }}</b> · {{ signature.created_at|date }}</span>
     {% elif is_current and reviewable and (view_tab|default('report') in ('report', 'implementation') or (view_tab == 'plan' and plan_first)) %}
     {% if plan_gate %}<span>The current plan must be approved before signing the implementation.</span>

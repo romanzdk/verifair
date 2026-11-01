@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote as url_quote
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -337,13 +337,25 @@ def _links(report: db.Row) -> list[tuple[str, str]]:
     return links
 
 
-CODE_LINK = re.compile(r"/(merge_requests|pull|pulls|pull-requests)/\d+/?$")
+CODE_LINK = re.compile(r"/([^/]+)(?:/-)?/(merge_requests|pull|pulls|pull-requests)/(\d+)(?:/|$)")
 
 
-def _code_links(report: db.Row) -> list[tuple[str, str]]:
-    """Merge and pull request links, shown in the header next to the ticket."""
-    links = json.loads(report["links"])
-    return [(link["label"], link["url"]) for link in links if CODE_LINK.search(link["url"])]
+def _code_links(report: db.Row, links: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
+    """Merge and pull request links for the header, as (short label, agent label, url).
+
+    The short label comes from the URL like the ticket's, so agent text cannot pose as
+    header facts such as "Signed by"."""
+    seen = {report["ticket_url"]}
+    code_links = []
+    for label, url in links:
+        match = CODE_LINK.search(urlsplit(url).path)
+        if match and url not in seen:
+            seen.add(url)
+            repo, kind, number = match.groups()
+            code_links.append(
+                (f"{repo}{'!' if kind == 'merge_requests' else '#'}{number}", label, url)
+            )
+    return code_links
 
 
 def _sign_refusal(request: Request, report: db.Row, user_id: str) -> str | None:
@@ -489,6 +501,7 @@ def report_context(
             )
     url = f"/r/{url_quote(id)}"
     reviewable = markdown is not None and not readonly_plan
+    links = _links(report)
     return {
         "report": report,
         "url": url,
@@ -512,7 +525,7 @@ def report_context(
         "has_body": shown["body"] is not None,
         "plan_html": render_markdown(shown["plan"]) if shown["plan"] is not None else None,
         "ticket": _ticket_label(report["ticket_url"]) if report["ticket_url"] else None,
-        "code_links": _code_links(report),
+        "code_links": _code_links(report, links),
         "version": version,
         "version_date": shown["created_at"],
         "current_version": current,
@@ -535,7 +548,7 @@ def report_context(
             for v in verdicts
         ],
         "versions": db.list_versions(conn, id)[::-1],
-        "links": _links(report),
+        "links": links,
         "my_verdict": judged.get(user_id),
         "verdict_block": "The current plan must be approved before reviewing the implementation."
         if gate
