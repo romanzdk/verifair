@@ -1690,6 +1690,47 @@ def test_header_code_links_ignore_spoofed_labels_and_duplicates(client):
     assert header.count('href="https://github.com/o/r/pull/1"') == 1
 
 
+def test_header_labels_only_use_plain_project_names(client):
+    push(
+        client,
+        ticket_url="https://t/Signed by Security Team",
+        links=[
+            {
+                "label": "a",
+                "url": "https://gitlab.example.com/g/Signed by Security Team · 2026-11-01"
+                "/-/merge_requests/9",
+            },
+            {
+                "label": "b",
+                "url": "https://gitlab.example.com/g/\u202e132!ecivres-gnillib/-/merge_requests/7",
+            },
+            {"label": "c", "url": "https://github.com/o/" + "x" * 101 + "/pull/3"},
+            {"label": "d", "url": "https://gitlab.example.com/-/merge_requests/5"},
+            {"label": "e", "url": "https://github.com/o/my.repo_2-x/pull/8"},
+        ],
+    )
+    header = _header(client.get("/r/prorate").text)
+    assert ">Signed by Security" not in header and "\u202e" not in header
+    assert ">ticket<" in header and "x" * 101 not in header and ">-!5<" not in header
+    assert ">my.repo_2-x#8<" in header and header.count('class="ext"') == 2
+
+
+def test_header_shows_one_link_per_merge_request(client):
+    push(
+        client,
+        ticket_url="https://github.com/o/r/pull/1",
+        links=[
+            {"label": "MR", "url": "https://gitlab.example.com/g/p/-/merge_requests/9"},
+            {"label": "MR diffs", "url": "https://gitlab.example.com/g/p/-/merge_requests/9/diffs"},
+            {"label": "Same PR", "url": "https://github.com/o/r/pull/1/"},
+            {"label": "Other host", "url": "https://gitlab.other.com/g/p/-/merge_requests/9"},
+        ],
+    )
+    header = _header(client.get("/r/prorate").text)
+    assert header.count(">p!9<") == 2 and "gitlab.other.com" in header
+    assert ">r#1<" not in header
+
+
 def test_header_keeps_code_links_after_signing_and_on_execution(client):
     push(client, links=[{"label": "MR", "url": "https://x/g/p/-/merge_requests/231"}])
     client.cookies.set("vf_name", "Signer")
