@@ -1,0 +1,23 @@
+:root,
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #2f6fe0;
+  --md-primary-fg-color--light: #4a82ee;
+  --md-primary-fg-color--dark: #2559c4;
+  --md-accent-fg-color: #2559c4;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-accent-fg-color: #6b9dff;
+  --md-typeset-a-color: #6b9dff;
+}
+
+.md-typeset table img {
+  border-radius: 6px;
+}
+
+/* The default 70% white search hint is too faint on this lighter blue header */
+@media screen and (min-width: 60em) {
+  .md-search__input::placeholder {
+    color: var(--md-primary-bg-color);
+  }
+}

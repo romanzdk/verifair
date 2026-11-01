@@ -1,0 +1,83 @@
+site_name: verifair
+site_description: Review the evidence, not the diff. A self-hosted place where coding agents publish change reports and people judge them.
+site_url: https://romanzdk.github.io/verifair/
+repo_url: https://github.com/romanzdk/verifair
+repo_name: romanzdk/verifair
+edit_uri: edit/main/docs/
+copyright: MIT licence
+
+exclude_docs: |
+  superpowers/
+  examples/
+
+hooks:
+  - docs_hooks.py
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Reviewing: reviewing.md
+  - API: api.md
+  - Report template: report-template.md
+  - Execution traces: tracing.md
+  - Access and sign-in: access.md
+  - Configuration: configuration.md
+  - Deployment: deployment.md
+
+theme:
+  name: material
+  custom_dir: overrides
+  font: false
+  logo: images/logo.svg
+  favicon: images/logo.svg
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Dark theme
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Light theme
+  features:
+    - navigation.tracking
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format

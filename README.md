@@ -16,13 +16,13 @@
 ![Python 3.15](https://img.shields.io/badge/python-3.15-blue.svg)
 ![Postgres 18](https://img.shields.io/badge/postgres-18-336791.svg)
 
-[Quickstart](#quickstart) · [How it works](#how-it-works) · [Screenshots](#screenshots) · [API](docs/api.md) · [Configuration](docs/configuration.md) · [Deployment](docs/deployment.md)
+[Docs](https://romanzdk.github.io/verifair/) · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Screenshots](#screenshots) · [API](docs/api.md) · [Configuration](docs/configuration.md) · [Deployment](docs/deployment.md)
 
 </div>
 
 <br>
 
-![A verifair review page: the Edge cases section of a report with an open blocking thread, the agent's answer and the reviewers on the side](docs/images/review.png)
+![Demo: an agent pushes a report, the author signs it, a reviewer comments on a sentence, the agent answers and pushes version 2, the author signs again and the reviewer approves](docs/images/demo.gif)
 
 ## Why
 
@@ -102,6 +102,8 @@ This is local mode. For a team, use shared mode. See [docs/access.md](docs/acces
 
 ## Screenshots
 
+![A verifair review page: the Edge cases section of a report with an open blocking thread, the agent's answer and the reviewers on the side](docs/images/review.png)
+
 | Inbox, light | Inbox, dark |
 | --- | --- |
 | ![Inbox in light theme](docs/images/inbox-light.png) | ![Inbox in dark theme](docs/images/inbox-dark.png) |
@@ -113,6 +115,10 @@ This is local mode. For a team, use shared mode. See [docs/access.md](docs/acces
 | Agent tokens (shared mode) | Members (shared mode) |
 | --- | --- |
 | ![Agent tokens page with active and revoked tokens](docs/images/tokens.png) | ![Members page with roles](docs/images/members.png) |
+
+| Execution trace | Execution trace, dark |
+| --- | --- |
+| ![Execution tab with the agent's call tree, a failed test run with its output, and the plan used for the implementation](docs/images/execution.png) | ![Execution tab in dark theme](docs/images/execution-dark.png) |
 
 <p align="center">
   <img src="docs/images/mobile.png" width="260" alt="Inbox on a phone">
@@ -184,6 +190,8 @@ Full reference: [docs/api.md](docs/api.md) (push, read, comments, wait, errors).
 | [docs/configuration.md](docs/configuration.md) | All environment variables |
 | [docs/deployment.md](docs/deployment.md) | Run from source, Docker, deploying behind HTTPS, Postgres, backup and restore, upgrading an HTTP deployment |
 | [docs/report-template.md](docs/report-template.md) | The report layout, as a full example |
+
+Agents can read all of it as Markdown: [llms.txt](https://romanzdk.github.io/verifair/llms.txt), or every page in one file in [llms-full.txt](https://romanzdk.github.io/verifair/llms-full.txt).
 
 ## Configuration
 

@@ -4,6 +4,10 @@ This page documents the intended implemented behavior of Phase 3, normalized sch
 
 Execution evidence gives reviewers context about recorded work. **Imported recording (uploader-supplied)** and **Agent-written reconstruction** are different kinds of evidence. Neither label authenticates a capture. A completed tool call does not prove that a feature works or a test passed, and an assistant step is not necessarily one model API request.
 
+![Execution tab in dark theme: the call tree of an imported Claude Code recording next to the plan used for the implementation](images/execution-dark.png)
+
+Reviewers read it on the report's **Execution** tab; see [Execution](reviewing.md#execution).
+
 ## Convert a local capture
 
 `python -m verifair.trace_import` ships with the existing package. It reads only files you explicitly name and writes normalized JSON. It never starts an agent, discovers sessions, reads your agent directories automatically, uploads anything or needs provider credentials.
