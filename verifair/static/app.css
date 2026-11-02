@@ -361,6 +361,7 @@ table.t form { margin: 0; }
   .chg .si, .chg .when { margin-top: 2px; }
   .chg > :is(.badge, .risk, .av, .stack, .cm) { display: none; }
   .chg-ph { display: inline; }
+  .chg-m { white-space: normal; }
   .grp-h .hint { display: none; }
 }
 @media (max-width: 640px) {
@@ -547,7 +548,4 @@ body.has-verdict .side { padding-bottom: 112px; }
   }
   body.has-verdict .side { padding-bottom: 16px; }
   .verdict textarea { flex-basis: 100%; }
-  /* after your own verdict the bar keeps only the note and the buttons; showing the summary
-     on focus would move the buttons under a finger that is already tapping */
-  .verdict:has(.mine) textarea { display: none; }
 }

@@ -1088,16 +1088,18 @@ def lowercase_human_ids(conn: Connection) -> int:
 def link_account(conn: Connection, id: str, sub: str, name: str | None = None) -> Row | None:
     """Link a member to their provider account on first sign-in. None when not a member.
 
-    The provider's name replaces only the default name the bootstrap admin got from the email.
+    The provider's name, sent only for the bootstrap admin, replaces the default name they got
+    from the email, and only on the linked account.
     """
     with _write(conn):
         # a deactivated member is never linked, so whoever signs in after a reset cannot claim them
         return conn.execute(
             "UPDATE users SET oidc_sub = CASE WHEN active=1 THEN COALESCE(oidc_sub, %s)"
             " ELSE oidc_sub END,"
-            " name = CASE WHEN active=1 AND %s::text IS NOT NULL AND name=%s THEN %s ELSE name END"
+            " name = CASE WHEN active=1 AND %s::text IS NOT NULL AND name=%s"
+            " AND COALESCE(oidc_sub, %s)=%s THEN %s ELSE name END"
             " WHERE id=%s RETURNING oidc_sub, active",
-            (sub, name, default_name(id), name, id),
+            (sub, name, default_name(id), sub, sub, name, id),
         ).fetchone()
 
 

@@ -1888,13 +1888,13 @@ def test_header_shows_provenance_and_versions_show_commit(client):
     assert "Written by" not in client.get("/r/prorate").text
 
 
-def test_phone_rows_say_status_and_risk_and_verdict_bar_shrinks(client):
+def test_phone_rows_say_status_and_risk(client):
     push(client)
     page = client.get("/changes?tab=all").text
     assert '<span class="chg-ph" aria-hidden="true">Unsigned · High risk · </span>' in page
     css = (Path(web.__file__).parent / "static" / "app.css").read_text()
-    assert ".chg-ph { display: inline; }" in _media(css, "max-width: 1023px")
-    assert ".verdict:has(.mine) textarea { display: none; }" in _media(css, "max-width: 720px")
+    tablet = _media(css, "max-width: 1023px")
+    assert ".chg-ph { display: inline; }" in tablet and ".chg-m { white-space: normal; }" in tablet
 
 
 def test_changes_counts_unsigned(client):

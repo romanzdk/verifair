@@ -557,10 +557,25 @@ def test_sign_in_takes_the_provider_name_only_over_the_default(anonymous, provid
     provider.sign_in(anonymous, name="  Ada\n Lovelace ")
     assert _user(anonymous.app, "admin@example.com")["name"] == "Ada Lovelace"
     with closing(db.connect(url)) as conn:
-        db.add_user(conn, id="bob@example.com", name="Robert", role="member")
+        db.add_user(conn, id="bob@example.com", name="bob", role="member")
     anonymous.cookies.clear()
-    provider.sign_in(anonymous, email="bob@example.com", sub="bob-sub", name="Bob B")
-    assert _user(anonymous.app, "bob@example.com")["name"] == "Robert"
+    provider.sign_in(anonymous, email="bob@example.com", sub="bob-sub", name="Alice Admin")
+    assert _user(anonymous.app, "bob@example.com")["name"] == "bob"
+
+
+def test_provider_name_needs_the_linked_account_and_plain_text(anonymous, provider):
+    provider.sign_in(anonymous)
+    anonymous.cookies.clear()
+    provider.sign_in(anonymous, sub="someone-else", name="Mallory")
+    assert _user(anonymous.app, "admin@example.com")["name"] == "admin"
+    anonymous.cookies.clear()
+    provider.sign_in(anonymous, name="\u202eAda\u200b \x07Lovelace\u2066")
+    assert _user(anonymous.app, "admin@example.com")["name"] == "Ada Lovelace"
+
+
+def test_long_provider_name_is_cut_without_a_trailing_space(anonymous, provider):
+    provider.sign_in(anonymous, name="A" * 59 + " Smythe")
+    assert _user(anonymous.app, "admin@example.com")["name"] == "A" * 59
 
 
 def test_deactivated_member_is_never_linked_or_signed_in(anonymous, provider, caplog):
