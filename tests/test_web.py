@@ -1881,10 +1881,12 @@ def test_header_shows_provenance_and_versions_show_commit(client):
     assert '<a class="ext" href="https://s/1">session<svg class="ic12"' in page
     assert "/static/icons.svg#external-link" in page
     assert "<code>0123456</code>" in page and "0123456789" not in page
-    push(client, id="prorate", agent="claude-code")
+    push(client, id="prorate")
+    assert "Written by <b>claude-code</b> (opus)" in client.get("/r/prorate").text
+    push(client, id="prorate", model=None, session_url=None)
     page = client.get("/r/prorate").text
     assert "Written by <b>claude-code</b><" in page and "session</a>" not in page
-    push(client, id="prorate")
+    push(client, id="prorate", agent=None)
     assert "Written by" not in client.get("/r/prorate").text
 
 

@@ -657,6 +657,50 @@ def test_provenance_and_commit_roundtrip(client):
     assert [v["commit"] for v in g["versions"]] == ["a1b2c3d", "a" * 40]
 
 
+METADATA = {
+    "ticket_url": "https://tickets.example/BILL-1",
+    "links": [{"label": "MR", "url": "https://git.example/g/billing/-/merge_requests/7"}],
+    "agent": "claude",
+    "model": "opus",
+    "session_url": "https://sessions.example/1",
+}
+METADATA_KEYS = ("ticket_url", "links", "agent", "model", "session_url")
+
+
+def _metadata(client):
+    g = client.get("/api/reports/prorate", headers=H).json()
+    return {key: g[key] for key in METADATA_KEYS}
+
+
+def test_omitted_metadata_keeps_its_value_on_new_versions(client):
+    push(client, id="prorate", **METADATA)
+    assert push(client, id="prorate", body="## Intent\nv2").status_code == 201
+    assert _metadata(client) == METADATA
+
+
+def test_sent_metadata_replaces_or_clears(client):
+    push(client, id="prorate", **METADATA)
+    push(client, id="prorate", body="## Intent\nv2", agent="codex", links=[])
+    assert _metadata(client) == METADATA | {"agent": "codex", "links": []}
+    cleared = {"ticket_url": None, "agent": None, "model": None, "session_url": None}
+    push(client, id="prorate", body="## Intent\nv3", **cleared)
+    assert _metadata(client) == cleared | {"links": []}
+
+
+def test_null_links_is_rejected(client):
+    assert push(client, links=None).status_code == 422
+
+
+def test_plan_revision_keeps_metadata(client):
+    plan = {"id": "prorate", "project": "billing-service", "title": "Prorate", "risk": "high"}
+    first = plan | METADATA | {"workflow": "plan_first", "plan": "## Goal\nv1"}
+    assert client.post("/api/reports", json=first, headers=H).status_code == 201
+    second = plan | {"plan": "## Goal\nv2", "expected_version": 1}
+    r = client.post("/api/reports", json=second, headers=H)
+    assert r.status_code == 201, r.text
+    assert _metadata(client) == METADATA
+
+
 def test_provenance_defaults_to_null(client):
     push(client)
     g = client.get("/api/reports/prorate", headers=H).json()

@@ -83,7 +83,7 @@ print(
 
 Save the returned `{id, version, url}`. If creation omitted `id`, use the **returned ID** on every later push; omitting it again creates another review. Workflow is fixed after creation. Tell the owner to sign the plan, then wait for another human's approval. No agent token can sign or give a verdict on either target.
 
-Before updating, read `GET /api/reports/$ID`. Repeat `project`, `title`, `risk` and the same `id`; include `expected_version` equal to its `current_version`. Supply at least one content field. Omitted `plan`/`body` inherits current contents; explicit null for either is rejected on updates. No document can be removed. Blank/NUL/surrogate documents are rejected without saving metadata or content.
+Before updating, read `GET /api/reports/$ID`. Repeat `project`, `title`, `risk` and the same `id`; include `expected_version` equal to its `current_version`. Leave out `ticket_url`, `links`, `agent`, `model` and `session_url` to keep them; send them only to change them. Supply at least one content field. Omitted `plan`/`body` inherits current contents; explicit null for either is rejected on updates. No document can be removed. Blank/NUL/surrogate documents are rejected without saving metadata or content.
 
 When `stage` is `awaiting_implementation`, attach the report body at that ID with the guard, omitting plan or repeating its exact approved contents. Supply a non-null `commit` only together with a supplied body. Required report headings apply to this body. The URL remains unchanged. A plan-only update inherits an existing body's commit; a snapshot without implementation has null commit. A changed plan plus body in one request is refused; revise and get approval of the plan before submitting body.
 

@@ -300,6 +300,7 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             commit=body.commit,
             trace=body.trace,
             trace_supplied="trace" in body.model_fields_set,
+            metadata_supplied=body.model_fields_set,
             owner_id=owner["id"] if owner is not None else None,
         )
     except db.NoOwner:
