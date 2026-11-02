@@ -1,7 +1,10 @@
 name: CI
 
 on:
+  # Dependabot branches are tested by their pull request, so skip the duplicate push run
   push:
+    branches-ignore: ["dependabot/**"]
+    tags: ["**"]
   pull_request:
 
 permissions:
