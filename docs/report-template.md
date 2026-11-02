@@ -72,4 +72,4 @@ None. The change only reads prices and dates that the handler already loads. It 
 - Ticket: [BILL-412](https://example.com/tickets/BILL-412)
 - Staging: [plan change page](https://example.com/staging/plan-change)
 - Notebook: [proration golden](https://example.com/notebooks/proration-golden)
-- Code: [merge request !231](https://example.com/code/merge_requests/231)
+- Code: [merge request !231](https://gitlab.example.com/billing/billing-service/-/merge_requests/231)

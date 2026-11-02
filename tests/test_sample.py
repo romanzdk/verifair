@@ -26,5 +26,8 @@ def test_sample_uses_example_author(tmp_path):
     payload = json.loads(args[args.index("-d") + 1])
     assert payload["author"] == "Alice"
     assert payload["links"] == [
-        {"label": "Merge request !231", "url": "https://example.com/code/merge_requests/231"}
+        {
+            "label": "Merge request !231",
+            "url": "https://gitlab.example.com/billing/billing-service/-/merge_requests/231",
+        }
     ]

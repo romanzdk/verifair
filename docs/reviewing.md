@@ -61,7 +61,7 @@ Expand the indented call tree to read kind, title, status and known timing. Deta
 
 ![Execution tab: attachment version, reported commit and plan revision, two imported Claude Code runs with partial coverage warnings, and the call tree with a failed pytest run opened next to the plan used for this implementation](images/execution.png)
 
-<img src="images/mobile-execution.png" width="260" alt="Execution tab on a phone: the run labels and warnings, then the collapsed plan above the call tree">
+<img src="images/mobile-execution.png" width="260" alt="Execution tab on a phone: the ticket and merge request links in the header, the run labels and warnings, then the collapsed plan above the call tree">
 
 **Plan used for this implementation** shows the exact bound plan, not today's latest plan. On desktop it can sit beside the tree; on mobile it precedes it. A later revision is linked separately with an explanation that the evidence was attached against the older plan. A plan-only update can therefore show an older trace binding alongside a newer current plan. No plan is a valid state, and there is no automatic score claiming all plan steps were covered.
 
