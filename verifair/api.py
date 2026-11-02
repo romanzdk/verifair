@@ -253,6 +253,14 @@ def _verdict_json(row: db.Row, latest_ids: set[int]) -> dict:
     }
 
 
+PROVENANCE = {"agent", "model", "session_url"}
+
+
+def _metadata_supplied(sent: set[str]) -> set[str]:
+    # agent, model and session_url name one writer, so a push replaces them together
+    return sent | PROVENANCE if sent & PROVENANCE else sent
+
+
 @router.post("/reports", status_code=201)
 def push_report(body: ReportIn, request: Request, conn: Conn, background: BackgroundTasks):
     if body.body is not None:
@@ -300,7 +308,7 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
             commit=body.commit,
             trace=body.trace,
             trace_supplied="trace" in body.model_fields_set,
-            metadata_supplied=body.model_fields_set,
+            metadata_supplied=_metadata_supplied(body.model_fields_set),
             owner_id=owner["id"] if owner is not None else None,
         )
     except db.NoOwner:

@@ -681,7 +681,8 @@ def test_omitted_metadata_keeps_its_value_on_new_versions(client):
 def test_sent_metadata_replaces_or_clears(client):
     push(client, id="prorate", **METADATA)
     push(client, id="prorate", body="## Intent\nv2", agent="codex", links=[])
-    assert _metadata(client) == METADATA | {"agent": "codex", "links": []}
+    provenance = {"agent": "codex", "model": None, "session_url": None}
+    assert _metadata(client) == METADATA | provenance | {"links": []}
     cleared = {"ticket_url": None, "agent": None, "model": None, "session_url": None}
     push(client, id="prorate", body="## Intent\nv3", **cleared)
     assert _metadata(client) == cleared | {"links": []}
