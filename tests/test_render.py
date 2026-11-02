@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from verifair import render
@@ -447,12 +449,19 @@ def test_section_plain_text_keeps_lines_and_link_text():
 
 def test_section_plain_text_drops_a_leading_template_hint():
     body = (
-        "## Judge this\n> The questions only a human can answer.\n\nIs a day right?\n\n"
-        "> A quote the agent meant.\n"
+        "## Judge this\n> The questions only a human can answer: product intent, trade-offs,"
+        " risk you accept.\n\nIs a day right?\n\n> A quote the agent meant.\n"
     )
     assert section_plain_text(body, "Judge this") == "Is a day right?\n\nA quote the agent meant."
-    nested = "## Judge this\n> hint\n>\n> > inner\n\nKept.\n"
-    assert section_plain_text(nested, "Judge this") == "Kept."
+    own = "## Judge this\n> Finance wrote: round once.\n\nIs that a decision?\n"
+    assert (
+        section_plain_text(own, "Judge this") == "Finance wrote: round once.\n\nIs that a decision?"
+    )
+
+
+def test_the_dropped_hint_is_the_report_templates():
+    template = (Path(__file__).parents[1] / "docs" / "report-template.md").read_text()
+    assert section_plain_text(template, "Judge this").startswith("- Is ")
 
 
 def test_section_plain_text_keeps_numbers_and_table_rows():

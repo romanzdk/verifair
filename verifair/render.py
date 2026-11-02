@@ -74,6 +74,12 @@ def render_markdown(body: str) -> str:
     return _md.render(body)
 
 
+# the "> hint" docs/report-template.md opens Judge this with; it is not the agent's words
+JUDGE_THIS_HINT = (
+    "The questions only a human can answer: product intent, trade-offs, risk you accept."
+)
+
+
 def section_plain_text(body: str, heading: str) -> str:
     tokens = _md.parse(body)
     starts = list(_headings(tokens))
@@ -81,14 +87,14 @@ def section_plain_text(body: str, heading: str) -> str:
         if name == heading:
             end = starts[n + 1][0] if n + 1 < len(starts) else len(tokens)
             section = tokens[index + 3 : end]
-            # The report template opens each section with a "> hint" quote for the agent
             if section and section[0].type == "blockquote_open":
                 close = next(
                     i
                     for i, t in enumerate(section)
                     if t.type == "blockquote_close" and t.level == section[0].level
                 )
-                section = section[close + 1 :]
+                if _plain_lines(section[: close + 1]) == JUDGE_THIS_HINT:
+                    section = section[close + 1 :]
             return _plain_lines(section)
     return ""
 

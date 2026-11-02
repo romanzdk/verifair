@@ -17,7 +17,7 @@ python -m verifair.trace_import --format codex-exec-jsonl \
   --source-version 0.163.0 --input capture/events.jsonl --output trace.json
 ```
 
-Without a Python 3.15 checkout of verifair, run the same command from the Docker image. Mount the folder with the capture; `--user` makes the output file yours, because the image runs as user `10001`:
+If you do not have Python 3.15 and a verifair checkout, run the same command from the [Docker image](deployment.md#docker) (pick a tag from its table). Mount the folder with the capture; `--user` makes the output file yours, because the image runs as user `10001`:
 
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \

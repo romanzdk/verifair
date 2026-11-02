@@ -182,7 +182,7 @@ def send_email(
                 message["Subject"] = subject
                 message["From"] = settings.email_from
                 message["To"] = to
-                message["Date"] = formatdate()
+                message["Date"] = formatdate(usegmt=True)
                 message["Message-ID"] = make_msgid(domain=settings.email_from.rpartition("@")[2])
                 message.set_content(text)
                 try:
