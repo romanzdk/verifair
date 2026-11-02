@@ -1,6 +1,6 @@
 # Optional execution evidence
 
-This page documents the intended implemented behavior of Phase 3, normalized schema v1. The capture recipes are pinned to the producer versions below; they are not observations from live model runs. Tracing is optional in both review workflows. Existing reports and submissions without traces keep working.
+This page documents normalized trace schema v1. The capture recipes are pinned to the producer versions below; they are not observations from live model runs. Tracing is optional in both review workflows. Existing reports and submissions without traces keep working.
 
 Execution evidence gives reviewers context about recorded work. **Imported recording (uploader-supplied)** and **Agent-written reconstruction** are different kinds of evidence. Neither label authenticates a capture. A completed tool call does not prove that a feature works or a test passed, and an assistant step is not necessarily one model API request.
 
@@ -15,6 +15,15 @@ Reviewers read it on the report's **Execution** tab; see [Execution](reviewing.m
 ```sh
 python -m verifair.trace_import --format codex-exec-jsonl \
   --source-version 0.163.0 --input capture/events.jsonl --output trace.json
+```
+
+Without a Python 3.15 checkout of verifair, run the same command from the Docker image. Mount the folder with the capture; `--user` makes the output file yours, because the image runs as user `10001`:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
+  ghcr.io/romanzdk/verifair:<tag> /app/.venv/bin/python -m verifair.trace_import \
+  --format codex-exec-jsonl --source-version 0.163.0 \
+  --input capture/events.jsonl --output trace.json
 ```
 
 | Flag | Meaning |

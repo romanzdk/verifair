@@ -12,10 +12,15 @@ permissions:
 
 jobs:
   test:
+    name: test (postgres ${{ matrix.postgres }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["16", "18"]
     services:
       postgres:
-        image: postgres:18
+        image: postgres:${{ matrix.postgres }}
         env:
           POSTGRES_USER: verifair
           POSTGRES_PASSWORD: verifair

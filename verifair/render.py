@@ -80,7 +80,16 @@ def section_plain_text(body: str, heading: str) -> str:
     for n, (index, name) in enumerate(starts):
         if name == heading:
             end = starts[n + 1][0] if n + 1 < len(starts) else len(tokens)
-            return _plain_lines(tokens[index + 3 : end])
+            section = tokens[index + 3 : end]
+            # The report template opens each section with a "> hint" quote for the agent
+            if section and section[0].type == "blockquote_open":
+                close = next(
+                    i
+                    for i, t in enumerate(section)
+                    if t.type == "blockquote_close" and t.level == section[0].level
+                )
+                section = section[close + 1 :]
+            return _plain_lines(section)
     return ""
 
 

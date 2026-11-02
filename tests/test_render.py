@@ -445,6 +445,16 @@ def test_section_plain_text_keeps_lines_and_link_text():
     assert section_plain_text(body, "Missing") == ""
 
 
+def test_section_plain_text_drops_a_leading_template_hint():
+    body = (
+        "## Judge this\n> The questions only a human can answer.\n\nIs a day right?\n\n"
+        "> A quote the agent meant.\n"
+    )
+    assert section_plain_text(body, "Judge this") == "Is a day right?\n\nA quote the agent meant."
+    nested = "## Judge this\n> hint\n>\n> > inner\n\nKept.\n"
+    assert section_plain_text(nested, "Judge this") == "Kept."
+
+
 def test_section_plain_text_keeps_numbers_and_table_rows():
     body = (
         "## Judge this\nFirst para.\n\nSecond para.\n\n1. one\n2. two\n\n"

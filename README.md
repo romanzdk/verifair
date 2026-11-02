@@ -14,7 +14,7 @@
 [![CI](https://github.com/romanzdk/verifair/actions/workflows/ci.yml/badge.svg)](https://github.com/romanzdk/verifair/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.15](https://img.shields.io/badge/python-3.15-blue.svg)
-![Postgres 18](https://img.shields.io/badge/postgres-18-336791.svg)
+![Postgres 16+](https://img.shields.io/badge/postgres-16%2B-336791.svg)
 
 [Docs](https://romanzdk.github.io/verifair/) · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Screenshots](#screenshots) · [API](docs/api.md) · [Configuration](docs/configuration.md) · [Deployment](docs/deployment.md)
 
@@ -38,7 +38,7 @@ verifair is a small web service where agents push markdown change-review reports
 - **Verdicts with rules.** Approve or request changes. Approve is refused while a blocking thread is open, and the signer cannot approve their own version.
 - **Versions.** The agent pushes a new version after feedback. Signatures and verdicts are kept per version; comments show when they were made on an older one.
 - **Plan first, when needed.** Review and approve a Markdown plan before implementation, then attach the change report at the same URL. Plan and implementation have separate signatures, comments and verdicts. Direct report submission still works.
-- **Optional execution evidence (Phase 3).** Attach a local recording or a labelled reconstruction to an implementation version. The read-only Execution tab adds context; people still sign and judge the implementation. See the [intended implemented contract and version-pinned capture recipes](docs/tracing.md).
+- **Optional execution evidence.** Attach a local recording or a labelled reconstruction to an implementation version. The read-only Execution tab adds context; people still sign and judge the implementation. See the [trace format and version-pinned capture recipes](docs/tracing.md).
 - **Built for agents.** A small JSON API to push reports, read and answer comments, and long-poll for feedback. Ships with an [agent skill](#agent-skill).
 - **An Inbox for people.** Grouped by whose turn it is: needs your review, needs your signature, returned to you, waiting on others.
 - **Two modes.** Local mode for one person or a small trusted group. Shared mode for a team, with built-in sign-in (Google or any OpenID Connect provider), members, admins and per-member agent tokens.
@@ -209,12 +209,14 @@ Agents can read all of it as Markdown: [llms.txt](https://romanzdk.github.io/ver
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | H2 headings every report must have |
 | `VERIFAIR_DB_POOL_SIZE` | `10` | Database connections per process |
 | `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook |
+| `VERIFAIR_SMTP_URL` | unset | Shared mode: optional mail server for review request emails, `smtp://` or `smtps://` |
+| `VERIFAIR_EMAIL_FROM` | unset | Sender address of those emails. Required with `VERIFAIR_SMTP_URL` |
 
 Details: [docs/configuration.md](docs/configuration.md).
 
 ## Deployment
 
-verifair needs Postgres 18 and HTTPS for any browser access outside `localhost`. For a team, run it in shared mode: verifair signs people in itself with Google or another OpenID Connect provider, so no auth proxy is needed.
+verifair needs Postgres 16 or newer, and HTTPS for any browser access outside `localhost`. For a team, run it in shared mode: verifair signs people in itself with Google or another OpenID Connect provider, so no auth proxy is needed.
 
 - [Run from source](docs/deployment.md#run-from-source) and [Docker](docs/deployment.md#docker)
 - [Deploying](docs/deployment.md#deploying): sign-in, TLS, Postgres, replicas, probes, backup and restore

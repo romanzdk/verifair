@@ -3,6 +3,7 @@ import smtplib
 import ssl
 from collections.abc import Mapping
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 from urllib.parse import quote, unquote, urlsplit
 
 import anyio
@@ -181,6 +182,8 @@ def send_email(
                 message["Subject"] = subject
                 message["From"] = settings.email_from
                 message["To"] = to
+                message["Date"] = formatdate()
+                message["Message-ID"] = make_msgid(domain=settings.email_from.rpartition("@")[2])
                 message.set_content(text)
                 try:
                     server.send_message(message, to_addrs=[to])
