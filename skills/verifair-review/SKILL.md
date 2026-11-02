@@ -57,7 +57,7 @@ EOF
 
 For a finished implementation, omit `workflow` or choose `"artifact"`. The implementation body and required headings are required on every push. Optionally attach one arbitrary nonblank Markdown `plan`; no template, headings or particular planning skill is required. Read its UTF-8 file as bytes then decode so CRLF is preserved. Send contents, not a path or URL. See [API examples](../../docs/api.md#optional-plan).
 
-Reuse `id` on updates. Omitted `plan` inherits; `"plan": None` emits JSON null and removes it only from the new snapshot. This workflow's Plan tab stays read-only; plan feedback operations return 422. Each push creates a new unsigned implementation snapshot, including identical-body or plan-only-context changes. Earlier signatures/verdicts remain history.
+Reuse `id` on updates. Leave out `ticket_url`, `links`, `agent`, `model` and `session_url` to keep them. Omitted `plan` inherits; `"plan": None` emits JSON null and removes it only from the new snapshot. This workflow's Plan tab stays read-only; plan feedback operations return 422. Each push creates a new unsigned implementation snapshot, including identical-body or plan-only-context changes. Earlier signatures/verdicts remain history.
 
 ### Plan first, then implementation
 

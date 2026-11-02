@@ -211,7 +211,7 @@ Writes use the existing token and owner checks; members cannot add evidence to a
 ```
 
 - For artifact reviews, `status` is `unsigned`, `awaiting_review`, `changes_requested` or `approved`. It is `unsigned` until someone signs `current_version`; after that it only counts verdicts on `current_version` from people other than its signer. Earlier verdicts by the signer remain in the history.
-- `signed_by` and `signed_at` describe the signature on `current_version`, or are `null`. `agent`, `model` and `session_url` are `null` when the push did not send them.
+- `signed_by` and `signed_at` describe the signature on `current_version`, or are `null`. `agent`, `model` and `session_url` are `null` until a push sets them, or after a push clears them with `null`.
 - `verdict` is `approve` or `request_changes`. `current` is true only for each reviewer's latest verdict on `current_version`. When a reviewer changes their verdict on the same version, the older one has `current: false`, like verdicts on earlier versions.
 
 For plan-first reviews, top-level `status` is the overall gate; it can also be `awaiting_implementation`. `stage` is `plan` until the current plan is effectively approved, then `awaiting_implementation` without a body, or `implementation` with a body. `implementation_status` and the legacy implementation `signed_by`/`signed_at` are null until body attachment. Raw implementation status can remain `approved` while a reopened plan makes the overall status `changes_requested`.
