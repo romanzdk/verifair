@@ -453,6 +453,8 @@ def test_section_plain_text_drops_a_leading_template_hint():
         " risk you accept.\n\nIs a day right?\n\n> A quote the agent meant.\n"
     )
     assert section_plain_text(body, "Judge this") == "Is a day right?\n\nA quote the agent meant."
+    other = body.replace("Judge this", "Design")
+    assert section_plain_text(other, "Design").startswith("The questions only")
     own = "## Judge this\n> Finance wrote: round once.\n\nIs that a decision?\n"
     assert (
         section_plain_text(own, "Judge this") == "Finance wrote: round once.\n\nIs that a decision?"

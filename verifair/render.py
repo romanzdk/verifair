@@ -87,7 +87,7 @@ def section_plain_text(body: str, heading: str) -> str:
         if name == heading:
             end = starts[n + 1][0] if n + 1 < len(starts) else len(tokens)
             section = tokens[index + 3 : end]
-            if section and section[0].type == "blockquote_open":
+            if heading == "Judge this" and section and section[0].type == "blockquote_open":
                 close = next(
                     i
                     for i, t in enumerate(section)
