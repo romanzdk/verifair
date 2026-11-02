@@ -1,7 +1,8 @@
 version: 2
 
 # Minor and patch bumps come as one PR per ecosystem, majors one by one.
-# The cooldown keeps brand-new releases out until they have been public for a week.
+# Runtimes (Python, uv 0.x, Postgres data format) only take patch and digest updates;
+# move them by hand together with .python-version, CI and the compose volume.
 updates:
   - package-ecosystem: github-actions
     directory: /
@@ -14,22 +15,21 @@ updates:
         update-types: [minor, patch]
   - package-ecosystem: docker
     directory: /
+    # No cooldown: a digest update is the same release rebuilt with security fixes
     schedule:
       interval: weekly
-    cooldown:
-      default-days: 7
-    groups:
-      minor-and-patch:
-        update-types: [minor, patch]
+    ignore:
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "*astral-sh/uv"
+        update-types: [version-update:semver-major, version-update:semver-minor]
   - package-ecosystem: docker-compose
     directory: /
     schedule:
       interval: weekly
-    cooldown:
-      default-days: 7
-    groups:
-      minor-and-patch:
-        update-types: [minor, patch]
+    ignore:
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
   - package-ecosystem: uv
     directory: /
     schedule:
