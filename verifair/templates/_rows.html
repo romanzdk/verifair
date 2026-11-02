@@ -7,7 +7,7 @@
   <span class="si {{ st }}" title="{{ STATUS_LABELS[st] }}" aria-hidden="true">{{ icon(STATUS_ICONS[st]) }}</span>
   <div class="chg-main">
     <div class="chg-t">{{ r.title }}</div>
-    <div class="chg-m">{{ (([r.project] if show_project else []) + [row.target_phrase if r.workflow == "plan_first" else "v" ~ r.latest_version] + ([row.ticket] if row.ticket else []))|join(" · ") }}</div>
+    <div class="chg-m"><span class="chg-ph" aria-hidden="true">{{ STATUS_LABELS[st] }} · {{ r.risk|capitalize }} risk · </span>{{ (([r.project] if show_project else []) + [row.target_phrase if r.workflow == "plan_first" else "v" ~ r.latest_version] + ([row.ticket] if row.ticket else []))|join(" · ") }}</div>
   </div>
   <span class="sr-only">{{ STATUS_LABELS[st] }}, {{ r.risk }} risk, by {{ r.author }}{% if row.reviewers %}, reviewers: {% for rv in row.reviewers %}{{ rv.name }} {{ what[rv.mark] if rv.mark else "review requested" }}{{ ", " if not loop.last }}{% endfor %}{% endif %}</span>
   <span class="badge b-{{ st }}" aria-hidden="true">{{ STATUS_LABELS[st] }}</span>
