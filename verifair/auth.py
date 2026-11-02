@@ -164,7 +164,9 @@ def check_id_token(id_token: str, settings: Settings, nonce: str, now: float) ->
             hd_needed and not (isinstance(hd, str) and hd.lower() in domains)
         ):
             raise SignInError("domain")
-    return member_id, sub
+    name = claims.get("name")
+    name = " ".join(name.split())[:60] if isinstance(name, str) else ""
+    return member_id, sub, name if name and db.storable(name) else None
 
 
 def _client(app: FastAPI) -> httpx.AsyncClient:
@@ -350,9 +352,9 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         )
         # taken before linking, so a reset that lands meanwhile also ends this session
         now = time.time()
-        member_id, sub = check_id_token(id_token, settings, flow["nonce"], now)
+        member_id, sub, name = check_id_token(id_token, settings, flow["nonce"], now)
         # no session for someone who is not a member yet: it would carry no linked account
-        linked = await run_with_conn(request.app, db.link_account, member_id, sub)
+        linked = await run_with_conn(request.app, db.link_account, member_id, sub, name)
         if linked is None:
             raise SignInError("not-member", member_id)
         if not linked["active"]:
