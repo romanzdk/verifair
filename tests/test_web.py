@@ -3768,3 +3768,24 @@ def test_change_row_visible_metadata_names_actionable_document(client, settings,
         r'<div class="chg-m"><span class="chg-ph"[^>]*>.*?</span>(.*?)</div>', page
     )[1]
     assert metadata.startswith(label)
+
+
+def test_section_comment_link_opens_its_form_without_javascript(client):
+    push(client)
+    page = client.get("/r/prorate").text
+    form_id = re.search(r'<a href="#(vf_cform_[^"]+)" class="cc"', page).group(1)
+    assert f'<form class="cform" id="{form_id}" hidden' in page
+    assert "html:not(.js) .cform:target { display: block; }" in client.get("/static/app.css").text
+
+
+def test_unknown_page_in_a_browser_is_a_page_not_json(client):
+    for path, message in (
+        ("/r/nope", "Report not found."),
+        ("/nowhere", "This page does not exist."),
+    ):
+        r = client.get(path)
+        assert r.status_code == 404 and r.headers["content-type"].startswith("text/html")
+        assert message in r.text and '<a href="/">Go to Inbox</a>' in r.text
+    fragment = client.get("/r/nope", headers={"HX-Request": "true"})
+    assert fragment.json() == {"detail": "report not found"}
+    assert client.get("/api/reports/nope", headers=H).json() == {"detail": "report not found"}

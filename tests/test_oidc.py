@@ -4,6 +4,7 @@ from dataclasses import replace
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
+import psycopg
 import pytest
 from conftest import CLIENT_ID, ISSUER, SESSION_SECRET, signed_in
 from fastapi.testclient import TestClient
@@ -368,6 +369,26 @@ def test_logout_clears_the_session(shared_client, as_user):
         "/logout", headers=signed_in("stranger@example.com"), follow_redirects=False
     )
     assert stranger.status_code == 303
+
+
+def test_logout_ends_a_copied_session_cookie_too(shared_client, as_user):
+    bob = as_user("bob@example.com")
+    assert shared_client.get("/", headers=bob).status_code == 200
+    shared_client.post("/logout", headers=bob, follow_redirects=False)
+    r = shared_client.get("/", headers=bob, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/login")
+    assert shared_client.get("/", headers=signed_in("bob@example.com")).status_code == 200
+    assert shared_client.get("/").status_code == 200
+
+
+def test_logout_still_clears_the_cookie_when_the_database_fails(shared_client, monkeypatch):
+    def down(conn, id):
+        raise psycopg.OperationalError("down")
+
+    monkeypatch.setattr(db, "end_sessions", down)
+    r = shared_client.post("/logout", follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/signed-out")
+    assert "max-age=0" in _set_cookies(r)[auth.SESSION_COOKIE].lower()
 
 
 def test_logout_needs_a_same_origin_browser_request(shared_client):

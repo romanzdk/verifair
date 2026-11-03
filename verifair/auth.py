@@ -10,6 +10,7 @@ import unicodedata
 from urllib.parse import quote, urlencode
 
 import httpx
+import psycopg
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import RedirectResponse
 
@@ -388,7 +389,16 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
 
 
 @router.post("/logout")
-def logout(request: Request):
+async def logout(request: Request):
+    settings = request.app.state.settings
+    # the cookie is signed, not stored, so only this ends a copy of it kept elsewhere
+    session = read_session(settings.session_secret, _cookie(request, SESSION_COOKIE))
+    if session:
+        try:
+            await run_with_conn(request.app, db.end_sessions, session[0])
+        except psycopg.Error as error:
+            # still sign this browser out; only copies of the cookie elsewhere stay valid
+            log.error("sign-out could not end other sessions id=%s: %s", session[0], error)
     response = RedirectResponse("/signed-out", 303)
     clear_cookie(request, response, SESSION_COOKIE)
     return response

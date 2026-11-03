@@ -146,7 +146,9 @@ class ReportIn(Input):
 
 
 class CommentIn(Input):
-    body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20000)]
+    body: Annotated[
+        str, StringConstraints(strip_whitespace=True, max_length=20000), AfterValidator(_not_blank)
+    ]
     author: Author = "agent"
     parent_id: int | None = None
     section: Anchor | None = None

@@ -366,6 +366,7 @@ table.t form { margin: 0; }
 }
 @media (max-width: 640px) {
   .denied { padding: 0 24px; }
+  .pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   .ph .meta { font-size: 12.5px; }
   .top-act .btn { padding: 0 8px; }
   .top-act .btn .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -485,6 +486,8 @@ body.has-verdict .side { padding-bottom: 112px; }
 .tact .error { flex-basis: 100%; margin: 0; }
 .reply { display: flex; gap: 8px; flex: 1; }
 .reply textarea { flex: 1; min-height: 32px; }
+/* without JavaScript the comment link opens its form through the URL fragment; with it, app.js owns hidden */
+html:not(.js) .cform:target { display: block; }
 .cform { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 8px 0; background: var(--bg-side); }
 .cform textarea { width: 100%; min-height: 60px; }
 .name-prompt {

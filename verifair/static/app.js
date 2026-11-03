@@ -1,3 +1,4 @@
+document.documentElement.classList.add("js");
 const popover = document.getElementById("vf_popover");
 const QUOTE_PREVIEW_MAX = 300;
 const QUOTE_MAX = 2000;
@@ -89,7 +90,10 @@ popover?.querySelector("button").addEventListener("click", () => {
 
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-comment-section]");
-  if (button) openForm(button.closest("section"), "");
+  if (button) {
+    event.preventDefault();
+    openForm(button.closest("section"), "");
+  }
   const cancel = event.target.closest("[data-cancel]");
   if (cancel) {
     const form = cancel.closest("form");
@@ -328,9 +332,12 @@ document.body.addEventListener("htmx:sendError", (event) => {
   const typed = errorAnchor(event)?.querySelector?.("textarea");
   showRequestError(event, typed ? "Connection lost. Your text is still here, try again." : "Connection lost. Try again.");
 });
-document.body.addEventListener("htmx:afterRequest", (event) => {
-  const anchor = event.detail.successful && errorAnchor(event);
+// cleared before sending, because a stale reply replaces the form and leaves its error orphaned
+document.body.addEventListener("htmx:beforeRequest", (event) => {
+  const anchor = errorAnchor(event);
   if (anchor) clearRequestError(anchor);
+});
+document.body.addEventListener("htmx:afterRequest", (event) => {
   // hx-disabled-elt drops focus to the body while the Request button is disabled
   const form = event.detail.requestConfig?.elt;
   if (!event.detail.successful && form?.matches?.(".addrev") && form.isConnected && document.activeElement === document.body) {
