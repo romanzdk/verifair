@@ -26,7 +26,7 @@ Then set:
 | `VERIFAIR_OIDC_CLIENT_SECRET` | The client secret from your provider |
 | `VERIFAIR_SESSION_SECRET` | The session secret. Use the same value on every replica |
 | `VERIFAIR_OIDC_ALLOWED_DOMAINS` | Comma-separated email domains that may sign in, for example `example.com`. Required with Google, optional with other providers |
-| `VERIFAIR_BOOTSTRAP_ADMIN_ID` | Your own email, for example `jane@example.com`. On a database with no members, startup makes it the first admin. Once members exist, it adds no one. Case does not matter |
+| `VERIFAIR_BOOTSTRAP_ADMIN_ID` | Your own email, for example `jane@example.com`. On a database with no members, startup makes it the first admin, named after the part before `@` until their first sign-in brings the name from your provider. Once members exist, it adds no one. Case does not matter |
 | `VERIFAIR_BASE_URL` | The HTTPS URL of verifair |
 
 `VERIFAIR_API_TOKEN` is not needed. If it is set, shared mode refuses it and startup logs a warning.

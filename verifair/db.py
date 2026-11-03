@@ -1083,14 +1083,21 @@ def lowercase_human_ids(conn: Connection) -> int:
     return changed
 
 
-def link_account(conn: Connection, id: str, sub: str) -> Row | None:
-    """Link a member to their provider account on first sign-in. None when not a member."""
+def link_account(conn: Connection, id: str, sub: str, name: str | None = None) -> Row | None:
+    """Link a member to their provider account on first sign-in. None when not a member.
+
+    The provider's name, sent only for the bootstrap admin, replaces the default name they got
+    from the email, and only on the linked account.
+    """
     with _write(conn):
         # a deactivated member is never linked, so whoever signs in after a reset cannot claim them
         return conn.execute(
             "UPDATE users SET oidc_sub = CASE WHEN active=1 THEN COALESCE(oidc_sub, %s)"
-            " ELSE oidc_sub END WHERE id=%s RETURNING oidc_sub, active",
-            (sub, id),
+            " ELSE oidc_sub END,"
+            " name = CASE WHEN active=1 AND %s::text IS NOT NULL AND name=%s"
+            " AND COALESCE(oidc_sub, %s)=%s THEN %s ELSE name END"
+            " WHERE id=%s RETURNING oidc_sub, active",
+            (sub, name, default_name(id), sub, sub, name, id),
         ).fetchone()
 
 
@@ -1106,13 +1113,17 @@ def reset_sign_in(conn: Connection, id: str) -> bool:
         )
 
 
+def default_name(id: str) -> str:
+    return (id.partition("@")[0] or id)[:60]
+
+
 def bootstrap_admin(conn: Connection, admin_id: str) -> bool:
     admin_id, now = admin_id.lower(), _now()
     with _write(conn):
         cur = conn.execute(
             "INSERT INTO users (id, name, role, created_at, updated_at)"
             " SELECT %s, %s, 'admin', %s, %s WHERE NOT EXISTS (SELECT 1 FROM users)",
-            (admin_id, (admin_id.partition("@")[0] or admin_id)[:60], now, now),
+            (admin_id, default_name(admin_id), now, now),
         )
     return cur.rowcount > 0
 

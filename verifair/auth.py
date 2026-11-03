@@ -6,6 +6,7 @@ import logging
 import math
 import secrets
 import time
+import unicodedata
 from urllib.parse import quote, urlencode
 
 import httpx
@@ -124,7 +125,9 @@ def _token_issuer(value, issuer: str) -> bool:
     return google or _same_issuer(value, issuer)
 
 
-def check_id_token(id_token: str, settings: Settings, nonce: str, now: float) -> tuple[str, str]:
+def check_id_token(
+    id_token: str, settings: Settings, nonce: str, now: float
+) -> tuple[str, str, str | None]:
     parts = id_token.split(".")
     try:
         claims = json.loads(_unb64(parts[1])) if len(parts) == 3 else None
@@ -164,7 +167,13 @@ def check_id_token(id_token: str, settings: Settings, nonce: str, now: float) ->
             hd_needed and not (isinstance(hd, str) and hd.lower() in domains)
         ):
             raise SignInError("domain")
-    return member_id, sub
+    name = claims.get("name")
+    if not isinstance(name, str) or member_id != (settings.bootstrap_admin_id or "").lower():
+        return member_id, sub, None
+    # control, bidi and zero-width characters could make the name look like someone else's
+    name = "".join(c for c in name if unicodedata.category(c) not in ("Cc", "Cf"))
+    name = " ".join(name.split())[:60].rstrip()
+    return member_id, sub, name if name and db.storable(name) else None
 
 
 def _client(app: FastAPI) -> httpx.AsyncClient:
@@ -350,9 +359,9 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         )
         # taken before linking, so a reset that lands meanwhile also ends this session
         now = time.time()
-        member_id, sub = check_id_token(id_token, settings, flow["nonce"], now)
+        member_id, sub, name = check_id_token(id_token, settings, flow["nonce"], now)
         # no session for someone who is not a member yet: it would carry no linked account
-        linked = await run_with_conn(request.app, db.link_account, member_id, sub)
+        linked = await run_with_conn(request.app, db.link_account, member_id, sub, name)
         if linked is None:
             raise SignInError("not-member", member_id)
         if not linked["active"]:
