@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import secrets
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -417,6 +417,10 @@ def _require_plan_approved(conn: Connection, report_id: str) -> None:
         raise PlanNotApproved(state["revision"])
 
 
+# Report-level metadata a later version keeps unless the push sends it again
+METADATA = ("ticket_url", "links", "agent", "model", "session_url")
+
+
 def push_report(
     conn: Connection,
     *,
@@ -442,6 +446,7 @@ def push_report(
     owner_id: str | None = None,
     trace: TraceDocument | None = None,
     trace_supplied: bool = False,
+    metadata_supplied: Collection[str] = METADATA,
 ) -> tuple[str, int]:
     if workflow not in (None, "artifact", "plan_first"):
         raise ValueError("invalid workflow")
@@ -512,23 +517,16 @@ def push_report(
             if trace is not None and expected_version is None:
                 raise ValueError("expected_version is required for trace updates")
             version = latest_version(conn, id) + 1
+            values = (ticket_url, links_json, agent, model, session_url)
+            changed = {
+                f: v for f, v in zip(METADATA, values, strict=True) if f in metadata_supplied
+            }
             conn.execute(
-                "UPDATE reports SET title=%s, risk=%s, ticket_url=%s, links=%s,"
-                " author=COALESCE(%s, author), author_id=COALESCE(%s, author_id), updated_at=%s,"
-                " agent=%s, model=%s, session_url=%s WHERE id=%s",
-                (
-                    title,
-                    risk,
-                    ticket_url,
-                    links_json,
-                    author,
-                    author_id,
-                    now,
-                    agent,
-                    model,
-                    session_url,
-                    id,
-                ),
+                "UPDATE reports SET title=%s, risk=%s,"
+                " author=COALESCE(%s, author), author_id=COALESCE(%s, author_id), updated_at=%s"
+                + "".join(f", {field}=%s" for field in changed)
+                + " WHERE id=%s",
+                (title, risk, author, author_id, now, *changed.values(), id),
             )
         else:
             if expected_version is not None:
