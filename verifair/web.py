@@ -117,6 +117,7 @@ PLAIN_ID = re.compile(r"[^/\\\x00-\x1f\x7f\s]+")
 SCOPES = {"all": "All changes", "author": "My changes", "reviewer": "My reviews"}
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 STALE_FORM = "The review changed while you were on the page. Reload it and try again."
+EMPTY_BODY = "comment body is empty"
 NAME_FIRST = "Set your name on the report page before you comment, sign or review."
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
@@ -315,6 +316,12 @@ def _form_refused(request: Request, message: str, status: int, url: str):
     return templates.TemplateResponse(request, "denied.html", ctx, status_code=status)
 
 
+def _empty_body(request: Request, url: str):
+    if not _htmx(request):
+        return _form_refused(request, EMPTY_BODY, 422, url)
+    raise HTTPException(422, EMPTY_BODY)
+
+
 def _name_prompt(request: Request, next: str, target: str | None = None):
     if not _htmx(request):
         return _form_refused(request, NAME_FIRST, 422, next)
@@ -324,13 +331,6 @@ def _name_prompt(request: Request, next: str, target: str | None = None):
 def _stale(request: Request, report: db.Row, latest: int, target: db.Target):
     ctx = {"url": _document_url(report, target), "latest": latest}
     return _partial(request, ["_stale.html"], ctx, _retarget(request))
-
-
-def _require_body(body: str) -> str:
-    body = body.strip()
-    if not body:
-        raise HTTPException(422, "comment body is empty")
-    return body
 
 
 def _require_report(conn: db.Connection, id: str) -> db.Row:
@@ -1031,7 +1031,9 @@ def post_comment(
     revision: Annotated[int | None, Form()] = None,
 ):
     report = _require_report(conn, id)
-    body = _require_body(body)
+    body = body.strip()
+    if not body:
+        return _empty_body(request, _document_url(report, target))
     revision = _revision(target, revision, version)
     user_id, name = user
     if not name:
@@ -1086,10 +1088,12 @@ def post_reply(
     revision: Annotated[int | None, Form()] = None,
 ):
     report = _require_report(conn, id)
-    body = _require_body(body)
     root = db.thread_root(conn, id, cid)
     if root is None:
         raise HTTPException(404, "comment not found")
+    body = body.strip()
+    if not body:
+        return _empty_body(request, _document_url(report, root["target"]))
     selected = root["target"]
     revision = _revision(selected, revision, version)
     user_id, name = user

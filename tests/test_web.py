@@ -1950,6 +1950,8 @@ def test_refused_or_stale_form_without_javascript_is_an_error_not_a_fragment(cli
     push(client, id="prorate")
     r = client.post("/r/prorate/verdict", data=data | {"summary": "x"}, headers=NO_JS)
     assert r.status_code == 409 and "Reload it and try again" in r.text
+    r = client.post("/r/prorate/comments", data={"version": 2, "body": "  "}, headers=NO_JS)
+    assert r.status_code == 422 and "comment body is empty" in r.text and "<h1>" in r.text
     client.cookies.delete("vf_name")
     r = client.post("/r/prorate/comments", data={"version": 2, "body": "x"}, headers=NO_JS)
     assert r.status_code == 422 and "Set your name" in r.text and "Back to the report" in r.text
