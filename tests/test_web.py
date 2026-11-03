@@ -1945,10 +1945,14 @@ def test_refused_or_stale_form_without_javascript_is_an_error_not_a_fragment(cli
     client.cookies.set("vf_name", "Rita")
     data = {"version": 1, "verdict": "request_changes"}
     r = client.post("/r/prorate/verdict", data=data, headers=NO_JS)
-    assert r.status_code == 422 and "Add a summary" in r.json()["detail"]
+    assert r.status_code == 422 and "<h1>" in r.text and "Add a summary" in r.text
+    assert '<a href="/r/prorate">Back to the report</a>' in r.text and "Back button" in r.text
     push(client, id="prorate")
     r = client.post("/r/prorate/verdict", data=data | {"summary": "x"}, headers=NO_JS)
-    assert r.status_code == 409
+    assert r.status_code == 409 and "Reload it and try again" in r.text
+    client.cookies.delete("vf_name")
+    r = client.post("/r/prorate/comments", data={"version": 2, "body": "x"}, headers=NO_JS)
+    assert r.status_code == 422 and "Set your name" in r.text and "Back to the report" in r.text
 
 
 def test_requested_changes_note_is_not_green(client):

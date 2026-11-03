@@ -117,6 +117,7 @@ PLAIN_ID = re.compile(r"[^/\\\x00-\x1f\x7f\s]+")
 SCOPES = {"all": "All changes", "author": "My changes", "reviewer": "My reviews"}
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 STALE_FORM = "The review changed while you were on the page. Reload it and try again."
+NAME_FIRST = "Set your name on the report page before you comment, sign or review."
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
 BLOCKED_LOCAL = "Resolve the open blocking threads first, or mark them non-blocking."
@@ -304,7 +305,19 @@ def _retarget(request: Request, target: str | None = None) -> dict | None:
     return {"HX-Retarget": target, "HX-Reswap": "outerHTML"} if target else None
 
 
+def _htmx(request: Request) -> bool:
+    return bool(request.headers.get("HX-Request"))
+
+
+def _form_refused(request: Request, message: str, status: int, url: str):
+    # without JavaScript the browser shows this response as a whole page
+    ctx = {"title": "Not saved", "message": message, "report_url": url}
+    return templates.TemplateResponse(request, "denied.html", ctx, status_code=status)
+
+
 def _name_prompt(request: Request, next: str, target: str | None = None):
+    if not _htmx(request):
+        return _form_refused(request, NAME_FIRST, 422, next)
     return _partial(request, ["_name_prompt.html"], {"next": next}, _retarget(request, target))
 
 
@@ -624,10 +637,10 @@ def _thread_response(
         root = db.thread_root(conn, report["id"], comment_id)
         if root is None:
             raise HTTPException(404, "comment not found")
-        if not request.headers.get("HX-Request"):
-            if error:
-                raise HTTPException(422, error)
+        if not _htmx(request):
             url = _document_url(report, root["target"])
+            if error:
+                return _form_refused(request, error, 422, url)
             return RedirectResponse(f"{url}#vf_t{root['id']}", 303)
         current = db.latest_version(conn, report["id"])
         if version is None:
@@ -662,7 +675,7 @@ def _moderation_refusal(request, conn, report, user, cid, *, version=None):
         raise HTTPException(404, "comment not found")
     if _can_moderate(_shared(request), request.state.member, user[0], root, report):
         return None
-    if not request.headers.get("HX-Request"):
+    if not _htmx(request):
         raise HTTPException(403, rules.MODERATION)
     return _thread_response(
         request, conn, report, user, cid, version=version, error=rules.MODERATION
@@ -945,10 +958,10 @@ def _revision(target, revision, version):
 
 
 def _action_error(request, conn, report, target, error):
-    if not request.headers.get("HX-Request"):
-        if isinstance(error, (db.StaleVersion, db.StaleRevision)):
-            raise HTTPException(409, STALE_FORM) from error
-        raise HTTPException(422, str(error)) from error
+    if not _htmx(request):
+        stale = isinstance(error, (db.StaleVersion, db.StaleRevision))
+        message, status = (STALE_FORM, 409) if stale else (str(error), 422)
+        return _form_refused(request, message, status, _document_url(report, target))
     if isinstance(error, db.StaleVersion):
         return _stale(request, report, error.latest, target)
     if isinstance(error, db.StaleRevision):
@@ -978,10 +991,9 @@ def _action_error(request, conn, report, target, error):
 def _action_response(
     request, conn, id, user, target, *, version, signing=False, error=None, summary=""
 ):
-    if not request.headers.get("HX-Request"):
-        if error:
-            raise HTTPException(422, error)
-        return RedirectResponse(_document_url(_require_report(conn, id), target), 303)
+    if not _htmx(request):
+        url = _document_url(_require_report(conn, id), target)
+        return _form_refused(request, error, 422, url) if error else RedirectResponse(url, 303)
     with _read(conn):
         ctx = _response_context(request, conn, id, user, target, version)
         if not ctx["is_current"]:
@@ -1389,7 +1401,7 @@ def _reviewers_response(
     *,
     target="implementation",
 ):
-    if not request.headers.get("HX-Request"):
+    if not _htmx(request):
         if error:
             raise HTTPException(422, error)
         return RedirectResponse(_document_url(report, target), 303)
