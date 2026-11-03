@@ -1,4 +1,4 @@
-<form class="cform" id="vf_cform_{{ s.slug }}"{% if s.heading %} hidden{% endif %}{% if oob %} hx-swap-oob="true"{% endif %} hx-post="{{ url }}/comments" hx-target="#vf_threads_{{ s.slug }}" hx-swap="beforeend" hx-disabled-elt="find button">
+<form class="cform" id="vf_cform_{{ s.slug }}"{% if s.heading %} hidden{% endif %}{% if oob %} hx-swap-oob="true"{% endif %} method="post" action="{{ url }}/comments" hx-post="{{ url }}/comments" hx-target="#vf_threads_{{ s.slug }}" hx-swap="beforeend" hx-disabled-elt="find button">
   <input type="hidden" name="version" value="{{ version }}">
   <input type="hidden" name="target" value="{{ target }}">
   <input type="hidden" name="revision" value="{{ revision }}">
