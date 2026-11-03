@@ -1899,6 +1899,69 @@ def test_phone_rows_say_status_and_risk(client):
     assert ".chg-ph { display: inline; }" in tablet and ".chg-m { white-space: normal; }" in tablet
 
 
+NO_JS = {"HX-Request": ""}
+
+
+def test_forms_work_without_javascript(client):
+    push(client)
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    page = client.get("/r/prorate").text
+    for action in ("sign", "comments"):
+        assert f'method="post" action="/r/prorate/{action}"' in page
+    r = client.post("/r/prorate/sign", data={"version": 1}, headers=NO_JS, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/r/prorate")
+    client.cookies.set("vf_id", "review00")
+    client.cookies.set("vf_name", "Rita")
+    page = client.get("/r/prorate").text
+    assert 'method="post" action="/r/prorate/verdict"' in page
+    r = client.post(
+        "/r/prorate/comments",
+        data={"version": 1, "body": "Why day 20?"},
+        headers=NO_JS,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and r.headers["location"].startswith("/r/prorate#vf_t")
+    cid = int(r.headers["location"].rpartition("vf_t")[2])
+    assert (
+        f'method="post" action="/r/prorate/comments/{cid}/reply"' in client.get("/r/prorate").text
+    )
+    r = client.post(
+        f"/r/prorate/comments/{cid}/reply",
+        data={"version": 1, "body": "Because."},
+        headers=NO_JS,
+        follow_redirects=False,
+    )
+    assert (r.status_code, r.headers["location"]) == (303, f"/r/prorate#vf_t{cid}")
+    data = {"version": 1, "verdict": "request_changes", "summary": "Day 20 is wrong."}
+    r = client.post("/r/prorate/verdict", data=data, headers=NO_JS, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/r/prorate")
+    assert api_report(client)["verdicts"][0]["summary"] == "Day 20 is wrong."
+
+
+def test_refused_or_stale_form_without_javascript_is_an_error_not_a_fragment(client):
+    push(client)
+    sign(client)
+    client.cookies.set("vf_name", "Rita")
+    data = {"version": 1, "verdict": "request_changes"}
+    r = client.post("/r/prorate/verdict", data=data, headers=NO_JS)
+    assert r.status_code == 422 and "Add a summary" in r.json()["detail"]
+    push(client, id="prorate")
+    r = client.post("/r/prorate/verdict", data=data | {"summary": "x"}, headers=NO_JS)
+    assert r.status_code == 409
+
+
+def test_requested_changes_note_is_not_green(client):
+    push(client)
+    sign(client)
+    client.cookies.set("vf_name", "Rita")
+    data = {"version": 1, "verdict": "request_changes", "summary": "No."}
+    page = client.post("/r/prorate/verdict", data=data, headers={"HX-Request": "true"}).text
+    assert '<p class="mine no" role="alert">You requested changes on' in page
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    assert ".verdict .mine.no { color: var(--s-changes); }" in css
+
+
 def test_changes_counts_unsigned(client):
     push(client)
     push(client, title="Other")
@@ -2416,7 +2479,9 @@ def test_shared_mode_blocked_approval_names_who_can_resolve(shared_client, moder
     people, _, _ = moderation
     assert shared_client.post("/r/r/sign", data={"version": 1}, headers=people["owner"]).is_success
     r = shared_client.post(
-        "/r/r/verdict", data={"version": 1, "verdict": "approve"}, headers=people["dave"]
+        "/r/r/verdict",
+        data={"version": 1, "verdict": "approve"},
+        headers=people["dave"] | {"HX-Request": "true"},
     )
     assert f'<p class="error" role="alert">{SHARED_BLOCKING_COPY}</p>' in r.text
     assert BLOCKING_COPY not in r.text
@@ -2428,12 +2493,20 @@ def test_shared_mode_blocked_approval_on_your_own_threads_says_resolve_yours(
     people, _, agent = moderation
     shared_client.post("/r/r/sign", data={"version": 1}, headers=people["owner"])
     verdict = {"version": 1, "verdict": "approve"}
-    r = shared_client.post("/r/r/verdict", data=verdict, headers=people["carol"])
+    r = shared_client.post(
+        "/r/r/verdict", data=verdict, headers=people["carol"] | {"HX-Request": "true"}
+    )
     assert f'<p class="error" role="alert">{SHARED_BLOCKING_COPY}</p>' in r.text
-    shared_client.post(f"/r/r/comments/{agent}/resolve", headers=people["owner"])
-    r = shared_client.post("/r/r/verdict", data=verdict, headers=people["carol"])
+    shared_client.post(
+        f"/r/r/comments/{agent}/resolve", headers=people["owner"] | {"HX-Request": "true"}
+    )
+    r = shared_client.post(
+        "/r/r/verdict", data=verdict, headers=people["carol"] | {"HX-Request": "true"}
+    )
     assert f'<p class="error" role="alert">{OWN_BLOCKING_COPY}</p>' in r.text
-    r = shared_client.post("/r/r/verdict", data=verdict, headers=people["dave"])
+    r = shared_client.post(
+        "/r/r/verdict", data=verdict, headers=people["dave"] | {"HX-Request": "true"}
+    )
     assert f'<p class="error" role="alert">{SHARED_BLOCKING_COPY}</p>' in r.text
 
 
@@ -2458,22 +2531,28 @@ def test_shared_mode_creator_admin_and_report_owner_can_moderate(
     r = shared_client.post(
         f"/r/r/comments/{human}/blocking",
         data={"version": 1, "blocking": "0"},
-        headers=people["admin"],
+        headers=people["admin"] | {"HX-Request": "true"},
     )
     assert r.status_code == 200 and "Mark blocking" in r.text
     r = shared_client.post(
-        f"/r/r/comments/{human}/resolve", headers=people["carol"], data={"version": 1}
+        f"/r/r/comments/{human}/resolve",
+        headers=people["carol"] | {"HX-Request": "true"},
+        data={"version": 1},
     )
     assert r.status_code == 200 and 'class="thread resolved"' in r.text
     r = shared_client.post(
-        f"/r/r/comments/{agent}/resolve", headers=people["owner"], data={"version": 1}
+        f"/r/r/comments/{agent}/resolve",
+        headers=people["owner"] | {"HX-Request": "true"},
+        data={"version": 1},
     )
     assert r.status_code == 200 and 'class="thread resolved"' in r.text
     assert _moderation_state(shared_settings, human) == (1, "carol@example.com", 0)
     assert _moderation_state(shared_settings, agent) == (1, "owner@example.com", 1)
 
     r = shared_client.post(
-        f"/r/r/comments/{agent}/reopen", headers=people["dave"], data={"version": 1}
+        f"/r/r/comments/{agent}/reopen",
+        headers=people["dave"] | {"HX-Request": "true"},
+        data={"version": 1},
     )
     assert r.status_code == 200 and 'class="thread resolved"' not in r.text
     assert _moderation_state(shared_settings, agent) == (0, None, 1)
@@ -3643,7 +3722,9 @@ def test_shared_unsigned_partial_keeps_sign_permissions(proxied, actor, can_sign
         {"body": "Suggestion", "blocking": "0"} if action == "comments" else {"verdict": "approve"}
     )
     response = proxied.post(
-        f"/r/planned/{action}", headers=signed_in(actor), data=_target_form(**fields)
+        f"/r/planned/{action}",
+        headers=signed_in(actor) | {"HX-Request": "true"},
+        data=_target_form(**fields),
     )
     header = re.search(r'<header[^>]*id="vf_header".*?</header>', response.text, re.S)[0]
     assert ('id="vf_sign"' in header) == can_sign

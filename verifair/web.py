@@ -116,6 +116,7 @@ USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
 PLAIN_ID = re.compile(r"[^/\\\x00-\x1f\x7f\s]+")
 SCOPES = {"all": "All changes", "author": "My changes", "reviewer": "My reviews"}
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
+STALE_FORM = "The review changed while you were on the page. Reload it and try again."
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
 BLOCKED_LOCAL = "Resolve the open blocking threads first, or mark them non-blocking."
@@ -623,6 +624,11 @@ def _thread_response(
         root = db.thread_root(conn, report["id"], comment_id)
         if root is None:
             raise HTTPException(404, "comment not found")
+        if not request.headers.get("HX-Request"):
+            if error:
+                raise HTTPException(422, error)
+            url = _document_url(report, root["target"])
+            return RedirectResponse(f"{url}#vf_t{root['id']}", 303)
         current = db.latest_version(conn, report["id"])
         if version is None:
             return _partial(
@@ -939,6 +945,10 @@ def _revision(target, revision, version):
 
 
 def _action_error(request, conn, report, target, error):
+    if not request.headers.get("HX-Request"):
+        if isinstance(error, (db.StaleVersion, db.StaleRevision)):
+            raise HTTPException(409, STALE_FORM) from error
+        raise HTTPException(422, str(error)) from error
     if isinstance(error, db.StaleVersion):
         return _stale(request, report, error.latest, target)
     if isinstance(error, db.StaleRevision):
@@ -968,6 +978,10 @@ def _action_error(request, conn, report, target, error):
 def _action_response(
     request, conn, id, user, target, *, version, signing=False, error=None, summary=""
 ):
+    if not request.headers.get("HX-Request"):
+        if error:
+            raise HTTPException(422, error)
+        return RedirectResponse(_document_url(_require_report(conn, id), target), 303)
     with _read(conn):
         ctx = _response_context(request, conn, id, user, target, version)
         if not ctx["is_current"]:

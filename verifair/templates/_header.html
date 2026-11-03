@@ -19,7 +19,7 @@
     {% elif is_current and reviewable and (view_tab|default('report') in ('report', 'implementation') or (view_tab == 'plan' and plan_first)) %}
     {% if plan_gate %}<span>The current plan must be approved before signing the implementation.</span>
     {% elif sign_refusal %}<span>{{ sign_refusal }}</span>
-    {% elif user_name %}<form class="sign" id="vf_sign" hx-post="{{ url }}/sign" hx-target="#vf_header" hx-swap="outerHTML" hx-disabled-elt="find button">
+    {% elif user_name %}<form class="sign" id="vf_sign" method="post" action="{{ url }}/sign" hx-post="{{ url }}/sign" hx-target="#vf_header" hx-swap="outerHTML" hx-disabled-elt="find button">
       <input type="hidden" name="version" value="{{ version }}">
       <input type="hidden" name="target" value="{{ target }}">
       <input type="hidden" name="revision" value="{{ revision }}">

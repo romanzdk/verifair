@@ -177,9 +177,20 @@ def settings(new_database_url):
     )
 
 
+def _htmx_post(request):
+    # the review page posts its forms with htmx; a test sends "HX-Request": "" to post without it
+    if request.method == "POST" and not request.url.path.startswith("/api/"):
+        request.headers.setdefault("HX-Request", "true")
+
+
+def htmx(client):
+    client.event_hooks["request"].append(_htmx_post)
+    return client
+
+
 @pytest.fixture
 def client(settings, make_app):
-    return TestClient(make_app(settings), headers={"Sec-Fetch-Site": "same-origin"})
+    return htmx(TestClient(make_app(settings), headers={"Sec-Fetch-Site": "same-origin"}))
 
 
 @pytest.fixture
