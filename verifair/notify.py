@@ -184,6 +184,7 @@ def send_email(
                 message["To"] = to
                 message["Date"] = formatdate(usegmt=True)
                 message["Message-ID"] = make_msgid(domain=settings.email_from.rpartition("@")[2])
+                message["Auto-Submitted"] = "auto-generated"
                 message.set_content(text)
                 try:
                     server.send_message(message, to_addrs=[to])

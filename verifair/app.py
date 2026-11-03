@@ -10,11 +10,13 @@ from urllib.parse import quote, urlsplit
 import psycopg
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from verifair import api, auth, db, web
 from verifair.config import Settings, check_oidc
@@ -242,6 +244,18 @@ def create_app(settings: Settings) -> FastAPI:
         if response.headers.get("content-type", "").startswith("text/html"):
             response.headers["Content-Security-Policy"] = CSP
         return response
+
+    @app.exception_handler(StarletteHTTPException)
+    async def not_found_page(request: Request, error: StarletteHTTPException):
+        path = request.url.path
+        browser_get = request.method == "GET" and not path.startswith(("/api/", "/static/"))
+        if error.status_code == 404 and browser_get and not web._htmx(request):
+            detail = error.detail if isinstance(error.detail, str) else ""
+            known = detail and detail != "Not Found"
+            message = f"{detail[:1].upper()}{detail[1:]}." if known else "This page does not exist."
+            ctx = {"title": "Not found", "message": message, "home": True}
+            return web.templates.TemplateResponse(request, "denied.html", ctx, status_code=404)
+        return await http_exception_handler(request, error)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):

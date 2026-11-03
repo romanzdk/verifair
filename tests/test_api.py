@@ -533,6 +533,13 @@ def test_quote_without_section_422(client):
     }
 
 
+def test_blank_comment_says_must_not_be_blank(client):
+    push(client)
+    r = _comment(client, body="  ")
+    assert r.status_code == 422
+    assert "must not be blank" in r.json()["detail"][0]["msg"]
+
+
 def test_blank_title_says_must_not_be_blank(client):
     r = push(client, title="   ")
     assert r.status_code == 422

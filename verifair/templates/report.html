@@ -37,7 +37,7 @@
     {% if inline_name_prompt %}{% with next=selected_url %}{% include "_name_prompt.html" %}{% endwith %}{% endif %}
     {% for s in sections %}
     <section id="{{ s.slug }}" data-section="{{ s.heading }}">
-      <h2><span class="num">{{ loop.index }}</span>{{ s.heading }}{% if is_current %} <button type="button" class="cc" data-comment-section aria-label="Comment on {{ s.heading }}">{{ icon("message-square", "ic12") }} comment</button>{% endif %}</h2>
+      <h2><span class="num">{{ loop.index }}</span>{{ s.heading }}{% if is_current %} <a href="#vf_cform_{{ s.slug }}" class="cc" data-comment-section aria-label="Comment on {{ s.heading }}">{{ icon("message-square", "ic12") }} comment</a>{% endif %}</h2>
       <div class="content">{{ s.html|safe }}</div>
       <div class="threads" id="vf_threads_{{ s.slug }}">
         {% for thread in threads_by_section.get(s.slug, []) %}{% include "_thread.html" %}{% endfor %}

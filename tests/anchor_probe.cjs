@@ -20,6 +20,7 @@ const bodyEvents = new Map();
 const documentEvents = new Map();
 const windowEvents = new Map();
 const document = {
+  documentElement: { classList: { add() {} } },
   getElementById: () => null,
   querySelector: () => null,
   querySelectorAll: () => [],

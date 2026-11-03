@@ -133,6 +133,7 @@ LAST_ADMIN = "There must be at least one active admin."
 MEMBER_EXISTS = "That member already exists."
 MEMBER_INPUT = "Enter an email (1–200 characters) and a name (1–60 characters)."
 MEMBER_EMAIL = "Enter an email such as jane@example.com."
+MEMBER_DOMAIN = "Only emails from {domains} can sign in."
 NOT_MEMBER = "You are not a member of this workspace yet. Ask an admin to add {id}."
 DEACTIVATED = "Your access to this workspace was turned off. Ask an admin to reactivate {id}."
 LABEL_INPUT = "Enter a label (1–60 characters)."
@@ -1588,6 +1589,9 @@ def add_member(
     # before lower-casing, since "\u212a".lower() is an ASCII "k"
     if not (id.strip().isascii() and email_id(clean_id)):
         return refuse(MEMBER_EMAIL, 422)
+    domains = request.app.state.settings.oidc_allowed_domains
+    if domains and clean_id.rpartition("@")[2] not in domains:
+        return refuse(MEMBER_DOMAIN.format(domains=", ".join(domains)), 422)
     try:
         db.add_user(conn, id=clean_id, name=clean_name, role=role)
     except ValueError:

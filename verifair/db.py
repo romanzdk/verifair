@@ -1113,6 +1113,11 @@ def reset_sign_in(conn: Connection, id: str) -> bool:
         )
 
 
+def end_sessions(conn: Connection, id: str) -> None:
+    with _write(conn):
+        conn.execute("UPDATE users SET sessions_valid_after=%s WHERE id=%s", (_now_exact(), id))
+
+
 def default_name(id: str) -> str:
     return (id.partition("@")[0] or id)[:60]
 

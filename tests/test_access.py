@@ -1,6 +1,7 @@
 import asyncio
 import re
 from contextlib import closing
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -715,3 +716,15 @@ def test_a_pasted_email_with_non_breaking_spaces_is_trimmed(shared_client):
     r = shared_client.post("/access/users", data=data, headers=ADMIN, follow_redirects=False)
     assert r.status_code == 303
     assert "eve@example.com" in shared_client.get("/access/members", headers=ADMIN).text
+
+
+def test_add_member_refuses_a_domain_that_cannot_sign_in(shared_client, conn):
+    app = shared_client.app
+    app.state.settings = replace(app.state.settings, oidc_allowed_domains=("example.com",))
+    r = shared_client.post("/access/users", data={"id": "x@evil.com", "name": "X"}, headers=ADMIN)
+    assert r.status_code == 422 and "Only emails from example.com can sign in." in r.text
+    assert [u["id"] for u in db.list_users(conn)] == ["admin@example.com"]
+    ok = shared_client.post(
+        "/access/users", data={"id": "bob@example.com", "name": "Bob"}, headers=ADMIN
+    )
+    assert ok.status_code == 200

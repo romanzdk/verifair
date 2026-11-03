@@ -229,6 +229,7 @@ def test_email_has_date_and_message_id(smtp):
     [session] = smtp.sessions
     ids = [m["Message-ID"] for m, _ in session.sent]
     assert all(m["Date"] for m, _ in session.sent)
+    assert all(m["Auto-Submitted"] == "auto-generated" for m, _ in session.sent)
     assert all(i.endswith("@example.com>") for i in ids) and len(set(ids)) == 2
 
 
