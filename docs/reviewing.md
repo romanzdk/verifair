@@ -51,7 +51,7 @@ History pages show the exact stored Markdown and the signature and verdicts asso
 
 ## Execution
 
-This section describes the intended implemented Phase 3 behavior. When the selected snapshot has evidence, **Execution** appears beside **Report** (or **Implementation**) and **Plan** when present. Open `/r/<id>?tab=execution` or a historical `/r/<id>/v/<n>?tab=execution`. History keeps Execution selected even for versions without evidence. An explicit Execution URL without evidence says **No execution trace attached to this version** and links to the document; it never silently selects another tab. Reports without evidence otherwise keep their normal navigation and review behavior.
+When the selected snapshot has evidence, **Execution** appears beside **Report** (or **Implementation**) and **Plan** when present. Open `/r/<id>?tab=execution` or a historical `/r/<id>/v/<n>?tab=execution`. History keeps Execution selected even for versions without evidence. An explicit Execution URL without evidence says **No execution trace attached to this version** and links to the document; it never silently selects another tab. Reports without evidence otherwise keep their normal navigation and review behavior.
 
 Execution is read-only context, with a link back to the implementation's review controls. It has no signing, verdict, reviewer-management or comment forms. Presence, failure or missing coverage in a trace never changes approval automatically. To raise a concern, return to the implementation; plan concerns still belong on Plan. The existing plan-first approval gate and reopened-blocker holds remain in force.
 
@@ -86,7 +86,7 @@ A push makes a new unsigned version, so it sends no email; the reviewers get one
 
 For plan-first reviews emails identify **plan revision R** or **implementation vN**, and link to that document. Delivery is deduplicated separately for each target and revision. Signing an unchanged plan again after attachment sends no duplicate plan email. Adding someone while an approved plan awaits implementation keeps the review request without sending an implementation-ready email. Plans do not need a **Judge this** section; the excerpt is omitted when it is absent. Pushes send draft webhook messages, if configured, rather than ready-for-review email. Notification delivery failures do not undo saved review work.
 
-The subject is `Review requested: "<title>"`. The text says who signed which version and who asked for the review, then the project, the risk, the report's **Judge this** section as plain text (code blocks left out, links as their text, up to about 1,500 characters, then "Read the rest on the page.") and the link:
+The subject is `Review requested: "<title>"`. For plan-first reviews it ends with the document, for example `Review requested: "<title>" (plan revision 2)` or `Review requested: "<title>" (implementation v3)`. The text says who signed which version and who asked for the review, then the project, the risk, the report's **Judge this** section as plain text (the report template's `> The questions only a human can answer…` line and code blocks left out, links as their text, up to about 1,500 characters, then "Read the rest on the page.") and the link:
 
 ```text
 Alice signed v3 of "Prorate plan changes by day". You were asked to review it by Bob.

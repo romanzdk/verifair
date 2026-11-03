@@ -153,7 +153,7 @@ An unresolved blocking plan thread, including an older unresolved concern, pause
 
 ## Optional execution evidence
 
-This section documents the intended implemented Phase 3 contract, using normalized trace schema v1. `POST /api/reports` accepts optional `trace: TraceDocument | null`. Send normalized JSON, not a native provider export, file path or URL. Responses remain HTTP 201 `{id, version, url}`. Reports without traces keep their existing behavior. See [tracing.md](tracing.md) for the schema, version-pinned capture recipes, privacy limits and safe JSON assembly with curl.
+Traces use normalized trace schema v1. `POST /api/reports` accepts optional `trace: TraceDocument | null`. Send normalized JSON, not a native provider export, file path or URL. Responses remain HTTP 201 `{id, version, url}`. Reports without traces keep their existing behavior. See [tracing.md](tracing.md) for the schema, version-pinned capture recipes, privacy limits and safe JSON assembly with curl.
 
 | Operation | `trace` behavior |
 | --- | --- |
@@ -384,7 +384,7 @@ A supplied implementation body is refused with 422 if it lacks a required top-le
 
 `agent`, `model`, `session_url` and `commit` tell the reader who wrote the report and what it describes. The page shows the commit next to each snapshot. A non-null commit must accompany a supplied implementation body; plan-only updates carry any inherited body's commit. Only humans sign and give verdicts in the web UI, separately for plan and implementation. Agent tokens have no signature/verdict API.
 
-Local mode trusts the local browser's cookie identity and shared API token; it does not prove a human's identity against a directory. Use shared mode with trusted identity headers for enforced membership/ownership. Plan approval does not change that trust boundary.
+Local mode trusts the local browser's cookie identity and shared API token; it does not prove a human's identity against a directory. Use shared mode, where people sign in with your OpenID Connect provider, for enforced membership and ownership. Plan approval does not change that trust boundary.
 
 ### Upgrade boundary
 

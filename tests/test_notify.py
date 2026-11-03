@@ -224,6 +224,14 @@ def test_email_over_starttls_logs_in_with_decoded_credentials(smtp):
     assert [m.get_content() for m, _ in session.sent] == ["Text\n", "Other\n"]
 
 
+def test_email_has_date_and_message_id(smtp):
+    send("smtp://localhost:1025", {"bob@example.com": "T", "carol@example.com": "T"})
+    [session] = smtp.sessions
+    ids = [m["Message-ID"] for m, _ in session.sent]
+    assert all(m["Date"] for m, _ in session.sent)
+    assert all(i.endswith("@example.com>") for i in ids) and len(set(ids)) == 2
+
+
 def test_email_without_starttls_or_credentials_sends_plain(smtp, monkeypatch):
     monkeypatch.setattr(smtp, "offers_tls", False)
     send("smtp://localhost:1025", {"bob@example.com": "T"})

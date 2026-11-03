@@ -93,7 +93,7 @@ An open blocking plan thread, including an old unresolved concern, pauses attach
 
 ### Optional execution evidence
 
-The intended implemented Phase 3 contract accepts normalized schema-v1 evidence with an implementation body. Tracing is optional; all no-trace recipes above remain valid. Read [tracing.md](../../docs/tracing.md) for pinned Claude Code, Codex, OpenCode v2 and Pi formats, local conversion flags, privacy limits, a synthetic reconstruction and safe JSON/curl assembly. Native provider records are not accepted by the report API.
+The API accepts normalized schema-v1 evidence with an implementation body. Tracing is optional; all no-trace recipes above remain valid. Read [tracing.md](../../docs/tracing.md) for pinned Claude Code, Codex, OpenCode v2 and Pi formats, local conversion flags, privacy limits, a synthetic reconstruction and safe JSON/curl assembly. Native provider records are not accepted by the report API.
 
 Use only explicitly selected local captures; never discover sessions, start an agent or upload evidence automatically. The importer writes local JSON, not a report. Default conversion excludes prompts, prose, arguments/results and rationale. `--include-details` is an explicit choice with incomplete redaction. Inspect the normalized output for secrets and confidential content before including it in the normal report request; names and timestamps can also be sensitive. Never print tokens. Evidence shares the report's readers and historical copies survive removal from a later version.
 
