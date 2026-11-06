@@ -191,3 +191,23 @@ def test_a_fully_archived_project_points_to_its_archived_tab(shared_client, team
     blank = page.split('<div class="blank">')[1].split("</div>")[0]
     assert "Nothing open" in blank and "2 archived changes in this project." in blank
     assert 'href="?tab=archived"' in blank and "No projects yet" not in blank
+
+
+def test_manage_survives_sidebar_updates_and_project_count_ignores_filters(
+    shared_client, conn, team
+):
+    db.push_report(
+        conn,
+        project="q",
+        title="S",
+        risk="low",
+        body="## Intent\nx",
+        id="s",
+        owner_id="owner@example.com",
+    )
+    form = {"version": 1, "section": "Intent", "body": "hm"}
+    htmx = team["owner"] | {"HX-Request": "true"}
+    r = shared_client.post("/r/s/comments", data=form, headers=htmx)
+    assert 'action="/r/s/archive"' in r.text
+    page = shared_client.get("/p/p?scope=reviewer", headers=ADMIN).text
+    assert "Archive all 2 reviews in p?" in page

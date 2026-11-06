@@ -628,7 +628,12 @@ def _response_context(request, conn, id, user, target, version=None):
     ctx = report_context(
         conn, report, shown, user[0], request.state.member, _shared(request), target=target
     )
-    ctx |= {"sign_refusal": _sign_refusal(request, report, user[0]), "user_name": user[1]}
+    ctx |= {
+        "sign_refusal": _sign_refusal(request, report, user[0]),
+        "user_name": user[1],
+        "can_archive": _can_archive(request, conn, report, user[0]),
+        "can_delete": _can_delete(request),
+    }
     return ctx
 
 
@@ -883,7 +888,11 @@ def _list_page(
             ),
             "empty_url": "?tab=all" + (f"&scope={scope}" if scope != "all" else ""),
             "empty_action": "View all changes" if tab != "all" else None,
-            "can_archive_project": project is not None and _can_delete(request),
+            "project_open": (
+                sum(row["report"]["project"] == project for row in work["rows"])
+                if project is not None and _can_delete(request)
+                else 0
+            ),
         }
         if not reports and archived and tab != "archived":
             ctx.update(
@@ -964,11 +973,7 @@ def _report_page(id, request, conn, user, tab, version=None):
                     report, "implementation", None if ctx["is_current"] else version
                 ),
             }
-        ctx |= {
-            "active_project": report["project"],
-            "can_archive": _can_archive(request, conn, report, user[0]),
-            "can_delete": _can_delete(request),
-        }
+        ctx["active_project"] = report["project"]
         return _page(request, conn, user, "report.html", ctx)
 
 
