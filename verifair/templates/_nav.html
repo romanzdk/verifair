@@ -51,6 +51,6 @@
         {% for value, symbol in (("system", "monitor"), ("light", "sun"), ("dark", "moon")) %}<button name="theme" value="{{ value }}" aria-pressed="{{ 'true' if theme == value else 'false' }}" aria-label="{{ value|capitalize }} theme" title="{{ value|capitalize }}">{{ icon(symbol, "ic14") }}</button>{% endfor %}
       </form>
     </div>
-    <div class="foot"><a href="https://romanzdk.github.io/verifair/">{{ icon("book-open", "ic14") }}Docs</a><a href="https://github.com/romanzdk/verifair">{{ icon("external-link", "ic14") }}GitHub</a><span class="sp"></span><span>v{{ VERSION }}</span></div>
+    <div class="foot"><a href="https://romanzdk.github.io/verifair/" target="_blank" rel="noopener">{{ icon("book-open", "ic14") }}Docs</a><a href="https://github.com/romanzdk/verifair" target="_blank" rel="noopener">{{ icon("external-link", "ic14") }}GitHub</a><span class="sp"></span><span>v{{ VERSION }}</span></div>
   </div>
 </nav>

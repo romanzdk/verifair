@@ -3943,3 +3943,23 @@ def test_api_explorer_pins_its_scripts_with_integrity_hashes(client):
     assert "fonts.googleapis.com" not in client.get("/redoc").headers["content-security-policy"]
     csp = client.get("/").headers["content-security-policy"]
     assert "base-uri 'none'" in csp and "form-action 'self'" in csp
+
+
+def test_openapi_reports_the_real_version_and_only_the_api(client):
+    spec = client.get("/openapi.json").json()
+    assert spec["info"]["version"] == importlib.metadata.version("verifair")
+    assert {p for p in spec["paths"] if not p.startswith("/api/")} == {"/healthz", "/readyz"}
+
+
+def test_footer_links_open_in_a_new_tab(client):
+    foot = client.get("/").text.split('<div class="foot">')[1].split("</div>")[0]
+    assert foot.count('target="_blank" rel="noopener"') == 2
+
+
+def test_setup_banner_returns_when_every_token_is_revoked(shared_client):
+    with closing(db.connect(shared_client.app.state.settings.database_url)) as conn:
+        db.push_report(conn, project="p", title="T", risk="low", body="x", id="r", owner_id="o")
+        _, row = db.create_token(conn, owner_id="admin@example.com", label="old")
+        assert 'id="vf_setup"' not in shared_client.get("/").text
+        db.revoke_token(conn, row["id"])
+    assert 'id="vf_setup"' in shared_client.get("/").text
