@@ -9,7 +9,15 @@
   <input type="hidden" name="target" value="{{ target }}">
   <input type="hidden" name="revision" value="{{ revision }}">
   <textarea name="summary" maxlength="2000" placeholder="Summary for the author (optional)" aria-label="Summary for the author"{% if verdict_block %} disabled{% endif %}>{{ summary or "" }}</textarea>
+  {% if my_verdict and my_verdict.verdict == 'request_changes' %}
+  <button class="btn" formaction="{{ url }}/verdict/withdraw" hx-post="{{ url }}/verdict/withdraw">Withdraw request</button>
+  {% else %}
   <button class="btn" name="verdict" value="request_changes"{% if verdict_block %} disabled{% endif %}>{{ 'Request plan changes' if target == 'plan' else 'Request implementation changes' if plan_first else 'Request changes' }}</button>
+  {% endif %}
+  {% if my_verdict and my_verdict.verdict == 'approve' %}
+  <button class="btn" formaction="{{ url }}/verdict/withdraw" hx-post="{{ url }}/verdict/withdraw">Unapprove</button>
+  {% else %}
   <button class="btn p" name="verdict" value="approve"{% if verdict_block %} disabled{% endif %}>{{ 'Approve plan' if target == 'plan' else 'Approve implementation' if plan_first else 'Approve' }}</button>
+  {% endif %}
 </form>
 {% endif %}

@@ -122,6 +122,11 @@ EMPTY_BODY = "comment body is empty"
 NAME_FIRST = "Set your name on the report page before you comment, sign or review."
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
+UNSIGN_REFUSED = "Only the person who signed this version, or an admin, can unsign it."
+VERDICTS_GIVEN = (
+    "Someone already gave a verdict on this version, so it stays signed."
+    " Ask them to withdraw it, or push a new version."
+)
 BLOCKED_LOCAL = "Resolve the open blocking threads first, or mark them non-blocking."
 BLOCKED_OWN = "Resolve your open blocking threads first, or mark them non-blocking."
 BLOCKED = (
@@ -583,6 +588,11 @@ def report_context(
         "versions": db.list_versions(conn, id)[::-1],
         "links": links,
         "my_verdict": judged.get(user_id),
+        "can_unsign": signature is not None
+        and version == current
+        and not readonly_plan
+        and (signer_id == user_id or (member is not None and member["role"] == "admin"))
+        and not any(v["version"] == revision for v in verdicts),
         "verdict_block": "The current plan must be approved before reviewing the implementation."
         if gate
         else UNSIGNED
@@ -1446,6 +1456,60 @@ def sign(
                 markdown=document[1],
                 signature=signature,
             )
+    return _action_response(request, conn, id, user, target, version=version, signing=True)
+
+
+@router.post("/r/{id}/verdict/withdraw")
+def withdraw_verdict(
+    id: str,
+    request: Request,
+    conn: Conn,
+    user: User,
+    version: Annotated[int, Form()],
+    target: Annotated[db.Target, Form()] = "implementation",
+    revision: Annotated[int | None, Form()] = None,
+):
+    report = _require_report(conn, id)
+    try:
+        db.withdraw_verdicts(
+            conn,
+            report_id=id,
+            version=_revision(target, revision, version),
+            target=target,
+            expected_version=version,
+            reviewer_id=user[0],
+        )
+    except (db.StaleVersion, db.StaleRevision, db.MissingDocument, ValueError) as error:
+        return _action_error(request, conn, report, target, error)
+    return _action_response(request, conn, id, user, target, version=version)
+
+
+@router.post("/r/{id}/unsign")
+def unsign(
+    id: str,
+    request: Request,
+    conn: Conn,
+    user: User,
+    version: Annotated[int, Form()],
+    target: Annotated[db.Target, Form()] = "implementation",
+    revision: Annotated[int | None, Form()] = None,
+):
+    report = _require_report(conn, id)
+    revision = _revision(target, revision, version)
+    signature = db.get_signature(conn, id, revision, target=target)
+    member = request.state.member
+    admin = member is not None and member["role"] == "admin"
+    if signature is not None and signature["signer_id"] != user[0] and not admin:
+        raise HTTPException(403, UNSIGN_REFUSED)
+    try:
+        db.unsign_version(
+            conn, report_id=id, version=revision, target=target, expected_version=version
+        )
+    except db.VerdictsGiven:
+        raise HTTPException(409, VERDICTS_GIVEN) from None
+    except (db.StaleVersion, db.StaleRevision, db.MissingDocument, ValueError) as error:
+        return _action_error(request, conn, report, target, error)
+    log.info("access action=unsign actor=%s report=%s version=%d", user[0], id, revision)
     return _action_response(request, conn, id, user, target, version=version, signing=True)
 
 
