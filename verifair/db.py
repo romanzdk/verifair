@@ -759,14 +759,18 @@ def review_requesters(conn: Connection, report_id: str) -> dict[str, str | None]
 def add_review_request(
     conn: Connection, report_id: str, reviewer_id: str, requested_by: str | None = None
 ) -> bool:
-    return (
-        conn.execute(
-            "INSERT INTO review_requests (report_id, reviewer_id, requested_by)"
-            " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-            (report_id, reviewer_id, requested_by),
-        ).rowcount
-        > 0
-    )
+    try:
+        return (
+            conn.execute(
+                "INSERT INTO review_requests (report_id, reviewer_id, requested_by)"
+                " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                (report_id, reviewer_id, requested_by),
+            ).rowcount
+            > 0
+        )
+    except psycopg.errors.ForeignKeyViolation:
+        # an admin deleted the report after the caller looked it up
+        raise LookupError(f"report {report_id!r} not found") from None
 
 
 def remove_review_request(conn: Connection, report_id: str, reviewer_id: str) -> str:

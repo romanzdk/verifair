@@ -1043,6 +1043,11 @@ def delete_report(
         ctx = {"report": report, "error": DELETE_MISMATCH}
         return _page(request, conn, user, "delete.html", ctx, status=422)
     db.delete_report(conn, id)
+    with _MAIL_LOCK:
+        # a new report under the same id must email its reviewers again
+        request.app.state.mailed.difference_update(
+            key for key in list(request.app.state.mailed) if key[0] == id
+        )
     log.info("access action=delete_report actor=%s report=%s", user[0], id)
     return RedirectResponse("/", 303)
 
@@ -1051,6 +1056,8 @@ def delete_report(
 def archive_project(project: str, request: Request, conn: Conn, user: User):
     if not _can_delete(request):
         return _denied(request, DELETE_REFUSED, back=None)
+    if not db.project_exists(conn, project):
+        raise HTTPException(404, "project not found")
     count = db.archive_project(conn, project, user[1] or user[0])
     log.info(
         "access action=archive_project actor=%s project=%r reports=%d", user[0], project, count
@@ -1537,7 +1544,11 @@ def request_review(
     person = db.get_user(conn, reviewer_id.strip().lower())
     if person is None or not person["active"] or person["id"] == report["author_id"]:
         return _reviewers_response(request, conn, report, user, REVIEWER_REFUSED, target=target)
-    if db.add_review_request(conn, id, person["id"], requested_by=user[0]):
+    try:
+        added = db.add_review_request(conn, id, person["id"], requested_by=user[0])
+    except LookupError:
+        raise HTTPException(404, "report not found") from None
+    if added:
         log.info(
             "access action=add_reviewer actor=%s target=%s report=%s", user[0], person["id"], id
         )

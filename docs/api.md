@@ -365,7 +365,7 @@ This endpoint signals feedback; it does not provide a lossless event stream. Sto
 
 `POST /api/reports/{id}/archive` hides a finished or test report from the lists; `POST /api/reports/{id}/restore` brings it back. Both answer with the report, as `GET /api/reports/{id}` does. In shared mode a token may do this for reports its owner owns or was asked to review, otherwise 403. Archiving twice, or restoring a report that is not archived, changes nothing.
 
-An archived report stays readable by its id and URL, and people can still comment on it. Pushing a new version to it is refused with 409 `This report is archived. Restore it before pushing a new version.`
+An archived report stays readable by its id and URL, and people can still comment on, sign and judge it. Pushing a new version to it is refused with 409 `This report is archived. Restore it before pushing a new version.`
 
 Deleting a report for good is not in the API: an admin does it in the app.
 

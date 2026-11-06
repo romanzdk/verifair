@@ -123,3 +123,63 @@ def test_local_mode_lets_anyone_archive_and_delete(client):
     assert r.json()["archived_at"] is None
     assert client.post("/r/loc/delete", data={"confirm": "loc"}, **NO_REDIRECT).status_code == 303
     assert client.get("/r/loc").status_code == 404
+
+
+def test_delete_removes_threads_and_plan_revisions(shared_client, conn, team):
+    db.push_report(
+        conn,
+        project="p",
+        title="P",
+        risk="low",
+        body=None,
+        body_supplied=False,
+        workflow="plan_first",
+        plan="# Plan",
+        id="pf",
+        owner_id="owner@example.com",
+    )
+    db.push_report(
+        conn,
+        project="p",
+        title="P",
+        risk="low",
+        body=None,
+        body_supplied=False,
+        plan="# Plan v2",
+        expected_version=1,
+        id="pf",
+        owner_id="owner@example.com",
+    )
+    root = db.add_comment(
+        conn,
+        report_id="pf",
+        version=2,
+        target="plan",
+        author_id="rev",
+        author_name="rev",
+        body="why?",
+    )
+    db.add_comment(
+        conn,
+        report_id="pf",
+        version=2,
+        target="plan",
+        author_id="owner",
+        author_name="o",
+        body="because",
+        parent_id=root["id"],
+    )
+    r = shared_client.post("/r/pf/delete", data={"confirm": "pf"}, headers=ADMIN, **NO_REDIRECT)
+    assert r.status_code == 303 and db.get_report(conn, "pf") is None
+
+
+def test_a_reused_id_is_mailed_again_and_late_requests_get_a_404(shared_client, conn, team):
+    shared_client.app.state.mailed.update({("r", "rev@example.com", "implementation", 1)})
+    shared_client.post("/r/r/delete", data={"confirm": "r"}, headers=ADMIN)
+    assert not any(key[0] == "r" for key in shared_client.app.state.mailed)
+    with pytest.raises(LookupError):
+        db.add_review_request(conn, "r", "rev@example.com")
+
+
+def test_archiving_an_unknown_project_is_a_404(shared_client, team):
+    assert shared_client.post("/p/nope/archive", headers=ADMIN).status_code == 404
