@@ -28,6 +28,7 @@ nav:
   - Access and sign-in: access.md
   - Configuration: configuration.md
   - Deployment: deployment.md
+  - Changelog: changelog.md
 
 theme:
   name: material

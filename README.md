@@ -192,6 +192,7 @@ Full reference: [docs/api.md](docs/api.md) (push, read, comments, wait, errors).
 | [docs/configuration.md](docs/configuration.md) | All environment variables |
 | [docs/deployment.md](docs/deployment.md) | Run from source, Docker, deploying behind HTTPS, Postgres, backup and restore, upgrading an HTTP deployment |
 | [docs/report-template.md](docs/report-template.md) | The report layout, as a full example |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
 
 Agents can read all of it as Markdown: [llms.txt](https://romanzdk.github.io/verifair/llms.txt), or every page in one file in [llms-full.txt](https://romanzdk.github.io/verifair/llms-full.txt).
 
