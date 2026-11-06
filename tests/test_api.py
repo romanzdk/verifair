@@ -2406,3 +2406,14 @@ def test_skill_is_served_to_agents_with_a_token(client):
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/markdown")
     assert r.text == (Path(__file__).parents[1] / "skills/verifair-review/SKILL.md").read_text()
     assert client.get("/api/skill").status_code == 401
+
+
+def test_skill_missing_from_the_install_is_a_404(client, monkeypatch, tmp_path):
+    from verifair import api
+
+    monkeypatch.setattr(api, "SKILL", tmp_path / "SKILL.md")
+    r = client.get("/api/skill", headers=H)
+    assert (r.status_code, r.json()["detail"]) == (
+        404,
+        "this server was installed without the skill",
+    )

@@ -1,4 +1,4 @@
 {% macro skill_install(id) %}
-{% set command = 'mkdir -p ~/.claude/skills/verifair-review && curl -fsS -H "Authorization: Bearer $VERIFAIR_API_TOKEN" "$VERIFAIR_URL/api/skill" -o ~/.claude/skills/verifair-review/SKILL.md' %}
+{% set command = 'd=~/.claude/skills/verifair-review && mkdir -p $d && curl -fsS -H "Authorization: Bearer $VERIFAIR_API_TOKEN" "$VERIFAIR_URL/api/skill" -o $d/SKILL.md.new && grep -q "^name: verifair-review" $d/SKILL.md.new && mv $d/SKILL.md.new $d/SKILL.md' %}
 <div class="pre-wrap"><pre class="pre" id="{{ id }}">{{ command }}</pre><button type="button" class="icon-btn" data-copy-target="{{ id }}" aria-label="Copy skill install command">{{ icon("copy", "ic14") }}</button><span data-copy-result role="status"></span></div>
 {% endmacro %}

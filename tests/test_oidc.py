@@ -552,6 +552,26 @@ def test_google_without_allowed_domains_refuses_to_start(shared_settings):
         assert "VERIFAIR_OIDC_ALLOWED_DOMAINS is required" in str(error.value)
 
 
+def test_open_signup_still_refuses_other_domains(domain_client, provider, caplog):
+    caplog.set_level("INFO", logger="verifair")
+    client = domain_client(open_signup=True)
+    _fails(provider.sign_in(client, email="x@other.org", hd="other.org"), "domain", caplog)
+    with closing(db.connect(client.app.state.settings.database_url)) as conn:
+        assert db.get_user(conn, "x@other.org") is None
+
+
+def test_open_signup_names(domain_client, provider):
+    client = domain_client(open_signup=True)
+    with closing(db.connect(client.app.state.settings.database_url)) as conn:
+        db.add_user(conn, id="dana@example.com", name="dana", role="member")
+    provider.sign_in(client, email="dana@example.com", sub="d", name="Someone Else")
+    provider.sign_in(client, email="blank@example.com", sub="b", name="\u3164 \u200b")
+    with closing(db.connect(client.app.state.settings.database_url)) as conn:
+        assert db.get_user(conn, "dana@example.com")["name"] == "dana"
+        assert db.get_user(conn, "blank@example.com")["name"] == "blank"
+        assert db.join(conn, "blank@example.com", "Again") is False
+
+
 def test_open_signup_without_allowed_domains_refuses_to_start(shared_settings):
     with pytest.raises(RuntimeError) as error:
         create_app(replace(shared_settings, open_signup=True))

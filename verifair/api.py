@@ -77,7 +77,7 @@ def skill():
     # served by the server itself, so an agent always gets the skill that matches this version
     if not SKILL.is_file():
         raise HTTPException(404, "this server was installed without the skill")
-    return PlainTextResponse(SKILL.read_text(), media_type="text/markdown")
+    return PlainTextResponse(SKILL.read_text(encoding="utf-8"), media_type="text/markdown")
 
 
 # "function" returns the connection when the handler ends, not after the response and its

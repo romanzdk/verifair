@@ -1118,14 +1118,17 @@ def end_sessions(conn: Connection, id: str) -> None:
         conn.execute("UPDATE users SET sessions_valid_after=%s WHERE id=%s", (_now_exact(), id))
 
 
-def join(conn: Connection, id: str, name: str | None) -> None:
+def join(conn: Connection, id: str, name: str | None) -> bool:
     now = _now()
     with _write(conn):
         # a second tab signing in at the same moment finds the row and changes nothing
-        conn.execute(
-            "INSERT INTO users (id, name, role, created_at, updated_at)"
-            " VALUES (%s, %s, 'member', %s, %s) ON CONFLICT (id) DO NOTHING",
-            (id, name or default_name(id), now, now),
+        return (
+            conn.execute(
+                "INSERT INTO users (id, name, role, created_at, updated_at)"
+                " VALUES (%s, %s, 'member', %s, %s) ON CONFLICT (id) DO NOTHING",
+                (id, name or default_name(id), now, now),
+            ).rowcount
+            == 1
         )
 
 
