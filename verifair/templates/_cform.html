@@ -7,6 +7,7 @@
   <input type="hidden" name="prefix" value="">
   <input type="hidden" name="suffix" value="">
   <div class="q" hidden></div>
+  <div class="labels" role="group" aria-label="Comment label">{% for label in COMMENT_LABELS %}<button type="button" class="lb cl-{{ label }}" data-label="{{ label }}"{% if label in BLOCKING_LABELS %} data-blocks{% endif %} aria-pressed="false">{{ label }}</button>{% endfor %}</div>
   <textarea name="body" required maxlength="20000" placeholder="Comment on {{ s.heading or 'plan' }}" aria-label="Comment on {{ s.heading or 'plan' }}"></textarea>
   <label class="nb"><input type="checkbox" name="blocking" value="0"> Non-blocking (suggestion)</label>
   <div class="tact">

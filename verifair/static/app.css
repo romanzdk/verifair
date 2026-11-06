@@ -412,6 +412,13 @@ table.t form { margin: 0; }
 .b-approved { background: var(--s-approved-bg); color: var(--s-approved); }
 .b-stale, .tag-suggestion { background: var(--bg-hover); color: var(--text-muted); }
 .tag-blocking { background: var(--risk-medium-bg); color: var(--warn-text); }
+.labels { display: none; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.js .labels { display: flex; }
+.lb, .text .badge { font: 500 12px/16px var(--font); }
+.lb { height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; }
+.lb[aria-pressed="true"] { background: var(--bg-hover); color: var(--text); border-color: var(--text-muted); }
+.text .badge { height: 18px; padding: 0 6px; vertical-align: baseline; }
+.text .cl-issue, .text .cl-todo { background: var(--risk-medium-bg); color: var(--warn-text); }
 .cform .nb { display: block; font-size: 12px; color: var(--text-muted); margin: 4px 0; }
 
 .body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; flex: 1; }

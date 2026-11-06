@@ -94,6 +94,8 @@ document.addEventListener("click", (event) => {
     event.preventDefault();
     openForm(button.closest("section"), "");
   }
+  const label = event.target.closest("[data-label]");
+  if (label) setLabel(label);
   const cancel = event.target.closest("[data-cancel]");
   if (cancel) {
     const form = cancel.closest("form");
@@ -101,6 +103,18 @@ document.addEventListener("click", (event) => {
     else form.hidden = true;
   }
 });
+
+function setLabel(button) {
+  const form = button.closest("form");
+  const buttons = Array.from(form.querySelectorAll("[data-label]"));
+  const known = new RegExp(`^\\s*(${buttons.map((b) => b.dataset.label).join("|")})\\s*(\\([^)\\n]*\\))?\\s*:\\s*`, "i");
+  const on = button.getAttribute("aria-pressed") !== "true";
+  const rest = form.body.value.replace(known, "");
+  form.body.value = on ? `${button.dataset.label}: ${rest}` : rest;
+  buttons.forEach((b) => b.setAttribute("aria-pressed", String(on && b === button)));
+  if (on) form.blocking.checked = !button.hasAttribute("data-blocks");
+  form.body.focus();
+}
 
 function indexText(root) {
   const chars = [];
