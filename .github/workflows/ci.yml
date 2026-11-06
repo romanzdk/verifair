@@ -140,3 +140,20 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # Public images are built from scratch, never from a cache other jobs can write
           no-cache: true
+
+  release:
+    needs: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # a re-run after a failed later step must not fail on the release made the first time
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && exit 0
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$TAG" \
+            --notes "**Docker image:** \`ghcr.io/$GITHUB_REPOSITORY:${TAG#v}\` · **Agent skill:** \`npx skills add $GITHUB_REPOSITORY@$TAG --skill verifair-review -g\`"
