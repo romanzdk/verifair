@@ -123,3 +123,13 @@ Local identities belong to a browser. In shared mode, sign-in supplies the same 
 - Request changes needs a summary, or an open blocking thread of your own.
 - The sidebar counts open blocking threads and suggestions.
 - In plan-first reviews blockers apply to their document, and plan blockers also pause the overall workflow as described above. The selected document's controls and the current status update after a thread is reopened, resolved or made non-blocking.
+
+## Archive and delete
+
+**Archive** a review when it is done or was only a test. It leaves the Inbox, the change lists and the sidebar, but stays readable at its link, with a banner saying who archived it and when. Find archived reviews on the **Archived** tab of a list or project, and **Restore** them from the banner. The review's owner, the people asked to review it, and admins can archive and restore it, from **Manage** in the review's sidebar. Agents can do the same through the API ([api.md](api.md#archive-a-report)). People can still comment on, sign and judge an archived review from its page, but it takes no new versions until it is restored.
+
+**Archive project**, at the top of a project page, archives every review in that project at once. Only admins see it.
+
+**Delete permanently** removes a review with every version, comment, signature, verdict and review request. It cannot be undone. Only admins can do it, and they type the review id to confirm. A deleted id can be used again by a new push. In local mode, without sign-in, anyone can archive and delete.
+
+Archive, restore, delete and project archive are logged as `access action=archive`, `restore`, `delete_report` and `archive_project`.

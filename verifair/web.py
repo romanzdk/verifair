@@ -92,8 +92,9 @@ TABS = (
     "awaiting_implementation",
     "approved",
     "all",
+    "archived",
 )
-TAB_LABELS = {"open": "Open", **rules.STATUS_LABELS, "all": "All"}
+TAB_LABELS = {"open": "Open", **rules.STATUS_LABELS, "all": "All", "archived": "Archived"}
 STATUS_ICONS = {
     "unsigned": "circle-dashed",
     "awaiting_review": "circle-dot",
@@ -627,7 +628,12 @@ def _response_context(request, conn, id, user, target, version=None):
     ctx = report_context(
         conn, report, shown, user[0], request.state.member, _shared(request), target=target
     )
-    ctx |= {"sign_refusal": _sign_refusal(request, report, user[0]), "user_name": user[1]}
+    ctx |= {
+        "sign_refusal": _sign_refusal(request, report, user[0]),
+        "user_name": user[1],
+        "can_archive": _can_archive(request, conn, report, user[0]),
+        "can_delete": _can_delete(request),
+    }
     return ctx
 
 
@@ -821,9 +827,20 @@ def _list_page(
         )
         reports = [row["report"] for row in rows]
         by_status = Counter(row["status"] for row in rows)
+        archived = sorted(
+            (
+                row
+                for row in _change_rows(conn, db.list_reports(conn, archived=True))
+                if project in (None, row["report"]["project"])
+                and _in_scope(row, scope, user[0], legacy)
+            ),
+            key=lambda row: (row["report"]["archived_at"], row["report"]["id"]),
+            reverse=True,
+        )
         counts = {status: by_status[status] for status in rules.STATUS_LABELS} | {
             "open": sum(by_status[status] for status in OPEN_STATUSES),
             "all": len(rows),
+            "archived": len(archived),
         }
         awaiting = counts["awaiting_review"]
         if project is None:
@@ -838,6 +855,8 @@ def _list_page(
                 meta += f" · updated {ago(max(r['updated_at'] for r in reports))}"
         if tab == "all":
             shown = rows
+        elif tab == "archived":
+            shown = archived
         elif tab == "open":
             shown = [row for row in rows if row["status"] in OPEN_STATUSES]
         else:
@@ -861,6 +880,7 @@ def _list_page(
                 "unsigned": "No unsigned changes",
                 "approved": "No approved changes yet",
                 "awaiting_implementation": "No changes awaiting implementation",
+                "archived": "No archived changes",
             }[tab],
             "empty_description": (
                 f"Try another status, or view all {len(reports)} matching "
@@ -868,8 +888,20 @@ def _list_page(
             ),
             "empty_url": "?tab=all" + (f"&scope={scope}" if scope != "all" else ""),
             "empty_action": "View all changes" if tab != "all" else None,
+            "project_open": (
+                sum(row["report"]["project"] == project for row in work["rows"])
+                if project is not None and _can_delete(request)
+                else 0
+            ),
         }
-        if not reports:
+        if not reports and archived and tab != "archived":
+            ctx.update(
+                empty_title="Nothing open",
+                empty_description=f"{_plural(len(archived), 'archived change')}{where}.",
+                empty_url="?tab=archived" + (f"&scope={scope}" if scope != "all" else ""),
+                empty_action="View archived",
+            )
+        elif not reports and tab != "archived":
             ctx.update(_scope_empty(scope), empty_url="?scope=all&tab=all", empty_action=None)
             if scope != "all":
                 ctx.update(
@@ -955,6 +987,94 @@ def report_version_page(
     id: str, n: int, request: Request, conn: Conn, user: User, tab: str | None = None
 ):
     return _report_page(id, request, conn, user, tab, n)
+
+
+ARCHIVE_REFUSED = "Only the review's owner, its requested reviewers and admins can archive it."
+DELETE_REFUSED = "Only admins can delete reviews or archive whole projects."
+DELETE_MISMATCH = "Type the review id exactly to delete it."
+
+
+def _can_archive(request: Request, conn: db.Connection, report: db.Row, user_id: str) -> bool:
+    if not _shared(request):
+        return True
+    member = request.state.member
+    if member is None:
+        return False
+    return (
+        member["role"] == "admin"
+        or report["author_id"] == user_id
+        or user_id in db.requested_reviewers(conn, report["id"])
+    )
+
+
+def _can_delete(request: Request) -> bool:
+    member = request.state.member
+    return not _shared(request) or (member is not None and member["role"] == "admin")
+
+
+def _set_archived(id: str, request: Request, conn, user, archive: bool):
+    report = _require_report(conn, id)
+    if not _can_archive(request, conn, report, user[0]):
+        return _denied(request, ARCHIVE_REFUSED, back=None)
+    if db.set_archived(conn, id, (user[1] or user[0]) if archive else None):
+        action = "archive" if archive else "restore"
+        log.info("access action=%s actor=%s report=%s", action, user[0], id)
+    return RedirectResponse(f"/r/{url_quote(id)}", 303)
+
+
+@router.post("/r/{id}/archive")
+def archive_report(id: str, request: Request, conn: Conn, user: User):
+    return _set_archived(id, request, conn, user, archive=True)
+
+
+@router.post("/r/{id}/restore")
+def restore_report(id: str, request: Request, conn: Conn, user: User):
+    return _set_archived(id, request, conn, user, archive=False)
+
+
+@router.get("/r/{id}/delete")
+def delete_page(id: str, request: Request, conn: Conn, user: User):
+    report = _require_report(conn, id)
+    if not _can_delete(request):
+        return _denied(request, DELETE_REFUSED, back=None)
+    return _page(request, conn, user, "delete.html", {"report": report})
+
+
+@router.post("/r/{id}/delete")
+def delete_report(
+    id: str,
+    request: Request,
+    conn: Conn,
+    user: User,
+    confirm: Annotated[str, Form(max_length=300)] = "",
+):
+    report = _require_report(conn, id)
+    if not _can_delete(request):
+        return _denied(request, DELETE_REFUSED, back=None)
+    if confirm.strip() != id:
+        ctx = {"report": report, "error": DELETE_MISMATCH}
+        return _page(request, conn, user, "delete.html", ctx, status=422)
+    db.delete_report(conn, id)
+    with _MAIL_LOCK:
+        # a new report under the same id must email its reviewers again
+        request.app.state.mailed.difference_update(
+            key for key in list(request.app.state.mailed) if key[0] == id
+        )
+    log.info("access action=delete_report actor=%s report=%s", user[0], id)
+    return RedirectResponse("/", 303)
+
+
+@router.post("/p/{project}/archive")
+def archive_project(project: str, request: Request, conn: Conn, user: User):
+    if not _can_delete(request):
+        return _denied(request, DELETE_REFUSED, back=None)
+    if not db.project_exists(conn, project):
+        raise HTTPException(404, "project not found")
+    count = db.archive_project(conn, project, user[1] or user[0])
+    log.info(
+        "access action=archive_project actor=%s project=%r reports=%d", user[0], project, count
+    )
+    return RedirectResponse(f"/p/{url_quote(project)}?tab=archived", 303)
 
 
 def _revision(target, revision, version):
@@ -1436,7 +1556,11 @@ def request_review(
     person = db.get_user(conn, reviewer_id.strip().lower())
     if person is None or not person["active"] or person["id"] == report["author_id"]:
         return _reviewers_response(request, conn, report, user, REVIEWER_REFUSED, target=target)
-    if db.add_review_request(conn, id, person["id"], requested_by=user[0]):
+    try:
+        added = db.add_review_request(conn, id, person["id"], requested_by=user[0])
+    except LookupError:
+        raise HTTPException(404, "report not found") from None
+    if added:
         log.info(
             "access action=add_reviewer actor=%s target=%s report=%s", user[0], person["id"], id
         )

@@ -184,6 +184,10 @@ class NoOwner(Exception):
     pass
 
 
+class Archived(Exception):
+    pass
+
+
 class StaleVersion(Exception):
     def __init__(self, latest: int) -> None:
         super().__init__(f"latest version is {latest}")
@@ -339,6 +343,9 @@ def init_schema(conn: Connection) -> None:
         for column in ("oidc_sub", "sessions_valid_after"):
             if ("users", column) not in columns:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {column} TEXT")
+        for column in ("archived_at", "archived_by"):
+            if ("reports", column) not in columns:
+                conn.execute(f"ALTER TABLE reports ADD COLUMN {column} TEXT")
 
 
 def target_document(
@@ -503,6 +510,8 @@ def push_report(
                 raise NoOwner(f"report {id!r} has no owner")
             if owner_id is not None and existing["author_id"] != owner_id:
                 raise NotOwner(f"report {id!r} belongs to another member")
+            if existing["archived_at"] is not None:
+                raise Archived(f"report {id!r} is archived")
             if existing["project"] != project:
                 log.info(
                     "push rejected id=%s project=%s owner=%s", id, project, existing["project"]
@@ -638,7 +647,7 @@ def project_exists(conn: Connection, project: str) -> bool:
     )
 
 
-def list_reports(conn: Connection) -> list[Row]:
+def list_reports(conn: Connection, *, archived: bool = False) -> list[Row]:
     return conn.execute(
         "SELECT r.*, v.version AS latest_version, v.plan_revision, v.body IS NOT NULL AS has_body,"
         " s.signer_id, s.created_at AS signed_at,"
@@ -660,8 +669,46 @@ def list_reports(conn: Connection) -> list[Row]:
         " count(*) FILTER (WHERE target='plan') AS open_plan_threads,"
         " count(*) FILTER (WHERE target='plan' AND blocking=1) AS open_plan_blocking"
         " FROM comments WHERE parent_id IS NULL AND resolved_at IS NULL GROUP BY report_id) c"
-        " ON c.report_id=r.id ORDER BY r.created_at DESC, r.seq DESC"
+        " ON c.report_id=r.id"
+        f" WHERE r.archived_at IS {'NOT ' if archived else ''}NULL"
+        " ORDER BY r.created_at DESC, r.seq DESC"
     ).fetchall()
+
+
+def set_archived(conn: Connection, id: str, by: str | None) -> bool:
+    """Archive a report, or restore it with by=None. False when it was already so."""
+    with _write(conn):
+        if by is None:
+            sql = "UPDATE reports SET archived_at=NULL, archived_by=NULL WHERE id=%s"
+            return conn.execute(sql + " AND archived_at IS NOT NULL", (id,)).rowcount == 1
+        return (
+            conn.execute(
+                "UPDATE reports SET archived_at=%s, archived_by=%s"
+                " WHERE id=%s AND archived_at IS NULL",
+                (_now(), by, id),
+            ).rowcount
+            == 1
+        )
+
+
+def archive_project(conn: Connection, project: str, by: str) -> int:
+    with _write(conn):
+        return conn.execute(
+            "UPDATE reports SET archived_at=%s, archived_by=%s"
+            " WHERE project=%s AND archived_at IS NULL",
+            (_now(), by, project),
+        ).rowcount
+
+
+def delete_report(conn: Connection, id: str) -> bool:
+    with _write(conn):
+        if _lock_report(conn, id) is None:
+            return False
+        for table in ("comments", "verdicts", "signatures", "review_requests", "versions"):
+            conn.execute(f"DELETE FROM {table} WHERE report_id=%s", (id,))
+        conn.execute("DELETE FROM reports WHERE id=%s", (id,))
+    log.info("report deleted id=%s", id)
+    return True
 
 
 def _by_report(conn: Connection, sql: str, ids: list[str]) -> dict[str, list[Row]]:
@@ -712,14 +759,18 @@ def review_requesters(conn: Connection, report_id: str) -> dict[str, str | None]
 def add_review_request(
     conn: Connection, report_id: str, reviewer_id: str, requested_by: str | None = None
 ) -> bool:
-    return (
-        conn.execute(
-            "INSERT INTO review_requests (report_id, reviewer_id, requested_by)"
-            " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-            (report_id, reviewer_id, requested_by),
-        ).rowcount
-        > 0
-    )
+    try:
+        return (
+            conn.execute(
+                "INSERT INTO review_requests (report_id, reviewer_id, requested_by)"
+                " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                (report_id, reviewer_id, requested_by),
+            ).rowcount
+            > 0
+        )
+    except psycopg.errors.ForeignKeyViolation:
+        # an admin deleted the report after the caller looked it up
+        raise LookupError(f"report {report_id!r} not found") from None
 
 
 def remove_review_request(conn: Connection, report_id: str, reviewer_id: str) -> str:

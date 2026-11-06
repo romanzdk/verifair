@@ -11,6 +11,9 @@
 {% if not is_current %}
 <div class="banner">Viewing v{{ version }} · current is v{{ current_version }} · <a href="{{ url }}{% if on_execution or plan_first %}{{ selection_query }}{% elif view_tab == 'plan' and versions[0].plan is not none %}?tab=plan{% endif %}">open current</a></div>
 {% endif %}
+{% if report.archived_at %}
+<div class="banner archived">Archived by {{ report.archived_by }} · {{ report.archived_at|date }}. It is hidden from the lists.{% if can_archive %} <form method="post" action="/r/{{ report.id|urlencode }}/restore"><button class="btn sm">Restore</button></form>{% endif %}</div>
+{% endif %}
 {% include "_header.html" %}
 <div class="body">
   <main class="main" id="vf_main">
