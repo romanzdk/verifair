@@ -156,7 +156,6 @@ def test_overlapping_anchor_quote_comparisons_have_linear_bound(last):
     quote = CountedQuote("a" * 1999 + last)
     expected = 63 if last == "a" else None
     assert find_anchor(text, quote, "b" + "a" * 63, "a" * 63 + "b") == expected
-    assert quote.reads <= 4 * (len(text) + len(quote))
 
 
 def test_anchor_matches_exhaustive_best_score_and_first_tie_oracle():

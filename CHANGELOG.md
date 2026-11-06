@@ -8,8 +8,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ### Security
 
-- Comment anchoring no longer slows down sharply on huge, repetitive sections, so an agent-written report cannot stall the pages that show it.
-- Local mode refuses dotted hostnames other than the one in `VERIFAIR_BASE_URL` (400 `Unknown host`), which blocks DNS-rebinding attacks from websites you visit.
+- Comment anchoring no longer slows down sharply on huge, repetitive sections, so an agent-written report cannot stall the pages that show it. When the exact quoted context is gone after an edit, only the first 200 matches of the quote are compared, so in very repetitive text a moved comment can land on an earlier match.
+- Local mode refuses web pages on dotted hostnames other than the one in `VERIFAIR_BASE_URL` (400 `Unknown host`), which blocks DNS-rebinding attacks from websites you visit. The API and health checks are not affected.
 - The comment label matcher no longer backtracks on long runs of spaces.
 - The API explorer pages (`/docs`, `/redoc`) load pinned Swagger UI 5.34.1 and ReDoc 2.5.4 with integrity hashes, and no longer load Google Fonts.
 - The content security policy adds `base-uri 'none'` and `form-action 'self'`.

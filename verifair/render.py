@@ -200,9 +200,11 @@ def find_anchor(
     return best
 
 
-@functools.lru_cache(maxsize=64)
 def _squash(text: str) -> str:
     return re.sub(r"\s", "", text)
+
+
+_squash_section = functools.lru_cache(maxsize=32)(_squash)
 
 
 def _locate(
@@ -214,7 +216,7 @@ def _locate(
         for pool, moved in ((same, False), (every, True)):
             hits = []
             for section in pool:
-                text = fix(section.text)
+                text = _squash_section(section.text) if squash else section.text
                 start = find_anchor(text, q, p, s)
                 if start is not None:
                     hits.append((_score(text, start, q, p, s), section, start))
