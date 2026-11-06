@@ -15,7 +15,7 @@
   --risk-medium-bg: color-mix(in srgb, var(--risk-medium) 12%, var(--bg));
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --bg: #0e1014; --bg-side: #14171c; --bg-hover: #1c2027; --border: #2a2f38; --border-strong: #3a404b;
     --text: #e4e7ec; --text-muted: #9aa2b1; --text-subtle: #8a92a0; --warn-text: #f0b354; --accent: #2f6fe0;
     --accent-hover: #4a82ee; --link: #6b9dff; --accent-bg: #17243d;
@@ -27,6 +27,19 @@
     --av-3: #3a2a17; --av-3-t: #f2bd84; --av-4: #262b33; --av-4-t: #c3c9d4;
     color-scheme: dark;
   }
+}
+/* the switch in the sidebar sets data-theme; without it the system setting decides */
+:root[data-theme="dark"] {
+  --bg: #0e1014; --bg-side: #14171c; --bg-hover: #1c2027; --border: #2a2f38; --border-strong: #3a404b;
+  --text: #e4e7ec; --text-muted: #9aa2b1; --text-subtle: #8a92a0; --warn-text: #f0b354; --accent: #2f6fe0;
+  --accent-hover: #4a82ee; --link: #6b9dff; --accent-bg: #17243d;
+  --s-unsigned: #b6bdc9; --s-unsigned-bg: #252a33; --s-awaiting: #a3c0ff; --s-awaiting-bg: #192a4a;
+  --s-changes: #ffa198; --s-changes-bg: #3f1d1d; --s-approved: #73d5a5; --s-approved-bg: #12301f;
+  --risk-high: #ff8a7a; --risk-medium: #f0b354; --code-bg: #161a20; --backdrop: rgba(0, 0, 0, .55);
+  --shadow: 0 8px 24px rgba(0, 0, 0, .5), 0 1px 3px rgba(0, 0, 0, .4);
+  --av-0: #2a2350; --av-0-t: #c4b5fd; --av-1: #11332e; --av-1-t: #7ddcc9; --av-2: #3a1a2a; --av-2-t: #f5a3c7;
+  --av-3: #3a2a17; --av-3-t: #f2bd84; --av-4: #262b33; --av-4-t: #c3c9d4;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 body {
@@ -124,6 +137,9 @@ details.me summary .ic14 { color: var(--text-subtle); }
 .foot a { display: inline-flex; align-items: center; gap: 4px; }
 .foot a:hover { color: var(--link); }
 .foot .sp { flex: 1; }
+.theme { display: flex; gap: 4px; margin-top: 12px; }
+.theme .btn { flex: 1; }
+.theme .btn[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
 
 .av {
   display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; flex: none;

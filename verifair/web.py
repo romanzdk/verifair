@@ -242,6 +242,7 @@ def _with_id_cookie(request: Request, response):
 
 
 NAV_PROJECTS_SHOWN = 8
+THEMES = ("light", "dark")
 
 
 def _in_scope(row: dict, scope: str, user_id: str, legacy: bool) -> bool:
@@ -305,6 +306,7 @@ def _shell(request: Request, conn: db.Connection, user: tuple[str, str | None], 
         "base_url": request.app.state.settings.base_url,
         "here": url.path + (f"?{url.query}" if url.query else ""),
         "name_error": "name_error" in request.query_params,
+        "theme": theme if (theme := request.cookies.get("vf_theme")) in THEMES else "system",
     }
 
 
@@ -1784,6 +1786,24 @@ def _access(
 def _denied(request: Request, message: str, back: str | None = "/access/tokens", home: bool = True):
     ctx = {"message": message, "back": back, "home": home}
     return templates.TemplateResponse(request, "denied.html", ctx, status_code=403)
+
+
+@router.post("/theme")
+def set_theme(
+    request: Request,
+    theme: Annotated[Literal["system", "light", "dark"], Form()],
+    next: Annotated[str, Form(max_length=2000)] = "/",
+):
+    from verifair.auth import safe_next
+
+    response = RedirectResponse(safe_next(next), 303)
+    if theme == "system":
+        response.delete_cookie("vf_theme")
+    else:
+        response.set_cookie(
+            "vf_theme", theme, max_age=YEAR, samesite="lax", secure=_secure(request)
+        )
+    return response
 
 
 @router.get("/access")

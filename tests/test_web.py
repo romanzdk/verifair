@@ -881,7 +881,7 @@ def _media(css, query):
 
 def test_css_colours_are_tokens():
     css = (Path(web.__file__).parent / "static" / "app.css").read_text()
-    rest = re.sub(r":root\s*\{[^}]*\}", "", css)
+    rest = re.sub(r":root[^{]*\{[^}]*\}", "", css)
     assert not re.search(r"#[0-9a-fA-F]{3,8}\b", rest)
     assert "rgb(" not in rest and "rgba(" not in rest
 
@@ -2970,9 +2970,8 @@ def _contrast(a, b):
 def test_text_colours_pass_contrast_in_both_themes():
     css = (Path(web.__file__).parent / "static" / "app.css").read_text()
     light = dict(re.findall(r"(--[\w-]+): (#[0-9a-f]{6})", css.split(":root {")[1].split("}")[0]))
-    dark = light | dict(
-        re.findall(r"(--[\w-]+): (#[0-9a-f]{6})", css.split(":root {")[2].split("}")[0])
-    )
+    dark_block = css.split(':root[data-theme="dark"] {')[1].split("}")[0]
+    dark = light | dict(re.findall(r"(--[\w-]+): (#[0-9a-f]{6})", dark_block))
     for theme in (light, dark):
         warn, bg = theme["--risk-medium"], theme["--bg"]
         tint = "#" + "".join(
