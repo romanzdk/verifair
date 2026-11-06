@@ -363,7 +363,7 @@ This endpoint signals feedback; it does not provide a lossless event stream. Sto
 `GET /api/skill` returns the `verifair-review` skill (`SKILL.md`, `text/markdown`) that ships with this server, so an agent gets the instructions that match this version. It needs a token like the rest of the API.
 
 ```bash
-d=~/.claude/skills/verifair-review && mkdir -p $d && curl -fsS -H "Authorization: Bearer $VERIFAIR_API_TOKEN" "$VERIFAIR_URL/api/skill" -o $d/SKILL.md.new && grep -q "^name: verifair-review" $d/SKILL.md.new && mv $d/SKILL.md.new $d/SKILL.md
+d=~/.claude/skills/verifair-review && mkdir -p $d && curl -fsS -H "Authorization: Bearer $VERIFAIR_API_TOKEN" "${VERIFAIR_URL%/}/api/skill" -o $d/SKILL.md.new && grep -q "^name: verifair-review" $d/SKILL.md.new && mv $d/SKILL.md.new $d/SKILL.md
 ```
 
 ## Errors

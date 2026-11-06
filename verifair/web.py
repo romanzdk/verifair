@@ -704,7 +704,12 @@ def index(request: Request, conn: Conn, user: User, scope: str | None = None):
     with _read(conn):
         work = _work(request, conn, user[0])
         groups = work["groups"]
-        ctx = {"active": "inbox", "first_run": not work["rows"]}
+        member = request.state.member
+        ctx = {
+            "active": "inbox",
+            "first_run": not work["rows"],
+            "needs_setup": member is not None and not db.list_tokens(conn, member["id"]),
+        }
         if work["rows"]:
             ctx |= {"groups": groups, "need_count": _need_count(groups)}
         return _page(request, conn, user, "inbox.html", ctx, work=work)
