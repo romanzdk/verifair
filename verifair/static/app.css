@@ -137,9 +137,18 @@ details.me summary .ic14 { color: var(--text-subtle); }
 .foot a { display: inline-flex; align-items: center; gap: 4px; }
 .foot a:hover { color: var(--link); }
 .foot .sp { flex: 1; }
-.theme { display: flex; gap: 4px; margin-top: 12px; }
-.theme .btn { flex: 1; }
-.theme .btn[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+.me-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.me-actions .signout { margin-top: 0; }
+.theme {
+  display: inline-flex; gap: 2px; margin-left: auto; padding: 2px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-side);
+}
+.theme button {
+  display: grid; place-items: center; width: 26px; height: 22px; padding: 0;
+  border: 0; border-radius: 6px; background: none; color: var(--text-subtle); cursor: pointer;
+}
+.theme button:hover { color: var(--text); }
+.theme button[aria-pressed="true"] { background: var(--bg); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
 
 .av {
   display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; flex: none;
