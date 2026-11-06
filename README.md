@@ -147,13 +147,13 @@ This is local mode. For a team, use shared mode. See [docs/access.md](docs/acces
 
 ## Agent skill
 
-[skills/verifair-review/SKILL.md](skills/verifair-review/SKILL.md) teaches a coding agent (Claude Code, or any agent that reads skills) to write the report in this template, push it, and wait for and answer review feedback. It never signs or gives verdicts. Install it for Claude Code with:
+[skills/verifair-review/SKILL.md](skills/verifair-review/SKILL.md) teaches a coding agent (Claude Code, or any agent that reads skills) to write the report in this template, push it, and wait for and answer review feedback. It never signs or gives verdicts. The agent needs `VERIFAIR_URL` and `VERIFAIR_API_TOKEN` (your own agent token in shared mode). With those set, download the skill that matches your server into Claude Code's skills folder:
 
 ```bash
-mkdir -p ~/.claude/skills && ln -s "$PWD/skills/verifair-review" ~/.claude/skills/verifair-review
+d=~/.claude/skills/verifair-review && mkdir -p "$d" && curl -fsS -H "Authorization: Bearer $VERIFAIR_API_TOKEN" "${VERIFAIR_URL%/}/api/skill" -o "$d/SKILL.md.new" && grep -q "^name: verifair-review" "$d/SKILL.md.new" && mv "$d/SKILL.md.new" "$d/SKILL.md" || rm -f "$d/SKILL.md.new"
 ```
 
-The agent needs `VERIFAIR_URL` and `VERIFAIR_API_TOKEN` (your own agent token in shared mode).
+It replaces the file only when the download is the skill, so a failed download keeps the old one. The **Agent tokens** page and the first-run page show the same command. Run it again after the server is upgraded.
 
 ## API in short
 

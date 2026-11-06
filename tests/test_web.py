@@ -3,6 +3,7 @@ import importlib.metadata
 import re
 from contextlib import closing
 from datetime import UTC, datetime
+from html import escape
 from pathlib import Path
 from urllib.parse import quote as url_quote
 
@@ -788,7 +789,8 @@ def test_first_run_and_caught_up(client, shared_client, settings):
     assert 'data-copy-target="vf_env"' in page and '<pre class="pre" id="vf_env">' in page
     assert 'export VERIFAIR_API_TOKEN="&lt;your token&gt;"' in page
     assert 'aria-label="Copy environment variables"' in page
-    assert "Reload this page after your agent pushes." in page and 'class="waiting"' not in page
+    assert "Ask your agent to publish a verifair review, then reload this page." in page
+    assert 'class="waiting"' not in page
     shared = shared_client.get("/").text
     assert "Welcome to verifair" in shared and "Create an agent token" in shared
     assert 'class="btn p" href="/access/tokens"' in shared
@@ -3828,3 +3830,35 @@ def test_hsts_only_when_served_over_https(settings, make_app, base_url, hsts):
     app = make_app(dataclasses.replace(settings, base_url=base_url))
     r = TestClient(app).get("/healthz")
     assert r.headers.get("strict-transport-security") == hsts
+
+
+SKILL_INSTALL = escape(
+    'd=~/.claude/skills/verifair-review && mkdir -p "$d" && curl -fsS -H "Authorization: Bearer'
+    ' $VERIFAIR_API_TOKEN" "${VERIFAIR_URL%/}/api/skill" -o "$d/SKILL.md.new"'
+    ' && grep -q "^name: verifair-review" "$d/SKILL.md.new"'
+    ' && mv "$d/SKILL.md.new" "$d/SKILL.md" || rm -f "$d/SKILL.md.new"',
+    quote=False,
+).replace('"', "&#34;")
+
+
+def test_first_run_and_tokens_page_show_how_to_install_the_skill(client, shared_client):
+    assert SKILL_INSTALL in client.get("/").text
+    assert SKILL_INSTALL in shared_client.get("/").text
+    assert SKILL_INSTALL in shared_client.get("/access/tokens").text
+
+
+def test_inbox_asks_members_without_a_token_to_connect_their_agent(shared_client, as_user):
+    with closing(db.connect(shared_client.app.state.settings.database_url)) as conn:
+        db.push_report(conn, project="p", title="T", risk="low", body="x", id="r", owner_id="o")
+    page = shared_client.get("/").text
+    assert "Welcome to verifair" not in page and 'id="vf_setup"' in page
+    shared_client.post("/access/tokens", data={"label": "laptop", "nonce": "n"})
+    assert 'id="vf_setup"' not in shared_client.get("/").text
+
+
+def test_new_token_fills_in_the_environment_block(shared_client):
+    page = shared_client.post("/access/tokens", data={"label": "laptop", "nonce": "n"}).text
+    token = re.search(r'id="vf_new_token"[^>]*value="([^"]+)"|value="(vf_[^"]+)"', page)
+    secret = token[1] or token[2]
+    assert f"export VERIFAIR_API_TOKEN={secret}</pre>" in page
+    assert "export VERIFAIR_API_TOKEN=vf_…</pre>" in shared_client.get("/access/tokens").text

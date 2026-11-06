@@ -5,12 +5,13 @@ import secrets
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from itertools import islice
+from pathlib import Path
 from time import monotonic
 from typing import Annotated, Literal, NoReturn
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -68,6 +69,16 @@ async def require_token(request: Request) -> None:
 
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
+SKILL = Path(__file__).parents[1] / "skills" / "verifair-review" / "SKILL.md"
+
+
+@router.get("/skill")
+def skill():
+    # served by the server itself, so an agent always gets the skill that matches this version
+    if not SKILL.is_file():
+        raise HTTPException(404, "this server was installed without the skill")
+    return PlainTextResponse(SKILL.read_text(encoding="utf-8"), media_type="text/markdown")
+
 
 # "function" returns the connection when the handler ends, not after the response and its
 # background tasks (Slack notify) are done

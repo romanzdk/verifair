@@ -704,7 +704,12 @@ def index(request: Request, conn: Conn, user: User, scope: str | None = None):
     with _read(conn):
         work = _work(request, conn, user[0])
         groups = work["groups"]
-        ctx = {"active": "inbox", "first_run": not work["rows"]}
+        member = request.state.member
+        ctx = {
+            "active": "inbox",
+            "first_run": not work["rows"],
+            "needs_setup": member is not None and not db.list_tokens(conn, member["id"]),
+        }
         if work["rows"]:
             ctx |= {"groups": groups, "need_count": _need_count(groups)}
         return _page(request, conn, user, "inbox.html", ctx, work=work)
@@ -1537,6 +1542,8 @@ def _access(
             "roles": db.ROLES,
             "member_error": member_error,
             "member_form": member_form or {"id": "", "name": "", "role": "member"},
+            "open_signup": request.app.state.settings.open_signup,
+            "domains": ", ".join(request.app.state.settings.oidc_allowed_domains),
         }
     return _page(request, conn, user, f"{page}.html", ctx, status)
 
@@ -1570,6 +1577,7 @@ def add_member(
     conn: Conn,
     user: User,
     member: Member,
+    background: BackgroundTasks,
     id: Annotated[str, Form()] = "",
     name: Annotated[str, Form()] = "",
     role: Annotated[Literal["admin", "member"], Form()] = "member",
@@ -1597,6 +1605,9 @@ def add_member(
     except ValueError:
         return refuse(MEMBER_EXISTS, 409)
     log.info("access action=add_user actor=%s target=%s role=%s", user[0], clean_id, role)
+    settings = request.app.state.settings
+    subject, text = notify.welcome_email(user[1] or user[0], settings.base_url)
+    background.add_task(notify.email, settings, "-", subject, {clean_id: text})
     return RedirectResponse("/access/members", 303)
 
 

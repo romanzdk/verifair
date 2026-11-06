@@ -336,6 +336,10 @@ table.t form { margin: 0; }
 .intro h3 .ic { color: var(--text-subtle); }
 .intro p { margin: 0; font-size: 13px; color: var(--text-muted); }
 .intro p + p { margin-top: 8px; }
+.setup { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; padding: 16px; margin-bottom: 24px; }
+.setup h3 { margin: 0 0 4px; font: 600 14px/20px var(--font); display: flex; gap: 8px; align-items: center; }
+.setup h3 .ic { color: var(--text-subtle); }
+.setup p { margin: 0; font-size: 13px; color: var(--text-muted); }
 .intro a { color: var(--link); }
 .addform {
   display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 120px auto; gap: 8px; padding: 12px;

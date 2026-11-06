@@ -519,3 +519,19 @@ def test_plan_failed_mail_releases_only_captured_target_key(mail, team, outbox):
         )
     )
     assert mail.app.state.mailed == {("planned", "bob@example.com", "implementation", 1)}
+
+
+def test_adding_a_member_emails_them_how_to_start(mail, outbox):
+    form = {"id": "Dana@Example.com", "name": "Dana", "role": "member"}
+    r = mail.post("/access/users", data=form, headers=signed_in("admin@example.com"))
+    assert r.status_code == 200
+    [message] = outbox.sent
+    assert (message["To"], message["Subject"]) == ("dana@example.com", "You were added to verifair")
+    text = message.get_content()
+    assert "admin added you to verifair" in text
+    assert "http://localhost:8000/access/tokens" in text
+
+
+def test_adding_a_member_without_mail_sends_nothing(shared_client, outbox):
+    shared_client.post("/access/users", data={"id": "dana@example.com", "name": "Dana"})
+    assert outbox.sent == []

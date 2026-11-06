@@ -126,6 +126,10 @@ def _token_issuer(value, issuer: str) -> bool:
     return google or _same_issuer(value, issuer)
 
 
+# letters that render as nothing, so "ㅤ" would pass as a name and show as blank
+BLANK_LOOKING = dict.fromkeys(map(ord, "\u115f\u1160\u3164\uffa0\u2800"), " ")
+
+
 def check_id_token(
     id_token: str, settings: Settings, nonce: str, now: float
 ) -> tuple[str, str, str | None]:
@@ -169,12 +173,14 @@ def check_id_token(
         ):
             raise SignInError("domain")
     name = claims.get("name")
-    if not isinstance(name, str) or member_id != (settings.bootstrap_admin_id or "").lower():
+    named = settings.open_signup or member_id == (settings.bootstrap_admin_id or "").lower()
+    if not isinstance(name, str) or not named:
         return member_id, sub, None
     # control, bidi and zero-width characters could make the name look like someone else's
     name = "".join(c for c in name if unicodedata.category(c) not in ("Cc", "Cf"))
-    name = " ".join(name.split())[:60].rstrip()
-    return member_id, sub, name if name and db.storable(name) else None
+    name = " ".join(name.translate(BLANK_LOOKING).split())[:60].rstrip()
+    readable = any(c.isalnum() for c in name)
+    return member_id, sub, name if readable and db.storable(name) else None
 
 
 def _client(app: FastAPI) -> httpx.AsyncClient:
@@ -362,7 +368,16 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         now = time.time()
         member_id, sub, name = check_id_token(id_token, settings, flow["nonce"], now)
         # no session for someone who is not a member yet: it would carry no linked account
-        linked = await run_with_conn(request.app, db.link_account, member_id, sub, name)
+        bootstrap = member_id == (settings.bootstrap_admin_id or "").lower()
+        # only the bootstrap admin and people joining get the provider's name; a name an
+        # admin typed when adding someone stays
+        linked = await run_with_conn(
+            request.app, db.link_account, member_id, sub, name if bootstrap else None
+        )
+        if linked is None and settings.open_signup:
+            if await run_with_conn(request.app, db.join, member_id, name):
+                log.info("access action=join target=%s", member_id)
+            linked = await run_with_conn(request.app, db.link_account, member_id, sub)
         if linked is None:
             raise SignInError("not-member", member_id)
         if not linked["active"]:

@@ -564,7 +564,9 @@ def test_new_token_has_a_copy_button_and_the_note_describes_the_field(shared_cli
         f"{web.icon('copy', 'ic14')}Copy token</button>"
         '<span data-copy-result role="status"></span>'
     ) in r.text
-    assert r.text.count(token) == 1
+    # the field, and the export line that is ready to paste
+    assert r.text.count(token) == 2
+    assert f"export VERIFAIR_API_TOKEN={token}</pre>" in r.text
     secret = r.text.split('<div class="secret">')[1].split('<div class="panel intro">')[0]
     assert 'id="vf_new_token"' in secret and "Token “laptop” created" in secret
     js = (Path(web.__file__).parent / "static" / "app.js").read_text()

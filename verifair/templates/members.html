@@ -11,6 +11,7 @@
   {% set admins = users|selectattr("active")|selectattr("role", "eq", "admin")|list|length %}
   <div class="ph"><div><h1>Members</h1><div class="meta">{{ active_count }} active · {{ users|length - active_count }} deactivated · {{ admins }} admin{{ "s" if admins != 1 }}</div></div></div>
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if open_signup %}<p class="sub" id="vf_open_signup">Open sign-up is on: anyone with an email at {{ domains }} becomes a member when they first sign in. Add people here to give them a role or a name first, and to email them how to start.</p>{% endif %}
   <form method="post" action="/access/users#add-member" class="panel addform" id="add-member">
     {% if member_error %}<p class="error" id="vf_member_error" role="alert">{{ member_error }}</p>{% endif %}
     <label>Email<input name="id" type="email" value="{{ member_form.id }}"{% if member_error %} autofocus aria-invalid="true" aria-describedby="vf_member_error"{% endif %} maxlength="200" pattern="[^\s\/\\]+@[^\s\/\\]+" title="Enter an email such as jane@example.com." required placeholder="jane@example.com" class="inp"></label>

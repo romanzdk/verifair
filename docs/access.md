@@ -26,6 +26,7 @@ Then set:
 | `VERIFAIR_OIDC_CLIENT_SECRET` | The client secret from your provider |
 | `VERIFAIR_SESSION_SECRET` | The session secret. Use the same value on every replica |
 | `VERIFAIR_OIDC_ALLOWED_DOMAINS` | Comma-separated email domains that may sign in, for example `example.com`. Required with Google, optional with other providers |
+| `VERIFAIR_OPEN_SIGNUP` | `true` lets anyone from the allowed domains join as a member on first sign-in. Default `false`: invite-only. See [Open sign-up](#open-sign-up) |
 | `VERIFAIR_BOOTSTRAP_ADMIN_ID` | Your own email, for example `jane@example.com`. On a database with no members, startup makes it the first admin, named after the part before `@` until their first sign-in brings the name from your provider. Once members exist, it adds no one. Case does not matter |
 | `VERIFAIR_BASE_URL` | The HTTPS URL of verifair |
 
@@ -104,6 +105,7 @@ Startup prints one line with the reason and exits with code 1 when:
 - `VERIFAIR_OIDC_ISSUER` is set without `VERIFAIR_OIDC_CLIENT_ID`, `VERIFAIR_OIDC_CLIENT_SECRET` or `VERIFAIR_SESSION_SECRET`, or the session secret is shorter than 32 characters.
 - The issuer or `VERIFAIR_BASE_URL` is not HTTPS (plain HTTP is only allowed for `localhost` and `127.0.0.1`).
 - The issuer is Google and `VERIFAIR_OIDC_ALLOWED_DOMAINS` is not set.
+- `VERIFAIR_OPEN_SIGNUP` is `true` without `VERIFAIR_OIDC_ALLOWED_DOMAINS`, or is not `true` or `false`.
 - `VERIFAIR_IDENTITY_HEADER` is set. The trusted-header mode was removed. See [Moving from the identity header](#moving-from-the-identity-header).
 - The database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set.
 - `VERIFAIR_BOOTSTRAP_ADMIN_ID` is set without `VERIFAIR_OIDC_ISSUER`, so a missing issuer does not quietly start local mode.
@@ -140,6 +142,8 @@ Once a database has members, it stays in shared mode. Starting it without `VERIF
 
 Admins manage members on the **Members** page (`/access/members`, under **Settings** in the sidebar). Other members cannot open it. To add a member, enter their email, a display name, and a role: `admin` or `member`. Ids are matched without regard to case: verifair stores them in lower case and turns the email from sign-in into lower case too, so `Jane@Example.com` and `jane@example.com` are the same member. The members table changes roles and deactivates or reactivates people. Members are never deleted, so their history stays.
 
+When email is set up (see [configuration.md](configuration.md)), adding a member sends them a short email: who added them, the sign-in link, and the **Agent tokens** page where they connect their agent.
+
 A deactivated member is refused on their next request, is signed out in every browser, and all their tokens are revoked. Reactivating them does not bring old tokens or sessions back.
 
 **Reset sign-in** forgets which provider account a member is linked to and signs them out in every browser. Use it when someone's account at the provider changed, or when you think someone else signed in as them. Their next sign-in links them again.
@@ -154,6 +158,14 @@ A reset alone lets whoever signs in next with that email claim the member, so if
 There must always be at least one active admin. verifair refuses to demote or deactivate the last one: `There must be at least one active admin.`
 
 Admin and token actions (a reset logs `action=reset_sign_in`), and added or removed review requests (`action=add_reviewer` and `action=remove_reviewer`, with `report=<id>`), are written to the app log as `access action=... actor=... target=...`. A member change also logs `tokens_revoked=N`, the number of tokens a deactivation revoked. The token secret is never logged.
+
+### Open sign-up
+
+By default verifair is invite-only: someone who is not a member gets 403 with the email an admin has to add. With `VERIFAIR_OPEN_SIGNUP=true`, anyone whose email is in `VERIFAIR_OIDC_ALLOWED_DOMAINS` becomes a member with the role `member` on their first sign-in, named after the name the provider sends, cleaned of invisible characters (without a readable name, the part of the email before `@`). Members added by an admin keep the name the admin typed. Their sign-in logs `access action=join target=...`. The Members page says when open sign-up is on.
+
+- It needs `VERIFAIR_OIDC_ALLOWED_DOMAINS`, so only your own domains can join.
+- Deactivated members stay out. Open sign-up never reactivates anyone.
+- Admins still choose who is an admin. Adding someone first still works, to give them a role or name before they sign in and to send them the welcome email.
 
 ## Agent tokens
 
