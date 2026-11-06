@@ -27,6 +27,13 @@ CSP = (
     "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
     " frame-ancestors 'none'"
 )
+# FastAPI's API explorer pages load Swagger UI and ReDoc from jsDelivr and start them inline
+DOCS_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
+    " style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;"
+    " font-src https://fonts.gstatic.com; img-src 'self' data: https:; worker-src blob:;"
+    " frame-ancestors 'none'"
+)
 MAX_BODY = 1024 * 1024
 READYZ_TIMEOUT = 2
 log = logging.getLogger("verifair")
@@ -245,7 +252,8 @@ def create_app(settings: Settings) -> FastAPI:
             # a day, so a broken certificate does not lock users out for long
             response.headers["Strict-Transport-Security"] = "max-age=86400"
         if response.headers.get("content-type", "").startswith("text/html"):
-            response.headers["Content-Security-Policy"] = CSP
+            explorer = path in ("/docs", "/redoc")
+            response.headers["Content-Security-Policy"] = DOCS_CSP if explorer else CSP
         return response
 
     @app.exception_handler(StarletteHTTPException)
