@@ -6,6 +6,24 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Security
+
+- Comment anchoring no longer slows down sharply on huge, repetitive sections, so an agent-written report cannot stall the pages that show it.
+- Local mode refuses dotted hostnames other than the one in `VERIFAIR_BASE_URL` (400 `Unknown host`), which blocks DNS-rebinding attacks from websites you visit.
+- The comment label matcher no longer backtracks on long runs of spaces.
+- The API explorer pages (`/docs`, `/redoc`) load pinned Swagger UI 5.34.1 and ReDoc 2.5.4 with integrity hashes, and no longer load Google Fonts.
+- The content security policy adds `base-uri 'none'` and `form-action 'self'`.
+
+### Changed
+
+- The API explorer and `openapi.json` show the real version and only the API and health endpoints.
+- The **Docs** and **GitHub** links open in a new tab.
+- Each sent email is logged (`email sent report=… recipients=N`, without addresses).
+
+### Fixed
+
+- The "Connect your coding agent" banner returns when every token of a member is revoked.
+
 ## [0.6.1] - 2026-11-06
 
 ### Fixed

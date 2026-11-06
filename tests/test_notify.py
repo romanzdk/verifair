@@ -568,3 +568,24 @@ def test_artifact_formatters_keep_exact_legacy_text_and_bare_links(workflow, tar
         "Open it to comment, approve or request changes:\nhttp://x/r/prorate\n\n"
         "— Sent by verifair. Replies to this mail are not read."
     )
+
+
+def test_sent_emails_are_logged_without_addresses(monkeypatch, caplog):
+    caplog.set_level("INFO", logger="verifair")
+
+    class Server:
+        def __init__(self, *a, **k): ...
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a): ...
+        def ehlo(self): ...
+        def has_extn(self, name):
+            return False
+
+        def send_message(self, message, to_addrs): ...
+
+    monkeypatch.setattr(notify.smtplib, "SMTP", Server)
+    settings = replace(make_settings(None), smtp_url="smtp://mail:25", email_from="v@example.com")
+    assert notify.send_email(settings, "r", "S", {"a@example.com": "x", "b@example.com": "y"})
+    assert "email sent report=r recipients=2" in caplog.text and "a@example.com" not in caplog.text

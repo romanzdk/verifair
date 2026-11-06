@@ -760,7 +760,8 @@ def index(request: Request, conn: Conn, user: User, scope: str | None = None):
         ctx = {
             "active": "inbox",
             "first_run": not work["rows"],
-            "needs_setup": member is not None and not db.list_tokens(conn, member["id"]),
+            "needs_setup": member is not None
+            and all(t["revoked_at"] for t in db.list_tokens(conn, member["id"])),
         }
         if work["rows"]:
             ctx |= {"groups": groups, "need_count": _need_count(groups)}

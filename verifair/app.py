@@ -240,7 +240,13 @@ def create_app(settings: Settings) -> FastAPI:
         yield
         pool.close()
 
-    app = FastAPI(title="verifair", lifespan=lifespan, docs_url=None, redoc_url=None)
+    app = FastAPI(
+        title="verifair",
+        version=web.VERSION,
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+    )
 
     @app.get("/docs", include_in_schema=False)
     def api_explorer():
@@ -259,9 +265,9 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.oidc_failure = None
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.include_router(api.router)
-    app.include_router(web.router)
+    app.include_router(web.router, include_in_schema=False)
     if settings.shared:
-        app.include_router(auth.router)
+        app.include_router(auth.router, include_in_schema=False)
 
     @app.middleware("http")
     async def web_guard(request: Request, call_next):

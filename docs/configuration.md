@@ -7,7 +7,7 @@ verifair reads its settings from environment variables.
 | `VERIFAIR_API_TOKEN` | required in local mode | Bearer token agents use for `/api` in local mode. Not accepted in shared mode (startup logs a warning if it is set) |
 | `VERIFAIR_DATABASE_URL` | required | Postgres connection URL (libpq format), for example `postgresql://verifair:verifair@localhost:5432/verifair` |
 | `VERIFAIR_DB_POOL_SIZE` | `10` | Most database connections one verifair process opens. A request waits up to 10 seconds in total for a free one, then gets 503 with `Retry-After` |
-| `VERIFAIR_BASE_URL` | `http://localhost:8000` | Used for links in API responses and notifications. In shared mode it must be the HTTPS URL people open: sign-in sends them back to `VERIFAIR_BASE_URL/auth/callback` |
+| `VERIFAIR_BASE_URL` | `http://localhost:8000` | Used for links in API responses and notifications. In shared mode it must be the HTTPS URL people open: sign-in sends them back to `VERIFAIR_BASE_URL/auth/callback`. In local mode its host is the only dotted hostname verifair answers on (besides IP addresses, `localhost` and names without a dot); other names get 400 `Unknown host`, which blocks DNS-rebinding attacks |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | Comma-separated H2 headings every pushed body must have; empty turns the check off |
 | `VERIFAIR_OIDC_ISSUER` | unset | Issuer URL of your OpenID Connect sign-in provider, for example `https://accounts.google.com`. Setting it turns on shared mode (see [access.md](access.md#set-up-shared-mode)). Must be HTTPS, except `localhost` and `127.0.0.1` |
 | `VERIFAIR_OIDC_CLIENT_ID` | unset | Shared mode: client ID of the OAuth client at your provider. Required when the issuer is set |

@@ -220,6 +220,8 @@ def send_email(
     except Exception as exc:
         if missed := len(letters) - len(delivered) - len(refused):
             _failed(report_id, missed, exc)
+    if delivered:
+        log.info("email sent report=%s recipients=%d", report_id, len(delivered))
     return delivered
 
 
