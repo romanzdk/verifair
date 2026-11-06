@@ -202,9 +202,10 @@ def test_malformed_id_token_fails(anonymous, provider, caplog, monkeypatch):
 
 @pytest.fixture
 def domain_client(shared_settings, make_app, provider):
-    def make(issuer=ISSUER, domains=("example.com",)):
+    def make(issuer=ISSUER, domains=("example.com",), **extra):
         provider.discovery |= {"issuer": issuer}
-        app = make_app(replace(shared_settings, oidc_issuer=issuer, oidc_allowed_domains=domains))
+        settings = replace(shared_settings, oidc_issuer=issuer, oidc_allowed_domains=domains)
+        app = make_app(replace(settings, **extra))
         app.state.oidc_transport = httpx.MockTransport(provider.handler)
         return TestClient(app)
 
@@ -234,6 +235,35 @@ def test_without_allowed_domains_any_domain_signs_in(domain_client, provider):
     client = domain_client(domains=())
     r = provider.sign_in(client, email="x@other.org", hd="other.org", follow_redirects=False)
     assert r.status_code == 403 and "Ask an admin to add x@other.org." in r.text
+
+
+def test_open_signup_makes_new_people_from_allowed_domains_members(
+    domain_client, provider, shared_client
+):
+    client = domain_client(open_signup=True)
+    r = provider.sign_in(
+        client, email="New@Example.com", sub="new-1", name="New  Person", follow_redirects=False
+    )
+    assert r.status_code == 303
+    with closing(db.connect(client.app.state.settings.database_url)) as conn:
+        user = db.get_user(conn, "new@example.com")
+    assert (user["role"], user["name"], user["active"]) == ("member", "New Person", 1)
+    assert client.get("/").status_code == 200
+    assert client.get("/access/members").status_code == 403
+    client.cookies.clear()
+    provider.sign_in(client)
+    note = "Open sign-up is on: anyone with an email at example.com becomes a member"
+    assert note in client.get("/access/members").text
+    assert note not in shared_client.get("/access/members").text
+
+
+def test_open_signup_keeps_deactivated_members_out(domain_client, provider):
+    client = domain_client(open_signup=True)
+    with closing(db.connect(client.app.state.settings.database_url)) as conn:
+        db.add_user(conn, id="gone@example.com", name="Gone", role="member")
+        db.update_user(conn, "gone@example.com", active=False)
+    r = provider.sign_in(client, email="gone@example.com", follow_redirects=False)
+    assert r.status_code == 403
 
 
 @pytest.mark.parametrize(
@@ -520,6 +550,20 @@ def test_google_without_allowed_domains_refuses_to_start(shared_settings):
         with pytest.raises(RuntimeError) as error:
             create_app(replace(shared_settings, oidc_issuer=issuer))
         assert "VERIFAIR_OIDC_ALLOWED_DOMAINS is required" in str(error.value)
+
+
+def test_open_signup_without_allowed_domains_refuses_to_start(shared_settings):
+    with pytest.raises(RuntimeError) as error:
+        create_app(replace(shared_settings, open_signup=True))
+    assert "VERIFAIR_OPEN_SIGNUP needs VERIFAIR_OIDC_ALLOWED_DOMAINS" in str(error.value)
+
+
+@pytest.mark.parametrize(("raw", "on"), [("", False), ("0", False), ("1", True), ("true", True)])
+def test_open_signup_setting(monkeypatch, raw, on):
+    monkeypatch.setenv("VERIFAIR_API_TOKEN", "t")
+    monkeypatch.setenv("VERIFAIR_DATABASE_URL", "postgresql://x/y")
+    monkeypatch.setenv("VERIFAIR_OPEN_SIGNUP", raw)
+    assert load_settings().open_signup is on
 
 
 def test_google_accepts_the_issuer_without_https(domain_client, provider):

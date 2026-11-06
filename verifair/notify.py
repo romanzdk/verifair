@@ -102,6 +102,20 @@ def _cut(text: str) -> str:
     return text[: end if end > 0 else JUDGE_THIS_MAX].rstrip() + "\nRead the rest on the page."
 
 
+def welcome_email(added_by: str, base_url: str) -> tuple[str, str]:
+    text = "\n\n".join(
+        [
+            f"{added_by} added you to verifair, where coding agents publish change reports"
+            " for people to sign and review.",
+            f"Sign in with your work account:\n{base_url}/",
+            "To connect your coding agent, create a token and install the verifair skill:\n"
+            f"{base_url}/access/tokens",
+            "— Sent by verifair. Replies to this mail are not read.",
+        ]
+    )
+    return "You were added to verifair", text
+
+
 def review_email(
     report: Mapping,
     version: int,

@@ -14,6 +14,7 @@ verifair reads its settings from environment variables.
 | `VERIFAIR_OIDC_CLIENT_SECRET` | unset | Shared mode: client secret of that OAuth client. Required when the issuer is set |
 | `VERIFAIR_SESSION_SECRET` | unset | Shared mode: secret that signs the session cookie, at least 32 characters, the same on every replica. Create one with `openssl rand -base64 48`. Changing it signs everyone out. Required when the issuer is set |
 | `VERIFAIR_OIDC_ALLOWED_DOMAINS` | unset | Shared mode: comma-separated email domains that may sign in, for example `example.com`. Required with Google, and the account must also belong to one of these Workspace domains. Unset means any verified email can sign in (it still needs to be a member) |
+| `VERIFAIR_OPEN_SIGNUP` | `false` | Shared mode: `true` makes anyone whose email is in `VERIFAIR_OIDC_ALLOWED_DOMAINS` a member (role `member`) on their first sign-in, so admins do not have to add everyone. Off means invite-only. Startup fails when it is `true` without allowed domains, or not `true` or `false` |
 | `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: email of the first admin, created when the database has no members. Startup fails if it is set without `VERIFAIR_OIDC_ISSUER` |
 | `VERIFAIR_IDENTITY_HEADER` | removed | The trusted-header mode was removed. Startup fails while it is set. See [access.md](access.md#moving-from-the-identity-header) |
 | `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook for draft reports, ready-for-review notifications, comments and verdicts |

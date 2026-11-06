@@ -8,6 +8,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY README.md LICENSE ./
 COPY verifair ./verifair
+COPY skills ./skills
 RUN uv sync --frozen --no-dev
 ENV UV_NO_CACHE=1 FORWARDED_ALLOW_IPS=* UVICORN_HOST=0.0.0.0
 USER 10001

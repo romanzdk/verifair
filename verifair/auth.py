@@ -169,7 +169,8 @@ def check_id_token(
         ):
             raise SignInError("domain")
     name = claims.get("name")
-    if not isinstance(name, str) or member_id != (settings.bootstrap_admin_id or "").lower():
+    named = settings.open_signup or member_id == (settings.bootstrap_admin_id or "").lower()
+    if not isinstance(name, str) or not named:
         return member_id, sub, None
     # control, bidi and zero-width characters could make the name look like someone else's
     name = "".join(c for c in name if unicodedata.category(c) not in ("Cc", "Cf"))
@@ -363,6 +364,10 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         member_id, sub, name = check_id_token(id_token, settings, flow["nonce"], now)
         # no session for someone who is not a member yet: it would carry no linked account
         linked = await run_with_conn(request.app, db.link_account, member_id, sub, name)
+        if linked is None and settings.open_signup:
+            await run_with_conn(request.app, db.join, member_id, name)
+            log.info("access action=join target=%s", member_id)
+            linked = await run_with_conn(request.app, db.link_account, member_id, sub, name)
         if linked is None:
             raise SignInError("not-member", member_id)
         if not linked["active"]:

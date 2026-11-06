@@ -20,6 +20,7 @@ class Settings:
     oidc_client_secret: str | None = field(default=None, repr=False)
     session_secret: str | None = field(default=None, repr=False)
     oidc_allowed_domains: tuple[str, ...] = ()
+    open_signup: bool = False
 
     @property
     def shared(self) -> bool:
@@ -86,6 +87,11 @@ def check_oidc(settings: Settings) -> None:
             " personal Google account made for a member's email could sign in as them."
             " Set it to your Google Workspace domain, such as example.com."
         )
+    if settings.open_signup and not settings.oidc_allowed_domains:
+        raise RuntimeError(
+            "VERIFAIR_OPEN_SIGNUP needs VERIFAIR_OIDC_ALLOWED_DOMAINS, so only people from"
+            " your own domains can join."
+        )
     if not https_or_local(settings.base_url):
         raise RuntimeError(
             "VERIFAIR_BASE_URL must be the https URL people open, such as"
@@ -137,6 +143,9 @@ def load_settings() -> Settings:
         raise RuntimeError(
             "VERIFAIR_EMAIL_FROM must be one plain address such as verifair@example.com."
         )
+    open_signup = os.environ.get("VERIFAIR_OPEN_SIGNUP", "").strip().lower()
+    if open_signup not in ("", "0", "false", "1", "true"):
+        raise RuntimeError("VERIFAIR_OPEN_SIGNUP must be true or false.")
     return Settings(
         api_token=api_token,
         database_url=database_url,
@@ -156,4 +165,5 @@ def load_settings() -> Settings:
         oidc_allowed_domains=tuple(
             d.lower() for d in _split(os.environ.get("VERIFAIR_OIDC_ALLOWED_DOMAINS", ""))
         ),
+        open_signup=open_signup in ("1", "true"),
     )

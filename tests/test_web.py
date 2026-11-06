@@ -788,7 +788,8 @@ def test_first_run_and_caught_up(client, shared_client, settings):
     assert 'data-copy-target="vf_env"' in page and '<pre class="pre" id="vf_env">' in page
     assert 'export VERIFAIR_API_TOKEN="&lt;your token&gt;"' in page
     assert 'aria-label="Copy environment variables"' in page
-    assert "Reload this page after your agent pushes." in page and 'class="waiting"' not in page
+    assert "Ask your agent to publish a verifair review, then reload this page." in page
+    assert 'class="waiting"' not in page
     shared = shared_client.get("/").text
     assert "Welcome to verifair" in shared and "Create an agent token" in shared
     assert 'class="btn p" href="/access/tokens"' in shared
@@ -3828,3 +3829,16 @@ def test_hsts_only_when_served_over_https(settings, make_app, base_url, hsts):
     app = make_app(dataclasses.replace(settings, base_url=base_url))
     r = TestClient(app).get("/healthz")
     assert r.headers.get("strict-transport-security") == hsts
+
+
+SKILL_INSTALL = (
+    "mkdir -p ~/.claude/skills/verifair-review &amp;&amp; curl -fsS"
+    " -H &#34;Authorization: Bearer $VERIFAIR_API_TOKEN&#34; &#34;$VERIFAIR_URL/api/skill&#34;"
+    " -o ~/.claude/skills/verifair-review/SKILL.md"
+)
+
+
+def test_first_run_and_tokens_page_show_how_to_install_the_skill(client, shared_client):
+    assert SKILL_INSTALL in client.get("/").text
+    assert SKILL_INSTALL in shared_client.get("/").text
+    assert SKILL_INSTALL in shared_client.get("/access/tokens").text

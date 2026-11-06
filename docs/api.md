@@ -358,6 +358,14 @@ curl -sS --fail-with-body --max-time 60 -G \
 
 This endpoint signals feedback; it does not provide a lossless event stream. Stored event timestamps have second precision, so reusing `next_since` excludes other events from that same second. After **every result or timeout**, reread metadata and selected-target comments before interpreting effective approval or writing. This also catches non-events such as reopening. There is no lossless replay or durable resume cursor.
 
+## Get the agent skill
+
+`GET /api/skill` returns the `verifair-review` skill (`SKILL.md`, `text/markdown`) that ships with this server, so an agent gets the instructions that match this version. It needs a token like the rest of the API.
+
+```bash
+mkdir -p ~/.claude/skills/verifair-review && curl -fsS -H "Authorization: Bearer $VERIFAIR_API_TOKEN" "$VERIFAIR_URL/api/skill" -o ~/.claude/skills/verifair-review/SKILL.md
+```
+
 ## Errors
 
 | Status | `detail` |

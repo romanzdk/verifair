@@ -5,6 +5,7 @@ import time
 from contextlib import closing
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 import pytest
@@ -2398,3 +2399,10 @@ def test_trace_timestamp_precision_bound(client, fraction, status):
     trace = _trace_document()
     trace["events"][0]["started_at"] = f"2026-10-25T12:30:00.{fraction}Z"
     assert push(client, trace=trace).status_code == status
+
+
+def test_skill_is_served_to_agents_with_a_token(client):
+    r = client.get("/api/skill", headers=H)
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/markdown")
+    assert r.text == (Path(__file__).parents[1] / "skills/verifair-review/SKILL.md").read_text()
+    assert client.get("/api/skill").status_code == 401

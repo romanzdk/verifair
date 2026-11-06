@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_skill.html" import skill_install with context %}
 {% block title %}Agent tokens · verifair{% endblock %}
 {% block crumbs %}<span>Settings</span>{{ icon("chevron-right", "ic14") }}<span class="cur">Agent tokens</span>{% endblock %}
 {% macro new_token_fields(autofocus=False) %}
@@ -61,6 +62,11 @@
     </div>
     <div class="pre-wrap"><pre class="pre" id="vf_token_env">export VERIFAIR_URL={{ base_url }}
 export VERIFAIR_API_TOKEN=vf_…</pre><button type="button" class="icon-btn" data-copy-target="vf_token_env" aria-label="Copy environment variables">{{ icon("copy", "ic14") }}</button><span data-copy-result role="status"></span></div>
+    <div>
+      <h3>{{ icon("book-open") }}Install the verifair skill</h3>
+      <p>With the variables above set, this downloads the skill that matches this server into Claude Code's skills folder. Other agents can load the same file.</p>
+    </div>
+    {{ skill_install("vf_token_skill") }}
   </div>
   <section class="sec">
     <h2>Your tokens</h2>
