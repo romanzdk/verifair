@@ -864,3 +864,11 @@ def test_sign_in_link_on_the_401_page_keeps_the_page(anonymous):
     for header in ("Referer", "HX-Current-URL"):
         bad = anonymous.post("/r/x/comments", data={"body": "x"}, headers={header: "http://[x/y"})
         assert bad.status_code == 401 and 'href="/login"' in bad.text
+
+
+def test_refused_sign_in_offers_another_account_and_errors_offer_a_retry(
+    domain_client, provider, anonymous
+):
+    refused = provider.sign_in(domain_client(), email="x@other.org", hd="other.org")
+    assert ">Sign in with another account</a>" in refused.text
+    assert ">Try again</a>" in anonymous.get("/auth/callback", params={"state": "x"}).text

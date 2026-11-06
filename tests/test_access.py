@@ -39,7 +39,7 @@ def _token(conn, owner_id, label="agent"):
 def _new_token(client, headers, label="laptop"):
     r = client.post("/access/tokens", data={"label": label}, headers=headers)
     assert r.status_code == 200
-    return r, re.search(r'value="(vf_[^"]+)"', r.text).group(1)
+    return r, re.search(r'class="codebox">(vf_[^<]+)</textarea>', r.text).group(1)
 
 
 def test_member_sees_only_own_tokens_and_no_admin_sections(shared_client, conn, as_user):
@@ -209,7 +209,7 @@ def test_new_token_is_shown_once_and_never_logged(shared_client, conn, as_user, 
     bob = as_user("bob@example.com")
     r, token = _new_token(shared_client, bob, " laptop ")
     assert r.headers["cache-control"] == "no-store" and "location" not in r.headers
-    assert f'<input readonly value="{token}"' in r.text and COPY_ONCE in r.text
+    assert f'class="codebox">{token}</textarea>' in r.text and COPY_ONCE in r.text
     [row] = db.list_tokens(conn, "bob@example.com")
     assert (row["label"], token.startswith(f"vf_{row['id']}.")) == ("laptop", True)
     again = shared_client.get("/access/tokens", headers=bob)
@@ -233,7 +233,7 @@ def test_resending_the_new_token_form_does_not_create_a_second_token(shared_clie
     assert _nonce(shared_client.get("/access/tokens", headers=ADMIN).text) != nonce
     data = {"label": "laptop", "nonce": nonce}
     first = shared_client.post("/access/tokens", data=data, headers=ADMIN)
-    assert 'value="vf_' in first.text and ALREADY_CREATED not in first.text
+    assert 'class="codebox">vf_' in first.text and ALREADY_CREATED not in first.text
     assert _nonce(first.text) != nonce
     again = shared_client.post("/access/tokens", data=data, headers=ADMIN)
     assert again.status_code == 200 and again.headers["cache-control"] == "no-store"
@@ -555,9 +555,9 @@ def test_denied_page_has_a_heading_and_links_back(shared_client, conn, as_user):
 def test_new_token_has_a_copy_button_and_the_note_describes_the_field(shared_client):
     r, token = _new_token(shared_client, ADMIN)
     assert (
-        f'<input readonly value="{token}" id="vf_new_token" aria-label="New token"'
+        '<textarea readonly rows="1" id="vf_new_token" aria-label="New token"'
         ' aria-describedby="vf_new_token_note"'
-    ) in r.text
+    ) in r.text and f'class="codebox">{token}</textarea>' in r.text
     assert f'<p id="vf_new_token_note">{COPY_ONCE}</p>' in r.text
     assert (
         '<button type="button" class="btn p" data-copy-target="vf_new_token">'
