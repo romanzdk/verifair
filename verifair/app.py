@@ -12,7 +12,13 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
@@ -25,15 +31,32 @@ from verifair.deps import borrow, run_with_conn
 TOO_LARGE = {"detail": "request body too large"}
 CSP = (
     "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
-    " frame-ancestors 'none'"
+    " base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 )
-# FastAPI's API explorer pages load Swagger UI and ReDoc from jsDelivr and start them inline
+# the API explorer pages load pinned Swagger UI and ReDoc from jsDelivr, checked by SRI hashes,
+# and start them with an inline script
 DOCS_CSP = (
     "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
-    " style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;"
-    " font-src https://fonts.gstatic.com; img-src 'self' data: https:; worker-src blob:;"
-    " frame-ancestors 'none'"
+    " style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:;"
+    " worker-src blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 )
+CDN = "https://cdn.jsdelivr.net/npm"
+SWAGGER = f"{CDN}/swagger-ui-dist@5.34.1"
+SWAGGER_PAGE = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>verifair API</title>
+<link rel="stylesheet" href="{SWAGGER}/swagger-ui.css" crossorigin="anonymous"
+ integrity="sha384-4c3vsE5f+trhFyHrFrLM1fFGUn531NIaC7dcqEWIJdoRQJ5CkJbSuSCwXLpaS1KF">
+</head><body><div id="swagger-ui"></div>
+<script src="{SWAGGER}/swagger-ui-bundle.js" crossorigin="anonymous"
+ integrity="sha384-XFYN47VzPiDY6qPtxYKg0nqUeW/upo20xf1j2SUE7gT/i35FJB4cuS/71Iegzk8Z"></script>
+<script>SwaggerUIBundle({{url: "/openapi.json", dom_id: "#swagger-ui"}})</script>
+</body></html>"""
+REDOC_PAGE = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>verifair API</title></head><body>
+<redoc spec-url="/openapi.json"></redoc>
+<script src="{CDN}/redoc@2.5.4/bundles/redoc.standalone.js" crossorigin="anonymous"
+ integrity="sha384-w447zOpYfw/1Tv/5AK9NfHTlQIqE3RVR6KY62jCyy9zNDgO64cMwGGP1Fj0zJVf5"></script>
+</body></html>"""
 MAX_BODY = 1024 * 1024
 READYZ_TIMEOUT = 2
 log = logging.getLogger("verifair")
@@ -45,6 +68,24 @@ CONNECTION_LOST = ("08", "57P")
 STARTUP_LOCKED = (
     "Startup waited too long for a database lock held by another transaction. Restart to try again."
 )
+
+
+UNKNOWN_HOST = (
+    "Unknown host. In local mode verifair answers only on localhost, IP addresses and the host"
+    " in VERIFAIR_BASE_URL."
+)
+
+
+def _local_host_allowed(host: str, settings: Settings) -> bool:
+    # DNS rebinding points an attacker's domain at this machine, so in local mode, which has no
+    # sign-in, a dotted name is only trusted when it is the configured address
+    if "." not in host or host.endswith(".localhost"):
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return host == (urlsplit(settings.base_url).hostname or "")
 
 
 def _loopback_own_origin(request: Request) -> bool:
@@ -199,7 +240,16 @@ def create_app(settings: Settings) -> FastAPI:
         yield
         pool.close()
 
-    app = FastAPI(title="verifair", lifespan=lifespan)
+    app = FastAPI(title="verifair", lifespan=lifespan, docs_url=None, redoc_url=None)
+
+    @app.get("/docs", include_in_schema=False)
+    def api_explorer():
+        return HTMLResponse(SWAGGER_PAGE)
+
+    @app.get("/redoc", include_in_schema=False)
+    def api_reference():
+        return HTMLResponse(REDOC_PAGE)
+
     app.state.settings = settings
     app.state.pool = pool
     app.state.mailed = set()
@@ -220,6 +270,9 @@ def create_app(settings: Settings) -> FastAPI:
         request.state.member = None
         # Postgres text cannot hold NUL, so no stored id can match such a path
         response = JSONResponse({"detail": "Not Found"}, 404) if "\x00" in path else None
+        if response is None and not settings.shared:
+            if not _local_host_allowed((request.url.hostname or "").lower(), settings):
+                response = PlainTextResponse(UNKNOWN_HOST, 400)
         try:
             if (
                 response is None

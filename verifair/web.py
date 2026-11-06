@@ -82,11 +82,12 @@ COMMENT_LABELS = (
     "note",
 )
 BLOCKING_LABELS = ("issue", "todo")
-_LABEL = re.compile(rf"\s*({'|'.join(COMMENT_LABELS)})\s*(\([^)\n]*\))?\s*:\s*", re.IGNORECASE)
+_LABEL = re.compile(rf"\s*({'|'.join(COMMENT_LABELS)})\s*(?:(\([^)\n]*\))\s*)?:\s*", re.IGNORECASE)
 
 
 def comment_label(body: str) -> Markup:
-    found = _LABEL.match(body)
+    # a label sits at the start, so a long body cannot make the match slow
+    found = _LABEL.match(body[:300])
     if not found:
         return escape(body)
     label = found[1].lower()
