@@ -115,7 +115,7 @@ Conn = Annotated[db.Connection, Depends(get_conn, scope="function")]
 YEAR = 365 * 24 * 3600
 USER_ID = re.compile(r"[A-Za-z0-9_-]{8,16}")
 PLAIN_ID = re.compile(r"[^/\\\x00-\x1f\x7f\s]+")
-SCOPES = {"all": "All changes", "author": "My changes", "reviewer": "My reviews"}
+SCOPES = {"all": "All reviews", "author": "Created by me", "reviewer": "Assigned to me"}
 REFUSED = "Add a summary, or start a comment thread of your own and leave it open."
 STALE_FORM = "The review changed while you were on the page. Reload it and try again."
 EMPTY_BODY = "comment body is empty"
@@ -692,13 +692,13 @@ def _moderation_refusal(request, conn, report, user, cid, *, version=None):
 def _scope_empty(scope: str) -> dict:
     titles = {
         "all": "No projects yet",
-        "author": "No changes owned by you yet",
-        "reviewer": "No review requests for you yet",
+        "author": "Nothing created by you yet",
+        "reviewer": "Nothing assigned to you yet",
     }
     descriptions = {
-        "all": "Projects appear here when an agent shares its first change report.",
-        "author": "Changes linked to your identity will appear here.",
-        "reviewer": "Changes appear here when someone requests your review.",
+        "all": "Projects appear here when an agent publishes its first review.",
+        "author": "Reviews your agents publish for you will appear here.",
+        "reviewer": "Reviews appear here when someone asks you to review them.",
     }
     return {"empty_title": titles[scope], "empty_description": descriptions[scope]}
 
@@ -846,11 +846,11 @@ def _list_page(
         if project is None:
             projects = len({r["project"] for r in reports})
             meta = (
-                f"{_plural(len(rows), 'change')} in {_plural(projects, 'project')}"
+                f"{_plural(len(rows), 'review')} in {_plural(projects, 'project')}"
                 f" · {awaiting} awaiting review"
             )
         else:
-            meta = f"{_plural(len(rows), 'change')} · {awaiting} awaiting review"
+            meta = f"{_plural(len(rows), 'review')} · {awaiting} awaiting review"
             if reports:
                 meta += f" · updated {ago(max(r['updated_at'] for r in reports))}"
         if tab == "all":
@@ -873,21 +873,21 @@ def _list_page(
             "counts": counts,
             "rows": shown,
             "empty_title": {
-                "open": "No open changes",
-                "all": "No changes yet",
-                "awaiting_review": "No changes awaiting review",
+                "open": "No open reviews",
+                "all": "No reviews yet",
+                "awaiting_review": "Nothing awaiting review",
                 "changes_requested": "No changes requested",
-                "unsigned": "No unsigned changes",
-                "approved": "No approved changes yet",
-                "awaiting_implementation": "No changes awaiting implementation",
-                "archived": "No archived changes",
+                "unsigned": "No unsigned reviews",
+                "approved": "No approved reviews yet",
+                "awaiting_implementation": "Nothing awaiting implementation",
+                "archived": "No archived reviews",
             }[tab],
             "empty_description": (
                 f"Try another status, or view all {len(reports)} matching "
-                f"change{'s' if len(reports) != 1 else ''}{where}."
+                f"review{'s' if len(reports) != 1 else ''}{where}."
             ),
             "empty_url": "?tab=all" + (f"&scope={scope}" if scope != "all" else ""),
-            "empty_action": "View all changes" if tab != "all" else None,
+            "empty_action": "View all reviews" if tab != "all" else None,
             "project_open": (
                 sum(row["report"]["project"] == project for row in work["rows"])
                 if project is not None and _can_delete(request)
@@ -897,7 +897,7 @@ def _list_page(
         if not reports and archived and tab != "archived":
             ctx.update(
                 empty_title="Nothing open",
-                empty_description=f"{_plural(len(archived), 'archived change')}{where}.",
+                empty_description=f"{_plural(len(archived), 'archived review')}{where}.",
                 empty_url="?tab=archived" + (f"&scope={scope}" if scope != "all" else ""),
                 empty_action="View archived",
             )
@@ -905,8 +905,8 @@ def _list_page(
             ctx.update(_scope_empty(scope), empty_url="?scope=all&tab=all", empty_action=None)
             if scope != "all":
                 ctx.update(
-                    empty_description=f"View everyone's changes{where}.",
-                    empty_action="View everyone's changes",
+                    empty_description=f"View everyone's reviews{where}.",
+                    empty_action="View everyone's reviews",
                 )
         return _page(request, conn, user, "changes.html", ctx, work=work)
 

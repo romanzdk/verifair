@@ -25,7 +25,7 @@
 {% endmacro %}
 
 {% macro status_tabs(counts, tab, scope) %}
-<nav class="tabs" aria-label="Filter changes by status" data-status-nav>
+<nav class="tabs" aria-label="Filter reviews by status" data-status-nav>
   {% for key in TABS %}
   <a href="?tab={{ key }}{% if scope != 'all' %}&amp;scope={{ scope }}{% endif %}" aria-label="{{ TAB_LABELS[key] }} · {{ counts[key] }}"{% if tab == key %} aria-current="page"{% endif %}{% if not counts[key] %} class="zero"{% endif %}>{{ TAB_LABELS[key] }}<span class="tab-n">{{ counts[key] }}</span></a>
   {% endfor %}

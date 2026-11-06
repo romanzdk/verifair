@@ -108,9 +108,9 @@ This is local mode. For a team, use shared mode. See [docs/access.md](docs/acces
 | --- | --- |
 | ![Inbox in light theme](docs/images/inbox-light.png) | ![Inbox in dark theme](docs/images/inbox-dark.png) |
 
-| All changes with status tabs | Review page, dark |
+| All reviews with status tabs | Review page, dark |
 | --- | --- |
-| ![All changes list with Open, Awaiting review, Changes requested, Unsigned, Approved and All tabs](docs/images/changes.png) | ![Review page in dark theme with a blocking thread](docs/images/review-dark.png) |
+| ![All reviews list with Open, Awaiting review, Changes requested, Unsigned, Approved and All tabs](docs/images/changes.png) | ![Review page in dark theme with a blocking thread](docs/images/review-dark.png) |
 
 | Agent tokens (shared mode) | Members (shared mode) |
 | --- | --- |

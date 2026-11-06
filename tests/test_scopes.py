@@ -178,7 +178,7 @@ def test_scope_links_keep_status_and_empty_status_recovery_keeps_scope(team):
     page = team.get("/changes?scope=author&tab=approved", headers=ALICE).text
     assert 'href="?tab=unsigned&amp;scope=author"' in page
     assert 'href="?tab=all&amp;scope=author"' in page
-    assert "No approved changes yet" in page
+    assert "No approved reviews yet" in page
     fallback = team.get("/changes?scope=bogus&tab=bogus", headers=ALICE).text
     assert 'href="/r/owned"' in fallback and 'href="/r/requested"' in fallback
     assert 'href="/r/elsewhere"' in fallback
@@ -195,14 +195,14 @@ def test_old_scope_urls_redirect_to_changes(team):
 def test_no_matches_is_a_useful_empty_state_and_not_a_missing_project(team):
     seed(team)
     empty = team.get("/p/other?scope=author", headers=ALICE)
-    assert empty.status_code == 200 and "No changes owned by you" in empty.text
+    assert empty.status_code == 200 and "Nothing created by you" in empty.text
     assert 'href="?scope=all&amp;tab=all"' in empty.text
-    assert "View everyone&#39;s changes in this project." in empty.text
+    assert "View everyone&#39;s reviews in this project." in empty.text
     assert "another scope" not in empty.text
     missing = team.get("/p/missing?scope=author", headers=ALICE)
     assert missing.status_code == 404
     reviews = team.get("/changes?scope=reviewer", headers=signed_in("carol@example.com"))
-    assert "No review requests for you yet" in reviews.text
+    assert "Nothing assigned to you yet" in reviews.text
     assert 'href="?scope=all&amp;tab=all"' in reviews.text
 
 

@@ -17,32 +17,32 @@
   <div class="welcome">
     <div class="hero">{{ icon("inbox") }}</div>
     <h1>Welcome to verifair</h1>
-    <p>Your agents push change reports here. You read them, sign your own and review the rest.</p>
+    <p>Your agents publish reviews here. You read them, sign your own and review the ones assigned to you.</p>
     <ol class="steps panel">
       {% if shared %}
       <li class="step next"><span class="n">1</span><div><h3>Create an agent token</h3><p>One token per machine or CI job. You see the secret once.</p><a class="btn p" href="/access/tokens">{{ icon("key-round", "ic14") }}Create token</a></div></li>
       {% else %}
       <li class="step next"><span class="n">1</span><div><h3>Give your agent the server's <code>VERIFAIR_API_TOKEN</code></h3><p>It is the token this server was started with. Keep it out of shared files.</p></div></li>
       {% endif %}
-      <li class="step"><span class="n">2</span><div><h3>Point your agent at this URL</h3><p>Set these in the agent's environment, then ask it to publish its change report.</p>
+      <li class="step"><span class="n">2</span><div><h3>Point your agent at this URL</h3><p>Set these in the agent's environment, then ask it to publish a review.</p>
         <div class="pre-wrap"><pre class="pre" id="vf_env">export VERIFAIR_URL={{ base_url }}
 export VERIFAIR_API_TOKEN={% if shared %}vf_…{% else %}"&lt;your token&gt;"{% endif %}</pre><button type="button" class="icon-btn" data-copy-target="vf_env" aria-label="Copy environment variables">{{ icon("copy", "ic14") }}</button><span data-copy-result role="status"></span></div></div></li>
       <li class="step"><span class="n">3</span><div><h3>Install the verifair skill</h3><p>It teaches your agent the report format and how to answer comments. It needs Node.js; it asks which agents you use (Claude Code, Codex, Cursor and others) and installs the skill version that matches this server.</p>
         {{ skill_install("vf_skill") }}</div></li>
-      <li class="step"><span class="n">4</span><div><h3>Your first report appears here</h3><p>Ask your agent to publish a verifair review, then reload this page.</p></div></li>
+      <li class="step"><span class="n">4</span><div><h3>Your first review appears here</h3><p>Ask your agent to publish a verifair review, then reload this page.</p></div></li>
     </ol>
   </div>
 {% else %}
   {% set waiting = groups.waiting|length %}
   <div class="ph"><div><h1>Inbox</h1><div class="meta">{{ need_count }} need you · {{ waiting }} waiting on others</div></div></div>
   {% if needs_setup %}
-  <div class="panel setup" id="vf_setup"><div><h3>{{ icon("bot") }}Connect your coding agent</h3><p>Create an agent token and install the verifair skill, so your agent can publish its change reports here.</p></div><a class="btn p" href="/access/tokens">{{ icon("key-round", "ic14") }}Set up</a></div>
+  <div class="panel setup" id="vf_setup"><div><h3>{{ icon("bot") }}Connect your coding agent</h3><p>Create an agent token and install the verifair skill, so your agent can publish reviews here.</p></div><a class="btn p" href="/access/tokens">{{ icon("key-round", "ic14") }}Set up</a></div>
   {% endif %}
   {% if not need_count %}
   <div class="blank caught-up">
     <h2>You're all caught up</h2>
     <p>Nothing needs your review, signature or changes right now.</p>
-    <a class="btn" href="/changes">All changes</a> <a class="btn" href="/changes?scope=author">My changes</a>
+    <a class="btn" href="/changes">All reviews</a> <a class="btn" href="/changes?scope=author">Created by me</a>
   </div>
   {% endif %}
   {{ group(groups.review, "user-check", "Needs your review", "High risk first, then oldest", waiting=True) }}
