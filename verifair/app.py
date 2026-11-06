@@ -61,6 +61,7 @@ MAX_BODY = 1024 * 1024
 READYZ_TIMEOUT = 2
 log = logging.getLogger("verifair")
 SIGN_IN = "Sign in to use verifair."
+HEALTH = ("/healthz", "/readyz")
 PUBLIC = ("/healthz", "/readyz", "/login", "/auth/callback", "/logout", "/signed-out")
 DB_UNAVAILABLE = "The database is not available. Try again in a moment."
 # connection exceptions, and the server shutting down or not accepting connections yet
@@ -276,7 +277,7 @@ def create_app(settings: Settings) -> FastAPI:
         request.state.member = None
         # Postgres text cannot hold NUL, so no stored id can match such a path
         response = JSONResponse({"detail": "Not Found"}, 404) if "\x00" in path else None
-        if response is None and not settings.shared:
+        if response is None and not settings.shared and not (is_api or path in HEALTH):
             if not _local_host_allowed((request.url.hostname or "").lower(), settings):
                 response = PlainTextResponse(UNKNOWN_HOST, 400)
         try:

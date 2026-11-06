@@ -788,3 +788,13 @@ def test_shared_mode_does_not_check_the_host(shared_client):
     anonymous = TestClient(shared_client.app)
     assert anonymous.get("/healthz", headers={"Host": "10.0.0.5:8000"}).status_code == 200
     assert anonymous.get("/healthz", headers={"Host": "verifair.example.com"}).status_code == 200
+
+
+def test_local_mode_host_check_spares_the_api_and_probes(client):
+    host = {"Host": "verifair.ns.svc.cluster.local:8000"}
+    assert client.get("/healthz", headers=host).status_code == 200
+    assert (
+        client.get("/api/reports/missing", headers=host | {"Authorization": "Bearer t"}).status_code
+        == 404
+    )
+    assert client.get("/", headers=host).status_code == 400
