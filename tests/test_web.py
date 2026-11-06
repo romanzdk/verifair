@@ -3871,3 +3871,44 @@ def test_sidebar_links_to_the_docs_site_and_the_repository(client):
     page = client.get("/").text
     assert 'href="https://romanzdk.github.io/verifair/"' in page
     assert 'href="https://github.com/romanzdk/verifair"' in page
+
+
+@pytest.mark.parametrize(
+    ("body", "html"),
+    [
+        ("issue: breaks X", '<span class="badge cl-issue">issue</span> breaks X'),
+        (
+            "Suggestion (non-blocking): try Y",
+            '<span class="badge cl-suggestion">suggestion (non-blocking)</span> try Y',
+        ),
+        ("praise: <b>x</b>", '<span class="badge cl-praise">praise</span> &lt;b&gt;x&lt;/b&gt;'),
+        ("todo:", '<span class="badge cl-todo">todo</span> '),
+        ("because: nothing", "because: nothing"),
+        ("an issue: not at start", "an issue: not at start"),
+        (
+            "issue (<i>x</i>): y",
+            '<span class="badge cl-issue">issue (&lt;i&gt;x&lt;/i&gt;)</span> y',
+        ),
+    ],
+)
+def test_comment_label_filter(body, html):
+    assert str(web.comment_label(body)) == html
+
+
+def test_comment_form_has_label_buttons(client):
+    push(client)
+    page = client.get("/r/prorate").text
+    for label in web.COMMENT_LABELS:
+        assert f'data-label="{label}"' in page
+    assert page.count('data-label="issue" data-blocks') >= 1
+    assert 'data-label="note" data-blocks' not in page
+
+
+def test_labelled_comment_is_stored_unchanged_and_shown_as_badge(client):
+    push(client)
+    client.cookies.set("vf_name", "Alice")
+    r = client.post(
+        "/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "issue: breaks X"}
+    )
+    assert '<span class="badge cl-issue">issue</span> breaks X' in r.text
+    assert api_threads(client)[0]["body"] == "issue: breaks X"

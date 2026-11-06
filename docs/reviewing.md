@@ -131,6 +131,15 @@ Local identities belong to a browser. In shared mode, sign-in supplies the same 
 - The sidebar counts open blocking threads and suggestions.
 - In plan-first reviews blockers apply to their document, and plan blockers also pause the overall workflow as described above. The selected document's controls and the current status update after a thread is reopened, resolved or made non-blocking.
 
+## Conventional Comments
+
+The comment form has a row of label buttons: praise, nitpick, suggestion, issue, question, thought, todo, chore and note (see [conventionalcomments.org](https://conventionalcomments.org)). They need JavaScript.
+
+- A button puts `label: ` at the start of the comment. Another button swaps the label. Clicking the pressed button removes it.
+- `issue` and `todo` untick "Non-blocking (suggestion)", so the thread blocks. Every other label ticks it. You can still change the box by hand.
+- The label is plain text in the comment (`issue: this breaks X`). Agents read it as text. You can also type it yourself, with decorations like `suggestion (non-blocking): ...`.
+- A known label at the start of a comment is shown as a small badge. Other text before a colon stays plain.
+
 ## Archive and delete
 
 **Archive** a review when it is done or was only a test. It leaves the Inbox, the change lists and the sidebar, but stays readable at its link, with a banner saying who archived it and when. Find archived reviews on the **Archived** tab of a list or project, and **Restore** them from the banner. The review's owner, the people asked to review it, and admins can archive and restore it, from **Manage** in the review's sidebar. Agents can do the same through the API ([api.md](api.md#archive-a-report)). People can still comment on, sign and judge an archived review from its page, but it takes no new versions until it is restored.

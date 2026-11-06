@@ -70,7 +70,34 @@ def avatar(id: str) -> str:
     return f"c{zlib.crc32(id.encode()) % 5}"
 
 
+COMMENT_LABELS = (
+    "praise",
+    "nitpick",
+    "suggestion",
+    "issue",
+    "question",
+    "thought",
+    "todo",
+    "chore",
+    "note",
+)
+BLOCKING_LABELS = ("issue", "todo")
+_LABEL = re.compile(rf"\s*({'|'.join(COMMENT_LABELS)})\s*(\([^)\n]*\))?\s*:\s*", re.IGNORECASE)
+
+
+def comment_label(body: str) -> Markup:
+    found = _LABEL.match(body)
+    if not found:
+        return escape(body)
+    label = found[1].lower()
+    shown = f"{label} {found[2]}" if found[2] else label
+    rest = body[found.end() :]
+    return Markup('<span class="badge cl-{}">{}</span> {}').format(label, shown, rest)
+
+
 templates.env.filters["date"] = _date
+templates.env.filters["comment_label"] = comment_label
+templates.env.globals |= {"COMMENT_LABELS": COMMENT_LABELS, "BLOCKING_LABELS": BLOCKING_LABELS}
 templates.env.filters |= {"age": age, "ago": ago, "avatar": avatar}
 templates.env.filters["segment"] = lambda value: url_quote(value, safe="")
 VERSION = importlib.metadata.version("verifair")

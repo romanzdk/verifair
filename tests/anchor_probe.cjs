@@ -240,6 +240,45 @@ const cases = {
     assert.equal(run(true, "flex"), 0);
     assert.equal(run(false, "none"), 0);
   },
+  comment_label_buttons() {
+    const button = (label, blocks) => {
+      const attrs = { "aria-pressed": "false" };
+      return {
+        dataset: { label },
+        hasAttribute: () => blocks,
+        getAttribute: (name) => attrs[name],
+        setAttribute: (name, value) => { attrs[name] = value; },
+      };
+    };
+    const issue = button("issue", true);
+    const note = button("note", false);
+    const body = { value: "", focused: 0, focus() { this.focused++; } };
+    const form = { body, blocking: { checked: false }, querySelectorAll: () => [issue, note] };
+    const click = (b) => {
+      const event = { target: { closest: (selector) => selector === "[data-label]" ? Object.assign(b, { closest: () => form }) : null } };
+      documentEvents.get("click").forEach((fn) => fn(event));
+    };
+    click(issue);
+    assert.equal(body.value, "issue: ");
+    assert.equal(form.blocking.checked, false);
+    assert.equal(issue.getAttribute("aria-pressed"), "true");
+    body.value = "issue: breaks X";
+    click(note);
+    assert.equal(body.value, "note: breaks X");
+    assert.equal(form.blocking.checked, true);
+    assert.equal(issue.getAttribute("aria-pressed"), "false");
+    assert.equal(note.getAttribute("aria-pressed"), "true");
+    body.value = "Note (non-blocking): breaks X";
+    click(issue);
+    assert.equal(body.value, "issue: breaks X");
+    click(issue);
+    assert.equal(body.value, "breaks X");
+    assert.equal(issue.getAttribute("aria-pressed"), "false");
+    body.value = "plain text";
+    click(note);
+    assert.equal(body.value, "note: plain text");
+    assert.ok(body.focused >= 5);
+  },
 };
 cases[process.argv[2]]();
 console.log(`${process.argv[2]}: correct DOM range`);
