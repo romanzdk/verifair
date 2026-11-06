@@ -115,6 +115,12 @@ Local identities belong to a browser. In shared mode, sign-in supplies the same 
 - The person who signed a version cannot approve it or request changes on it. Someone else has to.
 - Only in shared mode, with sign-in, is signing a real control. See [access.md](access.md#set-up-shared-mode).
 
+## Undo a signature or a verdict
+
+- **Unsign:** the person who signed the current version, or an admin, can press **Unsign** next to "Signed by". It works only while nobody has approved or requested changes on that version; after that it stays signed, so the reviewers' verdicts keep their meaning. Ask them to withdraw their verdict first, or push a new version.
+- **Unapprove** and **Withdraw request:** after you approve or request changes, that button turns into its undo. It removes your verdict on this version, and the status goes back as if you had not judged it. The other button stays, so you can also switch straight to the opposite verdict.
+- Withdrawn verdicts are kept in the database for the record, but no longer count or show. Agents cannot sign, unsign or give verdicts, only people in the app.
+
 ## Blocking threads
 
 - A new thread is blocking by default. A reviewer can tick "Non-blocking (suggestion)" when writing it, and switch a thread between blocking and non-blocking later. In shared mode only some people can do that; see [Moderation](access.md#moderation).

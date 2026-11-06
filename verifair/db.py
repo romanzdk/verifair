@@ -188,6 +188,10 @@ class Archived(Exception):
     pass
 
 
+class VerdictsGiven(Exception):
+    pass
+
+
 class StaleVersion(Exception):
     def __init__(self, latest: int) -> None:
         super().__init__(f"latest version is {latest}")
@@ -343,6 +347,8 @@ def init_schema(conn: Connection) -> None:
         for column in ("oidc_sub", "sessions_valid_after"):
             if ("users", column) not in columns:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {column} TEXT")
+        if ("verdicts", "withdrawn_at") not in columns:
+            conn.execute("ALTER TABLE verdicts ADD COLUMN withdrawn_at TEXT")
         for column in ("archived_at", "archived_by"):
             if ("reports", column) not in columns:
                 conn.execute(f"ALTER TABLE reports ADD COLUMN {column} TEXT")
@@ -724,7 +730,7 @@ def verdicts_by_report(conn: Connection, ids: list[str]) -> dict[str, list[Row]]
         conn,
         "SELECT id, report_id, target, version, reviewer_id, reviewer_name, verdict, summary,"
         " created_at"
-        " FROM verdicts ORDER BY id",
+        " FROM verdicts WHERE withdrawn_at IS NULL ORDER BY id",
         ids,
     )
 
@@ -777,7 +783,7 @@ def remove_review_request(conn: Connection, report_id: str, reviewer_id: str) ->
     with _write(conn, report_id):
         judged = conn.execute(
             "SELECT 1 FROM verdicts d JOIN versions v ON v.report_id=d.report_id"
-            " WHERE d.report_id=%s AND d.reviewer_id=%s"
+            " WHERE d.report_id=%s AND d.reviewer_id=%s AND d.withdrawn_at IS NULL"
             " AND v.version=(SELECT MAX(version) FROM versions WHERE report_id=%s)"
             " AND ((d.target='implementation' AND v.body IS NOT NULL AND d.version=v.version)"
             " OR (d.target='plan' AND d.version=v.plan_revision)) LIMIT 1",
@@ -957,7 +963,9 @@ def list_verdicts(
     conn: Connection, report_id: str, *, target: Target = "implementation"
 ) -> list[Row]:
     return conn.execute(
-        "SELECT * FROM verdicts WHERE report_id=%s AND target=%s ORDER BY id", (report_id, target)
+        "SELECT * FROM verdicts WHERE report_id=%s AND target=%s AND withdrawn_at IS NULL"
+        " ORDER BY id",
+        (report_id, target),
     ).fetchall()
 
 
@@ -1012,6 +1020,58 @@ def sign_version(
         "version signed report=%s version=%d signer_id=%s", report_id, version, _short(signer_id)
     )
     return get_signature(conn, report_id, version, target=target)
+
+
+def withdraw_verdicts(
+    conn: Connection,
+    *,
+    report_id: str,
+    version: int,
+    reviewer_id: str,
+    target: Target = "implementation",
+    expected_version: int | None = None,
+) -> int:
+    with _write(conn, report_id):
+        _check_target(conn, report_id, target, version, expected_version)
+        withdrawn = conn.execute(
+            "UPDATE verdicts SET withdrawn_at=%s WHERE report_id=%s AND version=%s AND target=%s"
+            " AND reviewer_id=%s AND withdrawn_at IS NULL",
+            (_now(), report_id, version, target, reviewer_id),
+        ).rowcount
+    if withdrawn:
+        log.info(
+            "verdict withdrawn report=%s version=%d reviewer_id=%s",
+            report_id,
+            version,
+            _short(reviewer_id),
+        )
+    return withdrawn
+
+
+def unsign_version(
+    conn: Connection,
+    *,
+    report_id: str,
+    version: int,
+    target: Target = "implementation",
+    expected_version: int | None = None,
+) -> bool:
+    with _write(conn, report_id):
+        _check_target(conn, report_id, target, version, expected_version)
+        # reviewers judged this exact signed version, so their verdicts would lose their meaning
+        if conn.execute(
+            "SELECT 1 FROM verdicts WHERE report_id=%s AND version=%s AND target=%s"
+            " AND withdrawn_at IS NULL LIMIT 1",
+            (report_id, version, target),
+        ).fetchone():
+            raise VerdictsGiven(f"{report_id} v{version} already has verdicts")
+        removed = conn.execute(
+            "DELETE FROM signatures WHERE report_id=%s AND version=%s AND target=%s",
+            (report_id, version, target),
+        ).rowcount
+    if removed:
+        log.info("version unsigned report=%s version=%d", report_id, version)
+    return removed > 0
 
 
 def get_signature(
