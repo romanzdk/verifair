@@ -3,7 +3,6 @@ import importlib.metadata
 import re
 from contextlib import closing
 from datetime import UTC, datetime
-from html import escape
 from pathlib import Path
 from urllib.parse import quote as url_quote
 
@@ -3832,13 +3831,10 @@ def test_hsts_only_when_served_over_https(settings, make_app, base_url, hsts):
     assert r.headers.get("strict-transport-security") == hsts
 
 
-SKILL_INSTALL = escape(
-    'd=~/.claude/skills/verifair-review && mkdir -p "$d" && curl -fsS -H "Authorization: Bearer'
-    ' $VERIFAIR_API_TOKEN" "${VERIFAIR_URL%/}/api/skill" -o "$d/SKILL.md.new"'
-    ' && grep -q "^name: verifair-review" "$d/SKILL.md.new"'
-    ' && mv "$d/SKILL.md.new" "$d/SKILL.md" || rm -f "$d/SKILL.md.new"',
-    quote=False,
-).replace('"', "&#34;")
+SKILL_INSTALL = (
+    f"npx skills add romanzdk/verifair@v{importlib.metadata.version('verifair')}"
+    " --skill verifair-review -g"
+)
 
 
 def test_first_run_and_tokens_page_show_how_to_install_the_skill(client, shared_client):

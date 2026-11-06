@@ -65,7 +65,7 @@
 export VERIFAIR_API_TOKEN={{ new_token or "vf_…" }}</pre><button type="button" class="icon-btn" data-copy-target="vf_token_env" aria-label="Copy environment variables">{{ icon("copy", "ic14") }}</button><span data-copy-result role="status"></span></div>
     <div>
       <h3>{{ icon("book-open") }}Install the verifair skill</h3>
-      <p>With the variables above set, this downloads the skill that matches this server into Claude Code's skills folder. A 401 means the token is wrong or revoked. Other agents can load the same file.</p>
+      <p>It needs Node.js. It asks which agents you use (Claude Code, Codex, Cursor and others) and installs the skill version that matches this server. Run it again after an upgrade. No Node? <a href="https://romanzdk.github.io/verifair/api/#get-the-agent-skill">Download it from this server</a>.</p>
     </div>
     {{ skill_install("vf_token_skill") }}
   </div>
