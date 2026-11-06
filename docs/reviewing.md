@@ -119,6 +119,7 @@ Local identities belong to a browser. In shared mode, sign-in supplies the same 
 
 - **Unsign:** the person who signed the current version, or an admin, can press **Unsign** next to "Signed by". It works only while nobody has approved or requested changes on that version; after that it stays signed, so the reviewers' verdicts keep their meaning. Ask them to withdraw their verdict first, or push a new version.
 - **Unapprove** and **Withdraw request:** after you approve or request changes, that button turns into its undo. It removes your verdict on this version, and the status goes back as if you had not judged it. The other button stays, so you can also switch straight to the opposite verdict.
+- In a plan-first review, the plan's approval and signature cannot be undone once the implementation is attached, because the implementation was reviewed against that plan. Push a new plan revision instead.
 - Withdrawn verdicts are kept in the database for the record, but no longer count or show. Agents cannot sign, unsign or give verdicts, only people in the app.
 
 ## Blocking threads

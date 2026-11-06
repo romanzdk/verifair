@@ -80,6 +80,14 @@ def verdict_text(report: Mapping, verdict: Mapping, base_url: str) -> str:
     )
 
 
+def withdrawn_text(report: Mapping, name: str, version: int, target: str, base_url: str) -> str:
+    return (
+        f"{_esc(name)} withdrew their verdict on {_esc(report['title'])} "
+        f"{_revision(report, version, target)} "
+        f"{base_url}/r/{report['id']}{_tab(report, target)}"
+    )
+
+
 def send(settings: Settings, text: str) -> None:
     if not settings.slack_webhook_url:
         return

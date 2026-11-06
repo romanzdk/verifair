@@ -123,6 +123,10 @@ NAME_FIRST = "Set your name on the report page before you comment, sign or revie
 UNSIGNED = "The author has not signed this version yet."
 SELF_REVIEW = "You signed this report. Someone else has to approve it."
 UNSIGN_REFUSED = "Only the person who signed this version, or an admin, can unsign it."
+PLAN_IN_USE = (
+    "The implementation was built on this approved plan, so its approval and signature stay."
+    " Push a new plan revision instead."
+)
 VERDICTS_GIVEN = (
     "Someone already gave a verdict on this version, so it stays signed."
     " Ask them to withdraw it, or push a new version."
@@ -588,9 +592,11 @@ def report_context(
         "versions": db.list_versions(conn, id)[::-1],
         "links": links,
         "my_verdict": judged.get(user_id),
+        "plan_in_use": feedback_target == "plan" and latest["body"] is not None,
         "can_unsign": signature is not None
         and version == current
         and not readonly_plan
+        and not (feedback_target == "plan" and latest["body"] is not None)
         and (signer_id == user_id or (member is not None and member["role"] == "admin"))
         and not any(v["version"] == revision for v in verdicts),
         "verdict_block": "The current plan must be approved before reviewing the implementation."
@@ -1465,22 +1471,32 @@ def withdraw_verdict(
     request: Request,
     conn: Conn,
     user: User,
+    background: BackgroundTasks,
     version: Annotated[int, Form()],
     target: Annotated[db.Target, Form()] = "implementation",
     revision: Annotated[int | None, Form()] = None,
 ):
     report = _require_report(conn, id)
+    revision = _revision(target, revision, version)
     try:
-        db.withdraw_verdicts(
+        withdrawn = db.withdraw_verdicts(
             conn,
             report_id=id,
-            version=_revision(target, revision, version),
+            version=revision,
             target=target,
             expected_version=version,
             reviewer_id=user[0],
         )
+    except db.PlanInUse:
+        raise HTTPException(409, PLAN_IN_USE) from None
     except (db.StaleVersion, db.StaleRevision, db.MissingDocument, ValueError) as error:
         return _action_error(request, conn, report, target, error)
+    if withdrawn:
+        settings = request.app.state.settings
+        text = notify.withdrawn_text(
+            report, user[1] or user[0], revision, target, settings.base_url
+        )
+        background.add_task(notify.send, settings, text)
     return _action_response(request, conn, id, user, target, version=version)
 
 
@@ -1507,6 +1523,8 @@ def unsign(
         )
     except db.VerdictsGiven:
         raise HTTPException(409, VERDICTS_GIVEN) from None
+    except db.PlanInUse:
+        raise HTTPException(409, PLAN_IN_USE) from None
     except (db.StaleVersion, db.StaleRevision, db.MissingDocument, ValueError) as error:
         return _action_error(request, conn, report, target, error)
     log.info("access action=unsign actor=%s report=%s version=%d", user[0], id, revision)

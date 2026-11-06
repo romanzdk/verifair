@@ -324,7 +324,7 @@ function settleReviewers(sent) {
 
 document.body.addEventListener("htmx:afterSettle", (event) => {
   const path = event.detail.pathInfo?.requestPath || "";
-  if (path.endsWith("/verdict")) {
+  if (path.endsWith("/verdict") || path.endsWith("/verdict/withdraw")) {
     document.querySelector("#vf_verdict .vmsg")?.focus();
   } else if (/\/reviewers(\/[^/]+\/remove)?$/.test(path)) {
     settleReviewers(event.detail.requestConfig?.elt);

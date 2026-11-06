@@ -192,6 +192,16 @@ class VerdictsGiven(Exception):
     pass
 
 
+class PlanInUse(Exception):
+    pass
+
+
+def _refuse_plan_change(conn: Connection, report_id: str, target: Target) -> None:
+    # verdicts on an attached implementation were given against this approved plan
+    if target == "plan" and get_version(conn, report_id, latest_version(conn, report_id))["body"]:
+        raise PlanInUse(f"{report_id} already has an implementation")
+
+
 class StaleVersion(Exception):
     def __init__(self, latest: int) -> None:
         super().__init__(f"latest version is {latest}")
@@ -1033,6 +1043,7 @@ def withdraw_verdicts(
 ) -> int:
     with _write(conn, report_id):
         _check_target(conn, report_id, target, version, expected_version)
+        _refuse_plan_change(conn, report_id, target)
         withdrawn = conn.execute(
             "UPDATE verdicts SET withdrawn_at=%s WHERE report_id=%s AND version=%s AND target=%s"
             " AND reviewer_id=%s AND withdrawn_at IS NULL",
@@ -1058,6 +1069,7 @@ def unsign_version(
 ) -> bool:
     with _write(conn, report_id):
         _check_target(conn, report_id, target, version, expected_version)
+        _refuse_plan_change(conn, report_id, target)
         # reviewers judged this exact signed version, so their verdicts would lose their meaning
         if conn.execute(
             "SELECT 1 FROM verdicts WHERE report_id=%s AND version=%s AND target=%s"
