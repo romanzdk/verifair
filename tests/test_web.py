@@ -3853,8 +3853,7 @@ def test_inbox_asks_members_without_a_token_to_connect_their_agent(shared_client
 
 def test_new_token_fills_in_the_environment_block(shared_client):
     page = shared_client.post("/access/tokens", data={"label": "laptop", "nonce": "n"}).text
-    token = re.search(r'id="vf_new_token"[^>]*value="([^"]+)"|value="(vf_[^"]+)"', page)
-    secret = token[1] or token[2]
+    secret = re.search(r'class="codebox">(vf_[^<]+)</textarea>', page)[1]
     assert f"export VERIFAIR_API_TOKEN={secret}</pre>" in page
     assert "export VERIFAIR_API_TOKEN=vf_…</pre>" in shared_client.get("/access/tokens").text
 
@@ -3911,3 +3910,14 @@ def test_labelled_comment_is_stored_unchanged_and_shown_as_badge(client):
     )
     assert '<span class="badge cl-issue">issue</span> breaks X' in r.text
     assert api_threads(client)[0]["body"] == "issue: breaks X"
+
+
+def test_phone_layout_rules():
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    phone = _media(css, "max-width: 640px")
+    assert (
+        ".secret-row { flex-direction: column;" in phone
+        and ".lb, .btn.sm { min-height: 32px; }" in phone
+    )
+    assert ".content h1 { margin: 0 0 12px; font: 600 20px/28px var(--font); }" in css
+    assert ".verdict textarea:disabled { display: none; }" in _media(css, "max-width: 720px")

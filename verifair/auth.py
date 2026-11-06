@@ -302,13 +302,16 @@ def page(request: Request, title: str, message: str, status: int, **ctx):
 
 def _failed(request: Request, error: SignInError):
     log.info("sign-in failed reason=%s", " ".join(map(str, error.args)))
+    other = {"signin": True, "signin_label": "Sign in with another account"}
+    retry = {"signin": True, "signin_label": "Try again"}
     if isinstance(error, Unreachable):
-        return page(request, "Sign-in failed", UNREACHABLE, 502, signin=True)
+        return page(request, "Sign-in failed", UNREACHABLE, 502, **retry)
     if error.args[0] in ("not-member", "inactive"):
         copy = web.NOT_MEMBER if error.args[0] == "not-member" else web.DEACTIVATED
-        return page(request, "No access", copy.format(id=error.args[1]), 403, signin=True)
-    message = REFUSED.get(error.args[0], FAILED)
-    return page(request, "Sign-in failed", message, 400, signin=True)
+        return page(request, "No access", copy.format(id=error.args[1]), 403, **other)
+    if error.args[0] in REFUSED:
+        return page(request, "Sign-in failed", REFUSED[error.args[0]], 400, **other)
+    return page(request, "Sign-in failed", FAILED, 400, **retry)
 
 
 @router.get("/login")

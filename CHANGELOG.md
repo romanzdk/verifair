@@ -6,6 +6,16 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Fixed
+
+- A heading inside a plan or report overlapped itself when it wrapped on a phone.
+- On phones the verdict bar took about a quarter of the screen. The summary box is now one line that grows when you tap it, and is hidden when you cannot give a verdict.
+- On phones the new agent token was cut off in its box; it now wraps so you can see all of it.
+- Small buttons, comment label chips and "comment" links are at least 32px tall on phones.
+- The project name in the phone breadcrumb is no longer squeezed to a few letters.
+- The disabled **Approve** button is easier to read.
+- After a refused sign-in, the button says **Sign in with another account** (or **Try again** after an error) instead of a plain "Sign in" next to "Trying again will not help".
+
 ## [0.6.0] - 2026-11-06
 
 ### Added

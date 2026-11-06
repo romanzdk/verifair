@@ -49,7 +49,7 @@
   <div class="secret">
     <h3>{{ icon("key-round") }}Token “{{ created.label }}” created</h3>
     <p id="vf_new_token_note">Copy it now. It will not be shown again.</p>
-    <div class="secret-row"><input readonly value="{{ new_token }}" id="vf_new_token" aria-label="New token" aria-describedby="vf_new_token_note" autocomplete="off" spellcheck="false" class="codebox"><button type="button" class="btn p" data-copy-target="vf_new_token">{{ icon("copy", "ic14") }}Copy token</button><span data-copy-result role="status"></span></div>
+    <div class="secret-row"><textarea readonly rows="1" id="vf_new_token" aria-label="New token" aria-describedby="vf_new_token_note" autocomplete="off" spellcheck="false" class="codebox">{{ new_token }}</textarea><button type="button" class="btn p" data-copy-target="vf_new_token">{{ icon("copy", "ic14") }}Copy token</button><span data-copy-result role="status"></span></div>
   </div>
   {% elif token_note %}
   <div class="secret"><p role="status">{{ token_note }}</p></div>
