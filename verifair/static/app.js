@@ -215,6 +215,9 @@ function errorCopy(status, body = "") {
   if (status === 422 && body.includes("quote not found")) {
     return "The selected text was not found. Cancel and select it again.";
   }
+  if (status === 422 && body.includes("comment body is empty")) {
+    return "The comment is empty. Write something first.";
+  }
   if (status === 422) return "Check the text and try again.";
   if (status === 404) return "This item no longer exists. Reload the page.";
   return `Something went wrong (${status}). Reload and try again.`;
