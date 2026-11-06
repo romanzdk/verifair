@@ -68,14 +68,18 @@ def llms_txt(site_url: str, description: str, pages: list[tuple[str, str, str]])
 def on_files(files, config):
     from mkdocs.structure.files import File
 
-    readme = Path(config.config_file_path).parent / "README.md"
-    files.append(File.generated(config, "index.md", content=readme_page(readme.read_text())))
+    root = Path(config.config_file_path).parent
+    readme = (root / "README.md").read_text()
+    files.append(File.generated(config, "index.md", content=readme_page(readme)))
+    changelog = (root / "CHANGELOG.md").read_text()
+    files.append(File.generated(config, "changelog.md", content=changelog))
     return files
 
 
 def on_page_markdown(markdown, page, config, files):
     if page.file.generated_by:
-        page.edit_url = REPO.replace("/blob/", "/edit/") + "README.md"
+        source = "CHANGELOG.md" if page.file.src_uri == "changelog.md" else "README.md"
+        page.edit_url = REPO.replace("/blob/", "/edit/") + source
         return markdown
     return doc_page(markdown)
 
@@ -83,13 +87,19 @@ def on_page_markdown(markdown, page, config, files):
 def on_post_build(config):
     # Reads the sources itself: dirty rebuilds skip the page hooks for unchanged pages
     site = Path(config.site_dir)
-    readme = (Path(config.config_file_path).parent / "README.md").read_text()
-    summaries = page_summaries(readme) | {"index.md": config.site_description}
+    root = Path(config.config_file_path).parent
+    readme = (root / "README.md").read_text()
+    summaries = page_summaries(readme) | {
+        "index.md": config.site_description,
+        "changelog.md": "What changed in each version",
+    }
     pages, full = [], []
     for item in config.nav:
         ((title, path),) = item.items()
         if path == "index.md":
             text = readme_markdown(readme)
+        elif path == "changelog.md":
+            text = (root / "CHANGELOG.md").read_text()
         else:
             text = doc_links((Path(config.docs_dir) / path).read_text())
         (site / path).write_text(text)

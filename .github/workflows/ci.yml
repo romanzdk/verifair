@@ -148,12 +148,20 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Create the GitHub release
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Create the GitHub release from the changelog
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
           # a re-run after a failed later step must not fail on the release made the first time
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && exit 0
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$TAG" \
-            --notes "**Docker image:** \`ghcr.io/$GITHUB_REPOSITORY:${TAG#v}\` · **Agent skill:** \`npx skills add $GITHUB_REPOSITORY@$TAG --skill verifair-review -g\`"
+          section="$(python3 scripts/changelog_section.py "${TAG#v}")"
+          [ -n "$section" ] || { echo "::error::CHANGELOG.md has no section for ${TAG#v}"; exit 1; }
+          printf '%s\n\n**Docker image:** `ghcr.io/%s:%s` · **Agent skill:** `npx skills add %s@%s --skill verifair-review -g`\n\n**Full diff:** https://github.com/%s/compare/%s\n' \
+            "$section" "$GITHUB_REPOSITORY" "${TAG#v}" "$GITHUB_REPOSITORY" "$TAG" "$GITHUB_REPOSITORY" \
+            "$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo "$TAG")...$TAG" > notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file notes.md
