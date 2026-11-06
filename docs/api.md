@@ -195,6 +195,8 @@ Writes use the existing token and owner checks; members cannot add evidence to a
   "signed_at": "2026-10-21T09:30:00+00:00",
   "status": "changes_requested",
   "workflow": "artifact",
+  "archived_at": null,
+  "archived_by": null,
   "stage": "implementation",
   "implementation_status": "changes_requested",
   "plan_review": null,
@@ -211,6 +213,7 @@ Writes use the existing token and owner checks; members cannot add evidence to a
 ```
 
 - For artifact reviews, `status` is `unsigned`, `awaiting_review`, `changes_requested` or `approved`. It is `unsigned` until someone signs `current_version`; after that it only counts verdicts on `current_version` from people other than its signer. Earlier verdicts by the signer remain in the history.
+- `archived_at` and `archived_by` (a display name) are set while the report is archived, otherwise `null`. See [Archive a report](#archive-a-report).
 - `signed_by` and `signed_at` describe the signature on `current_version`, or are `null`. `agent`, `model` and `session_url` are `null` until a push sets them, or after a push clears them with `null`.
 - `verdict` is `approve` or `request_changes`. `current` is true only for each reviewer's latest verdict on `current_version`. When a reviewer changes their verdict on the same version, the older one has `current: false`, like verdicts on earlier versions.
 
@@ -357,6 +360,14 @@ curl -sS --fail-with-body --max-time 60 -G \
 - A timeout returns `{"event": "timeout", "since": "...", "next_since": "...", "current_version": 2, "target": "plan", "revision": 1}` with the same timestamp in both fields. `since` is the supplied instant normalized to UTC, or the UTC request start time when omitted. On an event, `next_since` is the event’s `created_at`.
 
 This endpoint signals feedback; it does not provide a lossless event stream. Stored event timestamps have second precision, so reusing `next_since` excludes other events from that same second. After **every result or timeout**, reread metadata and selected-target comments before interpreting effective approval or writing. This also catches non-events such as reopening. There is no lossless replay or durable resume cursor.
+
+## Archive a report
+
+`POST /api/reports/{id}/archive` hides a finished or test report from the lists; `POST /api/reports/{id}/restore` brings it back. Both answer with the report, as `GET /api/reports/{id}` does. In shared mode a token may do this for reports its owner owns or was asked to review, otherwise 403. Archiving twice, or restoring a report that is not archived, changes nothing.
+
+An archived report stays readable by its id and URL, and people can still comment on it. Pushing a new version to it is refused with 409 `This report is archived. Restore it before pushing a new version.`
+
+Deleting a report for good is not in the API: an admin does it in the app.
 
 ## Get the agent skill
 

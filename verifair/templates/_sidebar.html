@@ -40,4 +40,11 @@
   <ul>
     {% for v in versions %}<li{% if v.version == version %} class="on"{% endif %}><a href="{{ url }}{% if v.version != current_version %}/v/{{ v.version }}{% endif %}{% if view_tab == 'execution' or plan_first %}{{ selection_query }}{% elif on_plan and v.plan is not none %}?tab=plan{% endif %}">v{{ v.version }}{% if plan_first %} · Plan revision {{ v.plan_revision }}{% if v.body is none %} · No implementation{% endif %}{% endif %} · {{ v.created_at|date }}{% if v.commit %} · <code>{{ v.commit[:7] }}</code>{% endif %}</a></li>{% endfor %}
   </ul>
+  {% if (can_archive and not report.archived_at) or can_delete %}
+  <h4>Manage</h4>
+  <div class="manage">
+    {% if can_archive and not report.archived_at %}<form method="post" action="/r/{{ report.id|urlencode }}/archive"><button class="btn sm" data-confirm="Archive this review? It leaves the lists but stays readable at its link, and you can restore it.">Archive</button></form>{% endif %}
+    {% if can_delete %}<a class="btn sm danger" href="/r/{{ report.id|urlencode }}/delete">Delete permanently</a>{% endif %}
+  </div>
+  {% endif %}
 </aside>

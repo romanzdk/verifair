@@ -35,6 +35,8 @@ from verifair.rules import NO_OWNER, compute_status, latest_verdicts, review_sta
 from verifair.traces import TraceDocument
 
 NOT_OWNER = "This report belongs to another member."
+ARCHIVED = "This report is archived. Restore it before pushing a new version."
+NOT_ARCHIVER = "Only the report's owner and its requested reviewers can archive it with a token."
 SHARED_TOKEN = "The shared token is not accepted in shared mode. Use a member agent token."
 AGENT_RESOLVE = "Agent tokens can only resolve threads the agent started on its owner's reports."
 log = logging.getLogger("verifair")
@@ -330,6 +332,8 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
         raise HTTPException(403, NOT_OWNER) from None
     except db.ProjectMismatch:
         raise HTTPException(409, "id belongs to another project") from None
+    except db.Archived:
+        raise HTTPException(409, ARCHIVED) from None
     except (db.StaleVersion, db.PlanNotApproved, db.WorkflowMismatch, ValueError) as error:
         return _write_error(error)
     settings = request.app.state.settings
@@ -346,6 +350,32 @@ def push_report(body: ReportIn, request: Request, conn: Conn, background: Backgr
         notify.send, settings, notify.report_pushed_text(report, revision, base_url, target=target)
     )
     return {"id": id, "version": version, "url": f"{base_url}/r/{id}"}
+
+
+def _set_archived(id: str, request: Request, conn: db.Connection, archive: bool):
+    report = _require_report(conn, id)
+    owner = request.state.token_owner
+    if owner is not None and not (
+        report["author_id"] == owner["id"] or owner["id"] in db.requested_reviewers(conn, id)
+    ):
+        raise HTTPException(403, NOT_ARCHIVER)
+    by = owner["name"] if owner is not None else "agent"
+    if db.set_archived(conn, id, by if archive else None):
+        actor = owner["id"] if owner is not None else "agent"
+        action = "archive" if archive else "restore"
+        log.info("access action=%s actor=%s report=%s", action, actor, id)
+    with _read(conn):
+        return _report_json(conn, id)
+
+
+@router.post("/reports/{id}/archive")
+def archive_report(id: str, request: Request, conn: Conn):
+    return _set_archived(id, request, conn, archive=True)
+
+
+@router.post("/reports/{id}/restore")
+def restore_report(id: str, request: Request, conn: Conn):
+    return _set_archived(id, request, conn, archive=False)
 
 
 @router.get("/reports/{id}")
@@ -407,6 +437,8 @@ def _report_json(conn: db.Connection, id: str, *, snapshot_version: int | None =
         "signed_at": signature["created_at"] if signature else None,
         "status": status,
         "workflow": report["workflow"],
+        "archived_at": report["archived_at"],
+        "archived_by": report["archived_by"],
         "stage": stage,
         "implementation_status": implementation_status,
         "plan_review": plan_review,
