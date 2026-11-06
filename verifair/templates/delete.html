@@ -7,7 +7,7 @@
   <form method="post" action="/r/{{ report.id|urlencode }}/delete" class="panel delform">
     <p>This removes the review for good: every version, comment, signature, verdict and review request. It cannot be undone. To keep it but hide it from the lists, <a href="/r/{{ report.id|urlencode }}">archive it</a> instead.</p>
     {% if error %}<p class="error" id="vf_delete_error" role="alert">{{ error }}</p>{% endif %}
-    <label>Type <code>{{ report.id }}</code> to confirm<input name="confirm" class="inp" required autocomplete="off" spellcheck="false" maxlength="300"{% if error %} aria-invalid="true" aria-describedby="vf_delete_error" autofocus{% endif %}></label>
+    <label><span>Type <code>{{ report.id }}</code> to confirm</span><input name="confirm" class="inp" required autocomplete="off" spellcheck="false" maxlength="300"{% if error %} aria-invalid="true" aria-describedby="vf_delete_error" autofocus{% endif %}></label>
     <div><button class="btn danger">Delete permanently</button> <a class="btn" href="/r/{{ report.id|urlencode }}">Cancel</a></div>
   </form>
 </main>
