@@ -4,9 +4,9 @@
   <div class="nav">
     <h2 class="nav-h">Your work</h2>
     {{ item("/", icon("inbox"), "Inbox", active == "inbox", inbox_count, acc=True) }}
-    {{ item("/changes?scope=reviewer", icon("user-check"), "My reviews", active == "reviewer") }}
-    {{ item("/changes?scope=author", icon("git-pull-request"), "My changes", active == "author") }}
-    {{ item("/changes", icon("layers"), "All changes", active == "all") }}
+    {{ item("/changes?scope=reviewer", icon("user-check"), "Assigned to me", active == "reviewer") }}
+    {{ item("/changes?scope=author", icon("git-pull-request"), "Created by me", active == "author") }}
+    {{ item("/changes", icon("layers"), "All reviews", active == "all") }}
     <h2 class="nav-h">Projects</h2>
     {% for p in nav_projects %}
     {{ item("/p/" ~ p.name|urlencode, icon("folder"), p.name, p.name == active_project, p.awaiting) }}

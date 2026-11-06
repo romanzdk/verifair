@@ -14,9 +14,9 @@ The sidebar has four views under **Your work**:
   - **Waiting on others**: your signed changes that wait for a review. This group starts closed.
 
   When a new version is pushed, the change goes back to the author to sign, and then back to the reviewers. When nothing needs you, the Inbox says so. With no projects yet, it shows how to connect your first agent.
-- **My reviews** (`/changes?scope=reviewer`) lists every change where your review was requested, including finished reviews.
-- **My changes** (`/changes?scope=author`) lists every change you own, including unsigned drafts.
-- **All changes** (`/changes`) lists everyone's changes. Everyone sees all projects and changes.
+- **Assigned to me** (`/changes?scope=reviewer`) lists every review someone asked you to review, including finished ones. Here you are the reviewer.
+- **Created by me** (`/changes?scope=author`) lists every review you own (your agents published it with your token), including unsigned drafts. Here you are the author and wait for others.
+- **All reviews** (`/changes`) lists everyone's reviews. Everyone sees all projects and reviews.
 
 The lists and project pages (`/p/<project>`, under **Projects** in the sidebar) have status tabs with counts. A report is at `/r/<id>`.
 

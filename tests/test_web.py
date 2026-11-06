@@ -759,7 +759,7 @@ def test_unsigned_project_opens_with_its_changes_visible(client):
     assert "Draft evidence report" in page.text
     assert 'aria-current="page"' in page.text
     filtered = client.get("/p/billing-service?tab=awaiting_review")
-    assert "No changes awaiting review" in filtered.text
+    assert "Nothing awaiting review" in filtered.text
     assert 'href="?tab=all"' in filtered.text
 
 
