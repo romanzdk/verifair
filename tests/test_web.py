@@ -1212,7 +1212,7 @@ def test_forms_carry_the_page_version(client):
     client.cookies.set("vf_name", "Alice")
     client.post("/r/prorate/comments", data={"version": 1, "section": "Intent", "body": "Why?"})
     page = client.get("/r/prorate").text
-    assert page.count('<input type="hidden" name="version" value="1">') == 5
+    assert page.count('<input type="hidden" name="version" value="1">') == 7
     missing = client.post("/r/prorate/verdict", data={"verdict": "approve"})
     assert missing.status_code == 422
 
@@ -1257,6 +1257,30 @@ def test_resolve_needs_confirm_and_reply_reopens(client):
     reopened = client.post(f"/r/prorate/comments/{cid}/reply", data={"version": 1, "body": "No."})
     assert 'class="thread resolved"' not in reopened.text and "No." in reopened.text
     assert api_threads(client)[0]["resolved"] is False
+
+
+def _form_of(page, button_id):
+    return next(f for f in re.findall(r"<form\b.*?</form>", page, re.S) if f'id="{button_id}"' in f)
+
+
+def _submit_without_js(client, page, button_id):
+    form = _form_of(page, button_id)
+    action = re.search(r'action="([^"]+)"', form)[1]
+    fields = dict(re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', form))
+    return client.post(action, data=fields, headers={"HX-Request": ""}, follow_redirects=False)
+
+
+def test_moderation_buttons_work_without_javascript(client):
+    push(client)
+    cid = _open_thread(client)
+    page = client.get("/r/prorate").text
+    r = _submit_without_js(client, page, f"vf_blocking_{cid}")
+    assert (r.status_code, r.headers["location"]) == (303, f"/r/prorate#vf_t{cid}")
+    assert api_threads(client)[0]["blocking"] is False
+    r = _submit_without_js(client, client.get("/r/prorate").text, f"vf_resolve_{cid}")
+    assert r.status_code == 303 and api_threads(client)[0]["resolved"] is True
+    r = _submit_without_js(client, client.get("/r/prorate").text, f"vf_reopen_{cid}")
+    assert r.status_code == 303 and api_threads(client)[0]["resolved"] is False
 
 
 def test_resolve_without_name_retargets_thread_card(client):
@@ -2339,7 +2363,8 @@ def test_stale_blocking_toggle_keeps_verdict_bound_to_viewed_version(client):
     assert api_threads(client)[0]["blocking"] is True
     assert STALE_COPY in _approve(client).text
     assert api_report(client)["verdicts"] == []
-    assert 'hx-vals=\'{"blocking": "0", "version": "1"}\'' in page
+    form = _form_of(page, f"vf_blocking_{cid}")
+    assert 'name="version" value="1"' in form and 'name="blocking" value="0"' in form
 
 
 def test_blocking_toggle_checks_version_inside_write_transaction(client, settings, monkeypatch):
@@ -3673,13 +3698,11 @@ def test_moderation_buttons_include_displayed_snapshot(client, settings):
         )
         cid = root["id"]
     page = client.get("/r/planned?tab=plan").text
-    button = re.search(rf'<button[^>]*id="vf_resolve_{cid}"[^>]*>', page)[0]
-    assert 'hx-vals=\'{"version": "1"}\'' in button
+    assert 'name="version" value="1"' in _form_of(page, f"vf_resolve_{cid}")
     with closing(db.connect(settings.database_url)) as conn:
         db.resolve_thread(conn, "planned", cid)
     page = client.get("/r/planned?tab=plan").text
-    button = re.search(rf'<button[^>]*id="vf_reopen_{cid}"[^>]*>', page)[0]
-    assert 'hx-vals=\'{"version": "1"}\'' in button
+    assert 'name="version" value="1"' in _form_of(page, f"vf_reopen_{cid}")
 
 
 @pytest.mark.parametrize("workflow", ["artifact", "plan_first"])

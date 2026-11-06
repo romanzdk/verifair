@@ -484,6 +484,7 @@ body.has-verdict .side { padding-bottom: 112px; }
 .tact { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: flex-start; }
 .error { color: var(--risk-high); font-weight: 600; font-size: 12px; margin: 4px 0; }
 .tact .error { flex-basis: 100%; margin: 0; }
+.tact .act { display: contents; }
 .reply { display: flex; gap: 8px; flex: 1; }
 .reply textarea { flex: 1; min-height: 32px; }
 /* without JavaScript the comment link opens its form through the URL fragment; with it, app.js owns hidden */

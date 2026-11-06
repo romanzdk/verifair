@@ -15,7 +15,8 @@
   {{ messages() }}
   {% if is_current %}
   <div class="tact">
-    <button type="button" class="btn" id="vf_reopen_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/reopen" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML" hx-vals='{"version": "{{ version }}"}'{% if root.id not in can_moderate %} hx-confirm="Reopen this thread? Only its starter{{ ', the report owner for agent threads,' if root.author_id == 'agent' }} or an admin can resolve it again."{% endif %}>Reopen</button>
+    <form class="act" method="post" action="{{ url }}/comments/{{ root.id }}/reopen"><input type="hidden" name="version" value="{{ version }}">
+    <button class="btn" id="vf_reopen_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/reopen" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML"{% if root.id not in can_moderate %} hx-confirm="Reopen this thread? Only its starter{{ ', the report owner for agent threads,' if root.author_id == 'agent' }} or an admin can resolve it again."{% endif %}>Reopen</button></form>
   </div>
   {% endif %}
   {%- if thread_error %}
@@ -38,8 +39,10 @@
       <button class="btn">Reply</button>
     </form>
     {%- if root.id in can_moderate %}
-    <button type="button" class="btn" id="vf_resolve_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/resolve" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML" hx-vals='{"version": "{{ version }}"}' hx-confirm="Resolve this thread? You can reopen it later.">Resolve</button>
-    <button type="button" class="btn" id="vf_blocking_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/blocking" hx-vals='{"blocking": "{{ 0 if thread.blocking else 1 }}", "version": "{{ version }}"}' hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">{{ "Mark non-blocking" if thread.blocking else "Mark blocking" }}</button>
+    <form class="act" method="post" action="{{ url }}/comments/{{ root.id }}/resolve"><input type="hidden" name="version" value="{{ version }}">
+    <button class="btn" id="vf_resolve_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/resolve" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML" hx-confirm="Resolve this thread? You can reopen it later.">Resolve</button></form>
+    <form class="act" method="post" action="{{ url }}/comments/{{ root.id }}/blocking"><input type="hidden" name="version" value="{{ version }}"><input type="hidden" name="blocking" value="{{ 0 if thread.blocking else 1 }}">
+    <button class="btn" id="vf_blocking_{{ root.id }}" hx-post="{{ url }}/comments/{{ root.id }}/blocking" hx-target="#vf_t{{ root.id }}" hx-swap="outerHTML">{{ "Mark non-blocking" if thread.blocking else "Mark blocking" }}</button></form>
     {%- endif %}
   </div>
   {% endif %}

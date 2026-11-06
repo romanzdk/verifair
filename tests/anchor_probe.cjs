@@ -187,6 +187,10 @@ const cases = {
       scope.errorCopy(422, '{"detail":"quote not found"}'),
       "The selected text was not found. Cancel and select it again.",
     );
+    assert.equal(
+      scope.errorCopy(422, '{"detail":"comment body is empty"}'),
+      "The comment is empty. Write something first.",
+    );
     assert.equal(scope.errorCopy(500), "Something went wrong (500). Reload and try again.");
   },
   triple_click_clamp() {
