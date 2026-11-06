@@ -239,8 +239,11 @@ def create_app(settings: Settings) -> FastAPI:
             response = PlainTextResponse(DB_UNAVAILABLE, 503, headers={"Retry-After": "5"})
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
-        if path == "/access" or path.startswith("/access/"):
+        if not path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-store"
+        if settings.https:
+            # a day, so a broken certificate does not lock users out for long
+            response.headers["Strict-Transport-Security"] = "max-age=86400"
         if response.headers.get("content-type", "").startswith("text/html"):
             response.headers["Content-Security-Policy"] = CSP
         return response

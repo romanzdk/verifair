@@ -1,3 +1,4 @@
+import dataclasses
 import importlib.metadata
 import re
 from contextlib import closing
@@ -7,6 +8,7 @@ from urllib.parse import quote as url_quote
 
 import pytest
 from conftest import OIDC, SessionClient, signed_in
+from fastapi.testclient import TestClient
 
 from verifair import db, notify, web
 from verifair.app import CSP as APP_CSP
@@ -1024,8 +1026,6 @@ def test_comment_escapes_html(client):
 def test_web_posts_notify(settings, make_app, monkeypatch):
     from dataclasses import replace
 
-    from fastapi.testclient import TestClient
-
     from verifair import notify
 
     sent = []
@@ -1506,7 +1506,6 @@ CSP = (
 
 @pytest.fixture
 def anonymous(shared_client):
-    from fastapi.testclient import TestClient
 
     return TestClient(shared_client.app, follow_redirects=False)
 
@@ -3812,3 +3811,20 @@ def test_unknown_page_in_a_browser_is_a_page_not_json(client):
     fragment = client.get("/r/nope", headers={"HX-Request": "true"})
     assert fragment.json() == {"detail": "report not found"}
     assert client.get("/api/reports/nope", headers=H).json() == {"detail": "report not found"}
+
+
+def test_pages_are_not_cached_but_static_files_are(client):
+    push(client)
+    for path in ("/", "/r/prorate", "/api/reports/prorate", "/missing"):
+        assert client.get(path, headers=H).headers["cache-control"] == "no-store", path
+    assert "no-store" not in client.get("/static/app.css").headers.get("cache-control", "")
+
+
+@pytest.mark.parametrize(
+    ("base_url", "hsts"),
+    [("http://localhost:8000", None), ("https://vf.example.com", "max-age=86400")],
+)
+def test_hsts_only_when_served_over_https(settings, make_app, base_url, hsts):
+    app = make_app(dataclasses.replace(settings, base_url=base_url))
+    r = TestClient(app).get("/healthz")
+    assert r.headers.get("strict-transport-security") == hsts
