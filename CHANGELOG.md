@@ -10,6 +10,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 - Each version tag creates a GitHub release, with this changelog's section as its notes.
 
+### Changed
+
+- The theme switch is now a small icon control (monitor, sun, moon) next to **Sign out**, with a tooltip and a screen-reader label on each option.
+
 ## [0.5.0] - 2026-11-06
 
 ### Added

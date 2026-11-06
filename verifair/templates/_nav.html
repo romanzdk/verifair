@@ -44,11 +44,13 @@
     </details>
     {% endif %}
     <div class="me-id"><code title="{{ user_id }}">{{ user_id }}</code><button type="button" class="icon-btn" data-copy-identity="{{ user_id }}" aria-label="Copy id">{{ icon("copy", "ic14") }}</button><span data-copy-result role="status"></span></div>
-    {% if signed_in %}<form method="post" action="/logout" class="signout" aria-label="Sign out"><button class="btn sm">{{ icon("log-out", "ic14") }}Sign out</button></form>{% endif %}
-    <form class="theme" method="post" action="/theme" role="group" aria-label="Theme">
-      <input type="hidden" name="next" value="{{ here }}">
-      {% for value in ("system", "light", "dark") %}<button class="btn sm" name="theme" value="{{ value }}" aria-pressed="{{ 'true' if theme == value else 'false' }}">{{ value|capitalize }}</button>{% endfor %}
-    </form>
+    <div class="me-actions">
+      {% if signed_in %}<form method="post" action="/logout" class="signout" aria-label="Sign out"><button class="btn sm">{{ icon("log-out", "ic14") }}Sign out</button></form>{% endif %}
+      <form class="theme" method="post" action="/theme" role="group" aria-label="Theme">
+        <input type="hidden" name="next" value="{{ here }}">
+        {% for value, symbol in (("system", "monitor"), ("light", "sun"), ("dark", "moon")) %}<button name="theme" value="{{ value }}" aria-pressed="{{ 'true' if theme == value else 'false' }}" aria-label="{{ value|capitalize }} theme" title="{{ value|capitalize }}">{{ icon(symbol, "ic14") }}</button>{% endfor %}
+      </form>
+    </div>
     <div class="foot"><a href="https://romanzdk.github.io/verifair/">{{ icon("book-open", "ic14") }}Docs</a><a href="https://github.com/romanzdk/verifair">{{ icon("external-link", "ic14") }}GitHub</a><span class="sp"></span><span>v{{ VERSION }}</span></div>
   </div>
 </nav>
