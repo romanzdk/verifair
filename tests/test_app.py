@@ -5,6 +5,7 @@ import sys
 import time
 from contextlib import closing
 from dataclasses import replace
+from urllib.parse import urlsplit
 
 import psycopg
 import pytest
@@ -360,7 +361,11 @@ def test_web_post_without_sec_fetch_site_is_refused_unless_loopback_own_origin(
     browser = TestClient(make_app(settings), base_url=base_url)
     headers = {"Origin": origin} if origin else {}
     r = browser.post("/me", data={"name": "Mallory"}, headers=headers, follow_redirects=False)
-    assert (r.status_code, r.json()) == (403, {"detail": "browser request required"})
+    if urlsplit(base_url).hostname in ("verifair.internal", "127.evil.example", "localhost."):
+        # a dotted name that is not the configured address is refused before the browser check
+        assert r.status_code == 400 and "Unknown host" in r.text
+    else:
+        assert (r.status_code, r.json()) == (403, {"detail": "browser request required"})
 
 
 def test_loopback_own_origin_does_not_override_a_cross_site_header(settings, make_app):
@@ -411,7 +416,7 @@ def test_html_responses_carry_csp(client):
     page = client.get("/r/t")
     assert page.headers["content-security-policy"] == (
         "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
-        " frame-ancestors 'none'"
+        " base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
     )
     assert "hx-on" not in page.text
     assert "content-security-policy" not in client.get("/healthz").headers
@@ -751,3 +756,35 @@ def test_startup_config_error_is_one_line_and_exits_non_zero():
     assert "Traceback" not in result.stderr
     lines = result.stderr.strip().splitlines()
     assert len(lines) == 1 and "VERIFAIR_API_TOKEN is required in local mode." in lines[0]
+
+
+@pytest.mark.parametrize(
+    ("host", "allowed"),
+    [
+        ("localhost:8000", True),
+        ("127.0.0.1:8000", True),
+        ("[::1]:8000", True),
+        ("192.168.1.20:8000", True),
+        ("devbox:8000", True),
+        ("app.localhost:8000", True),
+        ("attacker.example:8000", False),
+        ("evil.localhost.example.com", False),
+    ],
+)
+def test_local_mode_refuses_hosts_a_rebinding_attack_could_use(client, host, allowed):
+    r = client.get("/", headers={"Host": host})
+    assert (r.status_code != 400) is allowed
+    if not allowed:
+        assert "VERIFAIR_BASE_URL" in r.text
+
+
+def test_local_mode_accepts_its_configured_host(settings, make_app):
+    app = make_app(replace(settings, base_url="http://verifair.lan:8000"))
+    r = TestClient(app).get("/healthz", headers={"Host": "verifair.lan:8000"})
+    assert r.status_code == 200
+
+
+def test_shared_mode_does_not_check_the_host(shared_client):
+    anonymous = TestClient(shared_client.app)
+    assert anonymous.get("/healthz", headers={"Host": "10.0.0.5:8000"}).status_code == 200
+    assert anonymous.get("/healthz", headers={"Host": "verifair.example.com"}).status_code == 200

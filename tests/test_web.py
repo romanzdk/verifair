@@ -1501,7 +1501,7 @@ def test_shared_mode_without_a_valid_session_cannot_act(proxied, session):
 SIGN_IN_COPY = "Sign in to use verifair."
 CSP = (
     "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
-    " frame-ancestors 'none'"
+    " base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 )
 
 
@@ -3921,3 +3921,25 @@ def test_phone_layout_rules():
     )
     assert ".content h1 { margin: 0 0 12px; font: 600 20px/28px var(--font); }" in css
     assert ".verdict textarea:disabled { display: none; }" in _media(css, "max-width: 720px")
+
+
+def test_comment_label_is_fast_on_long_whitespace():
+    import time
+
+    started = time.perf_counter()
+    for body in ("note" + " " * 20_000 + "x", "note (" + " " * 20_000 + "x", " " * 20_000 + ":"):
+        web.comment_label(body)
+    assert time.perf_counter() - started < 0.1
+    assert str(web.comment_label("issue  (blocking) : y")).startswith(
+        '<span class="badge cl-issue">'
+    )
+
+
+def test_api_explorer_pins_its_scripts_with_integrity_hashes(client):
+    for path in ("/docs", "/redoc"):
+        page = client.get(path).text
+        assert re.search(r'src="https://cdn\.jsdelivr\.net/npm/[a-z-]+@\d+\.\d+\.\d+/', page), path
+        assert page.count('integrity="sha384-') >= 1 and "@5/" not in page and "@2/" not in page
+    assert "fonts.googleapis.com" not in client.get("/redoc").headers["content-security-policy"]
+    csp = client.get("/").headers["content-security-policy"]
+    assert "base-uri 'none'" in csp and "form-action 'self'" in csp

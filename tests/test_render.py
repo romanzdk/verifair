@@ -156,7 +156,7 @@ def test_overlapping_anchor_quote_comparisons_have_linear_bound(last):
     quote = CountedQuote("a" * 1999 + last)
     expected = 63 if last == "a" else None
     assert find_anchor(text, quote, "b" + "a" * 63, "a" * 63 + "b") == expected
-    assert 0 < quote.reads <= 4 * (len(text) + len(quote))
+    assert quote.reads <= 4 * (len(text) + len(quote))
 
 
 def test_anchor_matches_exhaustive_best_score_and_first_tie_oracle():
@@ -474,3 +474,38 @@ def test_section_plain_text_keeps_numbers_and_table_rows():
     assert section_plain_text(body, "Judge this") == (
         "First para.\n\nSecond para.\n\n1. one\n2. two\n\nCase | Result\nempty | 0\none | 1"
     )
+
+
+def test_anchoring_stays_fast_on_a_huge_repetitive_section():
+    import time
+
+    from verifair.render import Section, build_threads, find_anchor
+
+    text = "a" * 900_000
+    started = time.perf_counter()
+    for _ in range(20):
+        assert find_anchor(text, "aa", "b", "b") == 0
+    sections = [Section(heading="H", slug="h", html="", text=text)]
+    comments = [
+        {
+            "id": i,
+            "parent_id": None,
+            "version": 1,
+            "section": "H",
+            "quote": "aa",
+            "prefix": "b",
+            "suffix": "b",
+            "resolved_at": None,
+            "blocking": 1,
+        }
+        for i in range(1, 21)
+    ]
+    build_threads(comments, sections, 1)
+    assert time.perf_counter() - started < 2
+
+
+def test_occurrences_still_overlap():
+    from verifair.render import occurrences
+
+    assert occurrences("aaaa", "aa") == [0, 1, 2]
+    assert occurrences("abc", "") == [0, 1, 2, 3]

@@ -1,3 +1,5 @@
+import functools
+import itertools
 import re
 import unicodedata
 from collections.abc import Iterator
@@ -148,6 +150,9 @@ def split_sections(body: str) -> list[Section]:
     return sections
 
 
+MAX_ANCHOR_CANDIDATES = 200
+
+
 def _common_len(a: str, b: str) -> int:
     return next(
         (i for i, (x, y) in enumerate(zip(a, b, strict=False)) if x != y), min(len(a), len(b))
@@ -164,23 +169,10 @@ def iter_occurrences(text: str, quote: str) -> Iterator[int]:
     if not quote:
         yield from range(len(text) + 1)
         return
-    failure = [0] * len(quote)
-    matched = 0
-    for index in range(1, len(quote)):
-        while matched and quote[index] != quote[matched]:
-            matched = failure[matched - 1]
-        if quote[index] == quote[matched]:
-            matched += 1
-        failure[index] = matched
-    matched = 0
-    for index, char in enumerate(text):
-        while matched and char != quote[matched]:
-            matched = failure[matched - 1]
-        if char == quote[matched]:
-            matched += 1
-        if matched == len(quote):
-            yield index - len(quote) + 1
-            matched = failure[matched - 1]
+    start = text.find(quote)
+    while start != -1:
+        yield start
+        start = text.find(quote, start + 1)
 
 
 def occurrences(text: str, quote: str) -> list[int]:
@@ -192,8 +184,14 @@ def find_anchor(
 ) -> int | None:
     prefix, suffix = prefix or "", suffix or ""
     maximum = len(prefix) + len(suffix)
+    if prefix or suffix:
+        exact = section_text.find(prefix + quote + suffix)
+        if exact != -1:
+            return exact + len(prefix)
     best, best_score = None, -1
-    for start in iter_occurrences(section_text, quote):
+    # a repetitive section can hold a quote hundreds of thousands of times; scoring each would
+    # let one agent-written report stall every page that shows it
+    for start in itertools.islice(iter_occurrences(section_text, quote), MAX_ANCHOR_CANDIDATES):
         score = _score(section_text, start, quote, prefix, suffix)
         if score > best_score:
             best, best_score = start, score
@@ -202,6 +200,7 @@ def find_anchor(
     return best
 
 
+@functools.lru_cache(maxsize=64)
 def _squash(text: str) -> str:
     return re.sub(r"\s", "", text)
 
