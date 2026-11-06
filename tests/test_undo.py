@@ -125,3 +125,77 @@ def test_admin_can_unsign_someone_elses_signature(shared_client, as_user, shared
     assert shared_client.post("/r/r/unsign", data={"version": 1}, headers=admin).status_code == 200
     with db.connect(shared_settings.database_url) as conn:
         assert db.get_signature(conn, "r", 1) is None
+
+
+def _plan_with_implementation(settings):
+    with db.connect(settings.database_url) as conn:
+        db.push_report(
+            conn,
+            project="p",
+            title="P",
+            risk="low",
+            body=None,
+            body_supplied=False,
+            workflow="plan_first",
+            plan="# Plan",
+            id="pf",
+        )
+        db.sign_version(
+            conn,
+            report_id="pf",
+            version=1,
+            signer_id="signer00",
+            signer_name="Signer",
+            target="plan",
+        )
+        db.add_verdict(
+            conn,
+            report_id="pf",
+            version=1,
+            target="plan",
+            reviewer_id="review00",
+            reviewer_name="Reviewer",
+            verdict="approve",
+        )
+        return conn
+
+
+def test_plan_approval_can_be_withdrawn_before_the_implementation_only(client, settings):
+    push(client)
+    _plan_with_implementation(settings)
+    as_(client, REVIEWER)
+    plan = {"version": 1, "target": "plan", "revision": 1}
+    page = client.get("/r/pf?tab=plan").text
+    assert "Unapprove" in page
+    with db.connect(settings.database_url) as conn:
+        db.push_report(
+            conn,
+            project="p",
+            title="P",
+            risk="low",
+            body="## Intent\nx",
+            id="pf",
+            expected_version=1,
+        )
+    page = client.get("/r/pf?tab=plan").text
+    assert "Unapprove" not in page
+    r = client.post("/r/pf/verdict/withdraw", data=plan | {"version": 2})
+    assert r.status_code == 409 and "Push a new plan revision" in r.json()["detail"]
+    as_(client, SIGNER)
+    assert 'action="/r/pf/unsign"' not in client.get("/r/pf?tab=plan").text
+    assert client.post("/r/pf/unsign", data=plan | {"version": 2}).status_code == 409
+
+
+def test_withdrawing_frees_the_reviewer_and_posts_to_slack(client, monkeypatch):
+    from verifair import notify
+
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda settings, text: sent.append(text))
+    push(client)
+    sign(client)
+    as_(client, REVIEWER)
+    verdict(client)
+    withdraw(client)
+    assert sent[-1].startswith("Reviewer withdrew their verdict on Prorate")
+    reviewers = client.get("/r/prorate").text.split("<h4>Reviewers</h4>")[1].split("<h4>")[0]
+    assert "approved" not in reviewers

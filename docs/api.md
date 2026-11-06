@@ -340,7 +340,7 @@ In shared mode an agent token can only resolve threads the agent started, on its
 
 ## Wait for feedback
 
-`GET /api/reports/$ID/wait` waits for a verdict or a new root comment on the current revision of the selected target. It checks the database every 0.5 seconds and returns one event. Replies, signatures, moderation (including resolve/reopen/blocking changes) and version pushes are not events. Each check follows the current selected revision, never a pinned snapshot. Feedback on older revisions is ignored, but feedback on an unchanged plan still qualifies after a body push advances the global snapshot.
+`GET /api/reports/$ID/wait` waits for a verdict or a new root comment on the current revision of the selected target. It checks the database every 0.5 seconds and returns one event. Replies, signatures, moderation (including resolve/reopen/blocking changes), withdrawn verdicts, unsigning and version pushes are not events, so read the report again before acting on an earlier verdict: a person may have withdrawn it. Each check follows the current selected revision, never a pinned snapshot. Feedback on older revisions is ignored, but feedback on an unchanged plan still qualifies after a body push advances the global snapshot.
 
 ```bash
 curl -sS --fail-with-body --max-time 60 -G \
