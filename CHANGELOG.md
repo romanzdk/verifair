@@ -6,6 +6,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-06
+
 ### Fixed
 
 - A heading inside a plan or report overlapped itself when it wrapped on a phone.
@@ -97,7 +99,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 - Plan-first reviews, optional execution traces, local and shared mode with Google or OpenID Connect sign-in, members, admins and per-member agent tokens, optional Slack messages and review emails.
 - Docker image at `ghcr.io/romanzdk/verifair` and the `verifair-review` agent skill.
 
-[Unreleased]: https://github.com/romanzdk/verifair/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/romanzdk/verifair/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/romanzdk/verifair/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/romanzdk/verifair/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/romanzdk/verifair/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/romanzdk/verifair/compare/v0.3.0...v0.4.0
