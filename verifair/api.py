@@ -36,7 +36,9 @@ from verifair.traces import TraceDocument
 
 NOT_OWNER = "This report belongs to another member."
 ARCHIVED = "This report is archived. Restore it before pushing a new version."
-NOT_ARCHIVER = "Only the report's owner and its requested reviewers can archive it with a token."
+NOT_ARCHIVER = (
+    "Only the report's owner and its requested reviewers can archive or restore it with a token."
+)
 SHARED_TOKEN = "The shared token is not accepted in shared mode. Use a member agent token."
 AGENT_RESOLVE = "Agent tokens can only resolve threads the agent started on its owner's reports."
 log = logging.getLogger("verifair")

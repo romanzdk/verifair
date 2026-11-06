@@ -367,7 +367,9 @@ This endpoint signals feedback; it does not provide a lossless event stream. Sto
 
 An archived report stays readable by its id and URL, and people can still comment on, sign and judge it. Pushing a new version to it is refused with 409 `This report is archived. Restore it before pushing a new version.`
 
-Deleting a report for good is not in the API: an admin does it in the app.
+Archiving does not end a running [wait](#wait-for-feedback): it ends with `timeout` as usual, so check `archived_at` when you read the report again after a wait.
+
+Deleting a report for good is not in the API: an admin does it in the app. A wait on a deleted report ends with 404, and the id can then be used by a new push, which starts a new report without the old history.
 
 ## Get the agent skill
 

@@ -885,7 +885,14 @@ def _list_page(
             "empty_action": "View all changes" if tab != "all" else None,
             "can_archive_project": project is not None and _can_delete(request),
         }
-        if not reports and tab != "archived":
+        if not reports and archived and tab != "archived":
+            ctx.update(
+                empty_title="Nothing open",
+                empty_description=f"{_plural(len(archived), 'archived change')}{where}.",
+                empty_url="?tab=archived" + (f"&scope={scope}" if scope != "all" else ""),
+                empty_action="View archived",
+            )
+        elif not reports and tab != "archived":
             ctx.update(_scope_empty(scope), empty_url="?scope=all&tab=all", empty_action=None)
             if scope != "all":
                 ctx.update(

@@ -183,3 +183,11 @@ def test_a_reused_id_is_mailed_again_and_late_requests_get_a_404(shared_client, 
 
 def test_archiving_an_unknown_project_is_a_404(shared_client, team):
     assert shared_client.post("/p/nope/archive", headers=ADMIN).status_code == 404
+
+
+def test_a_fully_archived_project_points_to_its_archived_tab(shared_client, team):
+    shared_client.post("/p/p/archive", headers=ADMIN)
+    page = shared_client.get("/p/p", headers=ADMIN).text
+    blank = page.split('<div class="blank">')[1].split("</div>")[0]
+    assert "Nothing open" in blank and "2 archived changes in this project." in blank
+    assert 'href="?tab=archived"' in blank and "No projects yet" not in blank
