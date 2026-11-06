@@ -2754,7 +2754,7 @@ def test_shell_wraps_every_page(client):
         assert 'id="vf_nav" popover' in page, path
         assert 'popovertarget="vf_nav"' in page, path
         assert 'href="/changes?scope=reviewer"' in page, path
-        assert 'href="/docs"' in page, path
+        assert 'href="https://romanzdk.github.io/verifair/"' in page, path
         assert f"v{importlib.metadata.version('verifair')}" in page, path
         assert ('class="app drawer"' in page) is (path == "/r/prorate"), path
 
@@ -3858,3 +3858,16 @@ def test_new_token_fills_in_the_environment_block(shared_client):
     secret = token[1] or token[2]
     assert f"export VERIFAIR_API_TOKEN={secret}</pre>" in page
     assert "export VERIFAIR_API_TOKEN=vf_…</pre>" in shared_client.get("/access/tokens").text
+
+
+def test_api_explorer_pages_may_load_their_cdn_scripts(client):
+    for path in ("/docs", "/redoc"):
+        csp = client.get(path).headers["content-security-policy"]
+        assert "https://cdn.jsdelivr.net" in csp and "frame-ancestors 'none'" in csp, path
+    assert "cdn.jsdelivr.net" not in client.get("/").headers["content-security-policy"]
+
+
+def test_sidebar_links_to_the_docs_site_and_the_repository(client):
+    page = client.get("/").text
+    assert 'href="https://romanzdk.github.io/verifair/"' in page
+    assert 'href="https://github.com/romanzdk/verifair"' in page
