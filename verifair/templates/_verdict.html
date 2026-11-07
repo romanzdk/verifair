@@ -1,5 +1,5 @@
 {% if reviewable %}
-<form class="verdict" id="vf_verdict" method="post" action="{{ url }}/verdict" hx-post="{{ url }}/verdict" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="#vf_verdict button"{% if verdict_oob %} hx-swap-oob="true"{% endif %}>
+<form class="verdict" id="vf_verdict" aria-label="Your review" method="post" action="{{ url }}/verdict" hx-post="{{ url }}/verdict" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="#vf_verdict button"{% if verdict_oob %} hx-swap-oob="true"{% endif %}>
   <div class="vmsg" tabindex="-1" aria-live="polite">
     {% if my_verdict %}<p class="mine{{ ' no' if my_verdict.verdict == 'request_changes' }}" role="alert">{{ "You approved" if my_verdict.verdict == "approve" else "You requested changes on" }} {{ target_phrase }}</p>{% endif %}
     {% if verdict_block and verdict_block != error %}<p class="note">{{ verdict_block }}</p>{% endif %}

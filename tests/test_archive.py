@@ -94,6 +94,8 @@ def test_only_admins_delete_and_they_must_type_the_id(shared_client, conn, team)
     form = {"confirm": "r"}
     assert shared_client.post("/r/r/delete", data=form, headers=team["owner"]).status_code == 403
     assert 'href="/r/r/delete"' in shared_client.get("/r/r", headers=ADMIN).text
+    page = shared_client.get("/r/r/delete", headers=ADMIN).text
+    assert 'data-match="r"' in page and "disabled" not in page
     wrong = shared_client.post("/r/r/delete", data={"confirm": "r2"}, headers=ADMIN)
     assert wrong.status_code == 422 and "Type the review id exactly" in wrong.text
     r = shared_client.post("/r/r/delete", data=form, headers=ADMIN, **NO_REDIRECT)

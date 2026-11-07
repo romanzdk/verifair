@@ -57,6 +57,11 @@ REDOC_PAGE = f"""<!DOCTYPE html>
 <script src="{CDN}/redoc@2.5.4/bundles/redoc.standalone.js" crossorigin="anonymous"
  integrity="sha384-w447zOpYfw/1Tv/5AK9NfHTlQIqE3RVR6KY62jCyy9zNDgO64cMwGGP1Fj0zJVf5"></script>
 </body></html>"""
+# a plain colour inversion keeps both explorers readable without knowing their internals
+EXPLORER_DARK = (
+    "html{filter:invert(92%) hue-rotate(180deg);background:#fff}"
+    "img,video{filter:invert(100%) hue-rotate(180deg)}"
+)
 MAX_BODY = 1024 * 1024
 READYZ_TIMEOUT = 2
 log = logging.getLogger("verifair")
@@ -249,13 +254,22 @@ def create_app(settings: Settings) -> FastAPI:
         redoc_url=None,
     )
 
+    def explorer(page: str, request: Request):
+        theme = request.cookies.get("vf_theme")
+        if theme == "light":
+            return HTMLResponse(page)
+        rules = EXPLORER_DARK
+        if theme != "dark":
+            rules = f"@media (prefers-color-scheme: dark) {{{rules}}}"
+        return HTMLResponse(page.replace("</head>", f"<style>{rules}</style></head>", 1))
+
     @app.get("/docs", include_in_schema=False)
-    def api_explorer():
-        return HTMLResponse(SWAGGER_PAGE)
+    def api_explorer(request: Request):
+        return explorer(SWAGGER_PAGE, request)
 
     @app.get("/redoc", include_in_schema=False)
-    def api_reference():
-        return HTMLResponse(REDOC_PAGE)
+    def api_reference(request: Request):
+        return explorer(REDOC_PAGE, request)
 
     app.state.settings = settings
     app.state.pool = pool

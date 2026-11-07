@@ -37,7 +37,7 @@ def team(conn, as_user):
 
 
 def rail(html):
-    return html.split("<h4>Reviewers</h4>")[1].split("<h4>Versions</h4>")[0]
+    return html.split("<h2>Reviewers</h2>")[1].split("<h2>Versions</h2>")[0]
 
 
 def add(client, who, headers=BOB, id="r"):
