@@ -32,6 +32,8 @@ CI publishes the image to `ghcr.io/romanzdk/verifair` for `linux/amd64` and `lin
 | `main`, `sha-<short commit>` (for example `sha-1787484`) | every push to `main` |
 | `1.2.3`, `latest`, `sha-<short commit>` | a `v1.2.3` git tag on a commit in `main` |
 
+Each `v1.2.3` tag also creates a GitHub release. Its notes are that version's section of the [changelog](../CHANGELOG.md), with the image and skill install commands.
+
 Other git tags, like `v1.2` or `v1.2.3-rc.1`, fail the publish job and publish nothing.
 
 Deploy a version tag or `sha-<short commit>`, not `main` or `latest`, so a restart does not pull a different version. To build it yourself, run `docker build -t verifair .`.

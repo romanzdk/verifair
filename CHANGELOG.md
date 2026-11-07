@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Changed
+
+- Docs, README feature list, screenshots and the demo GIF match the current app.
+
 ## [0.8.0] - 2026-11-07
 
 ### Security
