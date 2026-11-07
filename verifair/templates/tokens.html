@@ -47,7 +47,7 @@
   {% if new_token %}
   {% set created = tokens|selectattr("id", "eq", new_token[3:].partition(".")[0])|first %}
   <div class="secret">
-    <h3>{{ icon("key-round") }}Token “{{ created.label }}” created</h3>
+    <h2>{{ icon("key-round") }}Token “{{ created.label }}” created</h2>
     <p id="vf_new_token_note">Copy it now. It will not be shown again.</p>
     <div class="secret-row"><textarea readonly rows="1" id="vf_new_token" aria-label="New token" aria-describedby="vf_new_token_note" autocomplete="off" spellcheck="false" class="codebox">{{ new_token }}</textarea><button type="button" class="btn p" data-copy-target="vf_new_token">{{ icon("copy", "ic14") }}Copy token</button><span data-copy-result role="status"></span></div>
   </div>
@@ -56,15 +56,15 @@
   {% endif %}
   <div class="panel intro">
     <div>
-      <h3>{{ icon("bot") }}What is an agent token?</h3>
+      <h2>{{ icon("bot") }}What is an agent token?</h2>
       <p>Your coding agent uses a token to publish reviews and reply to comments. Reviews it publishes are owned by you, and you sign them.</p>
       <p>Make one token per machine or CI job, so you can revoke one without breaking the others. <a href="https://romanzdk.github.io/verifair/api/">Read the API docs</a> or <a href="/docs">try the API</a></p>
       {% if not new_token %}<p>Replace <code>vf_…</code> with your token; the block fills in by itself right after you create one.</p>{% endif %}
     </div>
-    <div class="pre-wrap"><pre class="pre" id="vf_token_env">export VERIFAIR_URL={{ base_url }}
+    <div class="pre-wrap"><pre class="pre" tabindex="0" id="vf_token_env">export VERIFAIR_URL={{ base_url }}
 export VERIFAIR_API_TOKEN={{ new_token or "vf_…" }}</pre><button type="button" class="icon-btn" data-copy-target="vf_token_env" aria-label="Copy environment variables">{{ icon("copy", "ic14") }}</button><span data-copy-result role="status"></span></div>
     <div>
-      <h3>{{ icon("book-open") }}Install the verifair skill</h3>
+      <h2>{{ icon("book-open") }}Install the verifair skill</h2>
       <p>It needs Node.js. It asks which agents you use (Claude Code, Codex, Cursor and others) and installs the skill version that matches this server. Run it again after an upgrade. No Node? <a href="https://romanzdk.github.io/verifair/api/#get-the-agent-skill">Download it from this server</a>.</p>
     </div>
     {{ skill_install("vf_token_skill") }}

@@ -100,7 +100,10 @@ document.addEventListener("click", (event) => {
   if (cancel) {
     const form = cancel.closest("form");
     if (form.closest(".general")) form.reset();
-    else form.hidden = true;
+    else {
+      form.hidden = true;
+      form.closest("section")?.querySelector("[data-comment-section]")?.focus();
+    }
   }
 });
 
@@ -336,12 +339,28 @@ function settleReviewers(sent) {
   if (live) live.textContent = status ? status.textContent : "";
 }
 
+// The thread that was clicked in is swapped whole, so focus goes to the resolved summary or to the
+// newest message, which a screen reader then reads out.
+function settleThread(path, target) {
+  const id = path.match(/\/comments\/(\d+)\//)?.[1];
+  const thread = id ? document.getElementById(`vf_t${id}`) : target.lastElementChild;
+  const messages = Array.from(thread?.querySelectorAll(".msg") || []);
+  (thread?.querySelector("summary") || messages.at(-1))?.focus();
+}
+
 document.body.addEventListener("htmx:afterSettle", (event) => {
   const path = event.detail.pathInfo?.requestPath || "";
   if (path.endsWith("/verdict") || path.endsWith("/verdict/withdraw")) {
-    document.querySelector("#vf_verdict .vmsg")?.focus();
+    const message = document.querySelector("#vf_verdict .vmsg");
+    message?.focus();
+    // an empty message is hidden and cannot take focus
+    if (document.activeElement !== message) document.querySelector("#vf_verdict button:enabled")?.focus();
   } else if (/\/reviewers(\/[^/]+\/remove)?$/.test(path)) {
     settleReviewers(event.detail.requestConfig?.elt);
+  } else if (/\/(sign|unsign)$/.test(path)) {
+    document.getElementById("vf_status")?.focus();
+  } else if (/\/comments(\/\d+\/(reply|resolve|reopen))?$/.test(path)) {
+    settleThread(path, event.detail.target);
   }
 });
 document.body.addEventListener("htmx:responseError", (event) => showRequestError(event, errorCopy(event.detail.xhr.status, event.detail.xhr.responseText)));
@@ -357,7 +376,7 @@ document.body.addEventListener("htmx:beforeRequest", (event) => {
 document.body.addEventListener("htmx:afterRequest", (event) => {
   // hx-disabled-elt drops focus to the body while the Request button is disabled
   const form = event.detail.requestConfig?.elt;
-  if (!event.detail.successful && form?.matches?.(".addrev") && form.isConnected && document.activeElement === document.body) {
+  if (!event.detail.successful && form?.matches?.(".addrev, .cform, .reply") && form.isConnected && document.activeElement === document.body) {
     (form.querySelector("button:enabled") || form.querySelector("select"))?.focus();
   }
 });
@@ -393,3 +412,14 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
     if (message && !confirm(message)) event.preventDefault();
   });
 })();
+
+document.querySelectorAll("input[data-match]").forEach((input) => {
+  const button = input.form.querySelector("button.danger");
+  const sync = () => { button.disabled = input.value.trim() !== input.dataset.match; };
+  input.addEventListener("input", sync);
+  sync();
+});
+
+document.querySelectorAll("pre, .content").forEach((box) => {
+  if (box.scrollWidth > box.clientWidth) box.tabIndex = 0;
+});

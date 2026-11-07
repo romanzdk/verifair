@@ -4,13 +4,13 @@
   {% set anchor_url = shown_url if readonly_plan else '' %}
   {% if view_tab != 'execution' %}
   {% with s = open_count - blocking_count %}<p class="dismiss" id="vf_blocking">{{ blocking_count }} blocking · {{ s }} suggestion{{ "s" if s != 1 }}</p>{% endwith %}
-  <h4>On this page</h4>
+  <h2>On this page</h2>
   <ul>
     {% for s in sections %}<li><a href="{{ anchor_url }}#{{ s.slug }}"><span class="toc-n">{{ loop.index }}</span>{{ s.heading }}</a>{% if open_by_section[s.slug] %}{% with n = open_by_section[s.slug] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endfor %}
     {% if threads_by_section.get("vf_general") or (plan_first and on_plan) %}<li><a href="{{ anchor_url }}#vf_general">General comments</a>{% if open_by_section["vf_general"] %}{% with n = open_by_section["vf_general"] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endif %}
     {% if threads_by_section.get(None) %}<li><a href="{{ anchor_url }}#vf_earlier">Earlier versions</a>{% if open_by_section[None] %}{% with n = open_by_section[None] %} <span class="n" role="img" aria-label="{{ n }} open thread{{ "s" if n != 1 }}">{{ n }}</span>{% endwith %}{% endif %}</li>{% endif %}
   </ul>
-  <h4>Reviewers</h4>
+  <h2>Reviewers</h2>
   {% for r in reviewers %}
   {% set label = labels.get(r.id, r.name) %}
   <div class="rev-item">
@@ -36,12 +36,12 @@
   </ul></details>
   {% endif %}
   {% endif %}
-  <h4>Versions</h4>
+  <h2>Versions</h2>
   <ul>
     {% for v in versions %}<li{% if v.version == version %} class="on"{% endif %}><a href="{{ url }}{% if v.version != current_version %}/v/{{ v.version }}{% endif %}{% if view_tab == 'execution' or plan_first %}{{ selection_query }}{% elif on_plan and v.plan is not none %}?tab=plan{% endif %}">v{{ v.version }}{% if plan_first %} · Plan revision {{ v.plan_revision }}{% if v.body is none %} · No implementation{% endif %}{% endif %} · {{ v.created_at|date }}{% if v.commit %} · <code>{{ v.commit[:7] }}</code>{% endif %}</a></li>{% endfor %}
   </ul>
   {% if (can_archive and not report.archived_at) or can_delete %}
-  <h4>Manage</h4>
+  <h2>Manage</h2>
   <div class="manage">
     {% if can_archive and not report.archived_at %}<form method="post" action="/r/{{ report.id|urlencode }}/archive"><button class="btn sm" data-confirm="Archive this review? It leaves the lists but stays readable at its link, and you can restore it.">Archive</button></form>{% endif %}
     {% if can_delete %}<a class="btn sm danger" href="/r/{{ report.id|urlencode }}/delete">Delete permanently</a>{% endif %}

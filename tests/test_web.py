@@ -785,7 +785,9 @@ def test_first_run_and_caught_up(client, shared_client, settings):
     assert 'href="/access/tokens"' not in page
     assert settings.api_token == "t"
     assert "=t\n" not in page and ">t<" not in page
-    assert 'data-copy-target="vf_env"' in page and '<pre class="pre" id="vf_env">' in page
+    assert (
+        'data-copy-target="vf_env"' in page and '<pre class="pre" tabindex="0" id="vf_env">' in page
+    )
     assert 'export VERIFAIR_API_TOKEN="&lt;your token&gt;"' in page
     assert 'aria-label="Copy environment variables"' in page
     assert "Ask your agent to publish a verifair review, then reload this page." in page
@@ -1658,7 +1660,7 @@ SELF_COPY = "You signed this report. Someone else has to approve it."
 
 def _header(html):
     start = html.index('id="vf_header"')
-    return html[start : html.index("</header>", start)]
+    return html[start : html.index("</section>", start)]
 
 
 def test_header_shows_merge_and_pull_request_links_only(client):
@@ -1788,7 +1790,7 @@ def test_header_shows_one_link_per_merge_request(client):
 def test_header_keeps_code_links_after_signing_and_on_execution(client):
     push(client, links=[{"label": "MR", "url": "https://x/g/p/-/merge_requests/231"}])
     client.cookies.set("vf_name", "Signer")
-    assert ">p!231<" in sign(client).text.split("</header>")[0]
+    assert ">p!231<" in sign(client).text.split("</section>")[0]
     assert ">p!231<" in _header(client.get("/r/prorate?tab=execution").text)
 
 
@@ -1809,7 +1811,7 @@ def test_sign_moves_unsigned_to_awaiting_review(client):
 
     r = sign(client)
     assert r.status_code == 200
-    assert r.text.startswith('<header class="head" id="vf_header">')
+    assert r.text.startswith('<section class="head" id="vf_header" aria-label="Review summary">')
     assert "Signed by <b>Signer</b>" in r.text and "Sign this version" not in r.text
     assert '<aside class="side" id="vf_sidebar" hx-swap-oob="true">' in r.text
     assert 'hx-disabled-elt="#vf_verdict button" hx-swap-oob="true">' in r.text
@@ -2983,6 +2985,20 @@ def test_text_colours_pass_contrast_in_both_themes():
             assert _contrast(theme["--link"], background) >= 4.5
             assert _contrast(theme["--accent"], background) >= 3
         assert _contrast(theme["--warn-text"], tint) >= 4.5
+        assert _contrast(theme["--link"], theme["--accent-bg"]) >= 4.5
+        assert _contrast(theme["--link"], theme["--bg-hover"]) >= 4.5
+        for background in (theme["--bg"], theme["--bg-side"]):
+            assert _contrast(theme["--input-border"], background) >= 3
+        for status in ("unsigned", "awaiting", "changes", "approved"):
+            assert _contrast(theme[f"--s-{status}"], theme[f"--s-{status}-bg"]) >= 4.5
+        for background in (theme["--bg"], theme["--bg-hover"], theme["--bg-side"]):
+            assert _contrast(theme["--text-muted"], background) >= 4.5
+            assert _contrast(theme["--text-subtle"], background) >= 4.5
+        for background in (theme["--bg"], theme["--bg-side"]):
+            for risk in ("--risk-high", "--risk-medium"):
+                assert _contrast(theme[risk], background) >= 4.5
+    for rule in (".inp {", ".sel {", ".codebox {", "textarea, input {"):
+        assert "border: 1px solid var(--input-border)" in css.split(rule)[1].split("}")[0], rule
     assert "a { color: var(--link);" in css
     assert ":focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }" in css
     assert ".chg:focus-visible { outline-offset: -2px; background: var(--bg-hover); }" in css
@@ -3071,7 +3087,7 @@ REQUESTED = re.compile(
 
 
 def _rail_reviewers(page):
-    return page.split("<h4>Reviewers</h4>")[1].split("<h4>Versions</h4>")[0]
+    return page.split("<h2>Reviewers</h2>")[1].split("<h2>Versions</h2>")[0]
 
 
 def test_sidebar_skips_the_signer_among_requested_reviewers(client):
@@ -3719,7 +3735,7 @@ def test_unsigned_named_owner_partial_keeps_sign_action(client, settings, workfl
         {"body": "Suggestion", "blocking": "0"} if action == "comments" else {"verdict": "approve"}
     )
     response = client.post(f"/r/{id}/{action}", data=form)
-    header = re.search(r'<header[^>]*id="vf_header".*?</header>', response.text, re.S)[0]
+    header = re.search(r'<section class="head" id="vf_header".*?</section>', response.text, re.S)[0]
     assert 'id="vf_sign"' in header
     if workflow == "plan_first":
         assert "Sign plan revision 1" in header
@@ -3754,7 +3770,7 @@ def test_shared_unsigned_partial_keeps_sign_permissions(proxied, actor, can_sign
         headers=signed_in(actor) | {"HX-Request": "true"},
         data=_target_form(**fields),
     )
-    header = re.search(r'<header[^>]*id="vf_header".*?</header>', response.text, re.S)[0]
+    header = re.search(r'<section class="head" id="vf_header".*?</section>', response.text, re.S)[0]
     assert ('id="vf_sign"' in header) == can_sign
     if not can_sign:
         assert "Only alice" in header
@@ -3963,3 +3979,62 @@ def test_setup_banner_returns_when_every_token_is_revoked(shared_client):
         assert 'id="vf_setup"' not in shared_client.get("/").text
         db.revoke_token(conn, row["id"])
     assert 'id="vf_setup"' in shared_client.get("/").text
+
+
+def test_review_page_landmarks_and_heading_levels(client):
+    push(client)
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    page = client.get("/r/prorate").text
+    assert page.count("<header") == 1
+    assert '<form class="verdict" id="vf_verdict" aria-label="Your review"' in page
+    assert '<div class="theme" role="group" aria-label="Theme">' in page
+    assert 'class="theme" method' not in page
+    assert "<h4" not in page and "<h2>On this page</h2>" in page
+    signed = client.post(
+        "/r/prorate/sign", data={"version": 1}, headers={"HX-Request": "true"}
+    ).text
+    assert signed.startswith('<section class="head" id="vf_header"')
+
+
+def test_app_js_moves_focus_after_swaps():
+    js = (Path(web.__file__).parent / "static" / "app.js").read_text()
+    for part in (
+        'getElementById("vf_status")?.focus()',
+        "settleThread(path, event.detail.target)",
+        'querySelector("[data-comment-section]")?.focus()',
+        '#vf_verdict button:enabled")?.focus()',
+    ):
+        assert part in js, part
+    thread = Path(web.__file__).parent / "templates" / "_thread.html"
+    assert 'id="vf_c{{ c.id }}" tabindex="-1"' in thread.read_text()
+
+
+def test_delete_button_waits_for_the_typed_id_in_the_script_only():
+    js = (Path(web.__file__).parent / "static" / "app.js").read_text()
+    assert "input[data-match]" in js and "input.value.trim() !== input.dataset.match" in js
+
+
+def test_members_table_is_compact_on_phones(shared_client):
+    page = shared_client.get("/access/members").text
+    assert '<table class="t members">' in page
+    css = (Path(web.__file__).parent / "static" / "app.css").read_text()
+    phone = css.split("@media (max-width: 640px) {")[1]
+    assert (
+        "table.members tr {" in phone
+        and "table.members td[data-label]::before { display: none; }" in phone
+    )
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc"])
+def test_api_explorer_follows_the_theme(client, path):
+    system = client.get(path).text
+    assert "@media (prefers-color-scheme: dark) {html{filter:invert" in system
+    client.cookies.set("vf_theme", "dark")
+    dark = client.get(path).text
+    assert "<style>html{filter:invert" in dark and "prefers-color-scheme" not in dark
+    client.cookies.set("vf_theme", "light")
+    light = client.get(path).text
+    assert "<style>" not in light and "filter:invert" not in light
+    for page in (system, dark, light):
+        assert page.count('integrity="sha384-') >= 1

@@ -19,7 +19,7 @@
     <label>Role<select name="role" class="sel">{% for r in roles %}<option value="{{ r }}"{% if r == member_form.role %} selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}</select></label>
     <button class="btn p">{{ icon("plus", "ic14") }}Add member</button>
   </form>
-  <div class="panel"><table class="t">
+  <div class="panel"><table class="t members">
     <thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Status</th><th class="r"><span class="sr-only">Actions</span></th></tr></thead>
     <tbody>
       {% for u in users %}{% set action = "/access/users/" ~ u.id|segment %}

@@ -197,5 +197,5 @@ def test_withdrawing_frees_the_reviewer_and_posts_to_slack(client, monkeypatch):
     verdict(client)
     withdraw(client)
     assert sent[-1].startswith("Reviewer withdrew their verdict on Prorate")
-    reviewers = client.get("/r/prorate").text.split("<h4>Reviewers</h4>")[1].split("<h4>")[0]
+    reviewers = client.get("/r/prorate").text.split("<h2>Reviewers</h2>")[1].split("<h2>")[0]
     assert "approved" not in reviewers

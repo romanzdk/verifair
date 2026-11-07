@@ -1,7 +1,7 @@
-<header class="head" id="vf_header"{% if header_oob %} hx-swap-oob="true"{% endif %}>
+<section class="head" id="vf_header" aria-label="Review summary"{% if header_oob %} hx-swap-oob="true"{% endif %}>
   <h1>{{ report.title }}</h1>
   <div class="meta">
-    <span id="vf_status" class="badge b-{{ status }}">{% if not is_current %}Current: {% endif %}{{ STATUS_LABELS[status] }}</span>
+    <span id="vf_status" tabindex="-1" class="badge b-{{ status }}">{% if not is_current %}Current: {% endif %}{{ STATUS_LABELS[status] }}</span>
     <span class="risk {{ report.risk }}">{{ icon("risk-" ~ report.risk, "ic14") }}{{ report.risk|capitalize }} risk</span>
     <span>by <b>{{ report.author }}</b></span>
     {% if view_tab != 'execution' %}
@@ -36,4 +36,4 @@
     {% if view_tab != 'execution' and plan_first and stage == 'awaiting_implementation' and is_current %}
     <p class="banner">Plan approved · Awaiting implementation. Ask your agent to submit the implementation body to <code>/api/reports</code> with this review's ID <code>{{ report.id }}</code> and <code>expected_version: {{ current_version }}</code>.</p>
     {% endif %}
-</header>
+</section>

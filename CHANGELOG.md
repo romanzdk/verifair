@@ -6,8 +6,16 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Fixed
+
+- Accessibility fixes from an audit. Input borders and a few grey texts are darker so they are easier to see. The section numbers on a review page are easier to read. Links inside a paragraph are underlined. The sidebar and token page headings follow the page order. The review page has no second page banner, and the review summary and your review bar are named regions. The theme buttons are a named group. Code blocks that scroll can be reached with the keyboard.
+- Keyboard and screen reader users no longer lose their place after posting a comment or reply, resolving or reopening a thread, cancelling a comment form, signing or unsigning, or withdrawing a verdict. Focus moves to the new message or the new status.
+
 ### Changed
 
+- On the delete page, "Delete permanently" stays disabled until the typed id matches. The server still checks the id.
+- On phones the members table is compact: name and email on top, then role, status and actions.
+- The API explorer pages (`/docs` and `/redoc`) follow your theme: dark when you chose dark, or when your system is dark and you chose system.
 - Docs, README feature list, screenshots and the demo GIF match the current app.
 
 ## [0.8.0] - 2026-11-07
