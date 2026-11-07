@@ -488,7 +488,7 @@ def test_push_and_comment_notify_when_slack_configured(settings, make_app, monke
     assert sent[0].startswith("Draft report v1 in billing-service")
     client.post("/api/reports/prorate/comments", json={"body": "Why?", "author": "bot"}, headers=H)
     assert len(sent) == 2
-    assert sent[1].startswith("bot commented on Prorate › report: Why?")
+    assert sent[1].startswith("bot (agent) commented on Prorate › report: Why?")
 
 
 @pytest.mark.parametrize(
