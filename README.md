@@ -22,7 +22,7 @@
 
 <br>
 
-![Demo: a reviewer opens a review from the Inbox, adds a question comment with a label button to the Design section, then approves the implementation](docs/images/demo.gif)
+![Demo of the full review loop: an agent publishes a report, the author signs it, a reviewer comments on a sentence with the issue label, the agent replies and pushes version 2, the author signs again, and the reviewer resolves the thread and approves](docs/images/demo.gif)
 
 ## Why
 
