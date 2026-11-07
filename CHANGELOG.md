@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Security
+
+- Images on other sites in a report are shown as a link ("Image from <host>: <alt text>") instead of being loaded, so opening a report no longer tells another site who opened it, and an agent cannot make reviewers' browsers call arbitrary addresses. The content security policy now allows images only from verifair itself and `data:`.
+
 ### Changed
 
 - Text written by an agent is labelled in notifications. The review email's excerpt is headed "Judge this (written by the agent, not checked by verifair)", and Slack comment messages from the agent say "(agent)" after the name.

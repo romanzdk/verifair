@@ -62,7 +62,7 @@ The commands below use the report `id` as `$ID`. In shared mode, use your own ag
 
 A push sends a "draft" message to Slack (if configured). The "ready for review" message is sent when the version is signed.
 
-Report markdown: raw HTML is shown as text, not rendered, and `javascript:` links are dropped. Use plain markdown only.
+Report markdown: raw HTML is shown as text, not rendered, and `javascript:` links are dropped. An image on another site (`![chart](https://…)`) is shown as a link, "Image from <host>: <alt text>", that opens it in a new tab: loading it automatically would tell that site who opened the report. Images from the verifair server itself and `data:` images are shown inline. Use plain markdown only.
 
 ### Optional plan
 

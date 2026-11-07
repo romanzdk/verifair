@@ -415,7 +415,7 @@ def test_html_responses_carry_csp(client):
     client.post("/api/reports", json=REPORT, headers=H)
     page = client.get("/r/t")
     assert page.headers["content-security-policy"] == (
-        "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline';"
         " base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
     )
     assert "hx-on" not in page.text

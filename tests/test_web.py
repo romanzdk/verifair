@@ -1500,7 +1500,7 @@ def test_shared_mode_without_a_valid_session_cannot_act(proxied, session):
 
 SIGN_IN_COPY = "Sign in to use verifair."
 CSP = (
-    "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline';"
     " base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 )
 
