@@ -24,6 +24,10 @@ def _revision(report: Mapping, version: int, target: str) -> str:
     return f"v{version}"
 
 
+# the excerpt comes from an agent's report, so readers must not take it as verifair's own words
+JUDGE_HEADING = "Judge this (written by the agent, not checked by verifair):"
+
+
 def _tab(report: Mapping, target: str) -> str:
     return f"?tab={target}" if report.get("workflow") == "plan_first" else ""
 
@@ -64,8 +68,9 @@ def comment_text(report: Mapping, comment: Mapping, base_url: str) -> str:
         else ""
     )
     url = f"{base_url}/r/{report['id']}{_tab(report, target)}#vf_c{comment['id']}"
+    agent = " (agent)" if comment.get("author_id") == "agent" else ""
     return (
-        f"{_esc(comment['author_name'])} commented on {_esc(report['title'])}{revision} "
+        f"{_esc(comment['author_name'])}{agent} commented on {_esc(report['title'])}{revision} "
         f"› {section}: {_esc(comment['body'][:140])} {url}"
     )
 
@@ -145,7 +150,7 @@ def review_email(
         opening = f'{signer} signed {revision} of "{title}". You were asked to review it{by}.'
     blocks = [opening, f"Project: {report['project']} · Risk: {report['risk']}"]
     if judge:
-        blocks.append(f"Judge this:\n{_cut(judge)}")
+        blocks.append(f"{JUDGE_HEADING}\n{_cut(judge)}")
     blocks += [
         "Open it to comment, approve or request changes:\n"
         f"{base_url}/r/{quote(report['id'])}{_tab(report, target)}",

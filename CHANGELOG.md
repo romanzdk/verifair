@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Changed
+
+- Text written by an agent is labelled in notifications. The review email's excerpt is headed "Judge this (written by the agent, not checked by verifair)", and Slack comment messages from the agent say "(agent)" after the name.
+
 ## [0.7.0] - 2026-11-07
 
 ### Security

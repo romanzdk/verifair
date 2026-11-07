@@ -277,7 +277,7 @@ def test_signing_emails_every_requested_reviewer_except_the_signer(mail, team, o
     assert bob == (
         'alice signed v1 of "T". You were asked to review it.\n\n'
         "Project: p · Risk: high\n\n"
-        "Judge this:\nIs a day the right unit?\n\n"
+        "Judge this (written by the agent, not checked by verifair):\nIs a day the right unit?\n\n"
         "Open it to comment, approve or request changes:\nhttp://localhost:8000/r/r\n\n"
         "— Sent by verifair. Replies to this mail are not read.\n"
     )
@@ -461,7 +461,7 @@ def test_plan_notifications_and_mail_dedupe(mail, team, outbox):
     form = {"version": 1, "revision": 1, "target": "plan"}
     assert mail.post("/r/planned/sign", data=form, headers=ALICE).status_code == 200
     assert len(outbox.sent) == 1 and "plan revision 1" in outbox.sent[0].get_content()
-    assert "Judge this:" not in outbox.sent[0].get_content()
+    assert "Judge this" not in outbox.sent[0].get_content()
     assert "?tab=plan" in outbox.sent[0].get_content()
     mail.post("/r/planned/sign", data=form, headers=ALICE)
     assert len(outbox.sent) == 1

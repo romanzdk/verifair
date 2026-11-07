@@ -359,7 +359,7 @@ def test_review_email_after_signing_names_signer_and_asker():
     assert text == (
         'Alice signed v3 of "Pro Bcc: x@evil.com". You were asked to review it by Bob.\n\n'
         "Project: billing-service · Risk: high\n\n"
-        "Judge this:\n"
+        "Judge this (written by the agent, not checked by verifair):\n"
         "Is a day right?\n\n"
         "Open it to comment, approve or request changes:\n"
         "http://x/r/prorate\n\n"
@@ -380,12 +380,16 @@ def test_review_email_when_added_after_signing():
 def test_review_email_cuts_judge_this_at_a_word_or_line():
     words = " ".join(["word"] * 400)
     _, text = notify.review_email(REPORT, 1, words, "http://x", signer="A")
-    judge = text.split("Judge this:\n")[1].split("\n\nOpen it")[0]
+    judge = text.split("Judge this (written by the agent, not checked by verifair):\n")[1].split(
+        "\n\nOpen it"
+    )[0]
     assert judge.endswith("word\nRead the rest on the page.")
     assert len(judge) <= 1500 + len("\nRead the rest on the page.")
     lines = "\n".join(["a" * 99] * 20)
     _, text = notify.review_email(REPORT, 1, lines, "http://x", signer="A")
-    judge = text.split("Judge this:\n")[1].split("\n\nOpen it")[0]
+    judge = text.split("Judge this (written by the agent, not checked by verifair):\n")[1].split(
+        "\n\nOpen it"
+    )[0]
     assert judge == "\n".join(["a" * 99] * 15) + "\nRead the rest on the page."
     _, text = notify.review_email(REPORT, 1, "x" * 1600, "http://x", signer="A")
     assert "x" * 1500 + "\nRead the rest on the page." in text
@@ -509,7 +513,7 @@ def test_plan_first_review_email_identifies_target_without_requiring_headings(ta
         "Project: billing-service · Risk: high",
     ]
     if judge:
-        blocks.append(f"Judge this:\n{judge}")
+        blocks.append(f"Judge this (written by the agent, not checked by verifair):\n{judge}")
     blocks += [
         f"Open it to comment, approve or request changes:\nhttp://x/r/prorate?tab={target}",
         "— Sent by verifair. Replies to this mail are not read.",
@@ -589,3 +593,11 @@ def test_sent_emails_are_logged_without_addresses(monkeypatch, caplog):
     settings = replace(make_settings(None), smtp_url="smtp://mail:25", email_from="v@example.com")
     assert notify.send_email(settings, "r", "S", {"a@example.com": "x", "b@example.com": "y"})
     assert "email sent report=r recipients=2" in caplog.text and "a@example.com" not in caplog.text
+
+
+def test_agent_comments_are_marked_in_slack():
+    report = {"id": "r", "title": "T", "workflow": "artifact"}
+    base = {"id": 1, "section": "Intent", "version": 1, "body": "hi"}
+    agent = notify.comment_text(report, base | {"author_id": "agent", "author_name": "claude"}, "u")
+    person = notify.comment_text(report, base | {"author_id": "bob", "author_name": "Bob"}, "u")
+    assert agent.startswith("claude (agent) commented on T") and person.startswith("Bob commented")
