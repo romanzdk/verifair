@@ -4,8 +4,10 @@ import re
 import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
+from html import escape
 from html.parser import HTMLParser
 from typing import Any
+from urllib.parse import urlsplit
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
@@ -14,6 +16,24 @@ from markdown_it.token import Token
 GENERAL = "vf_general"
 
 _md = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable("table")
+
+
+def _image(self, tokens, idx, options, env):
+    token = tokens[idx]
+    src = token.attrGet("src") or ""
+    if not src.lower().startswith(("http://", "https://", "//")):
+        return self.image(tokens, idx, options, env)
+    # loading it would tell the image's host who opened the report and let an agent make
+    # every reviewer's browser call any address; a link loads it only when someone chooses to
+    alt = self.renderInlineAsText(token.children or [], options, env)
+    host = urlsplit(src if "://" in src else f"https:{src}").hostname or src
+    return (
+        f'<a class="ext-img" href="{escape(src)}" target="_blank" rel="noopener noreferrer">'
+        f"Image from {escape(host)}{': ' + escape(alt) if alt else ''}</a>"
+    )
+
+
+_md.add_render_rule("image", _image)
 
 
 @dataclass

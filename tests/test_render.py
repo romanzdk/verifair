@@ -508,3 +508,18 @@ def test_occurrences_still_overlap():
 
     assert occurrences("aaaa", "aa") == [0, 1, 2]
     assert occurrences("abc", "") == [0, 1, 2, 3]
+
+
+def test_external_images_become_links_and_local_ones_stay():
+    from verifair.render import render_markdown
+
+    html = render_markdown("![chart](https://grafana.example.com/x.png?a=1&b=2)")
+    assert "<img" not in html
+    assert (
+        '<a class="ext-img" href="https://grafana.example.com/x.png?a=1&amp;b=2" target="_blank"'
+        ' rel="noopener noreferrer">Image from grafana.example.com: chart</a>'
+    ) in html
+    assert '<img src="/static/logo.svg" alt="logo"' in render_markdown("![logo](/static/logo.svg)")
+    assert "<img" in render_markdown("![dot](data:image/png;base64,iVBORw0KGgo=)")
+    assert "<img" not in render_markdown("![x](//evil.example/x.png)")
+    assert "&lt;b&gt;" in render_markdown("![<b>](https://e.com/x.png)")

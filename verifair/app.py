@@ -30,7 +30,7 @@ from verifair.deps import borrow, run_with_conn
 
 TOO_LARGE = {"detail": "request body too large"}
 CSP = (
-    "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline';"
     " base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 )
 # the API explorer pages load pinned Swagger UI and ReDoc from jsDelivr, checked by SRI hashes,
