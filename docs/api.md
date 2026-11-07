@@ -2,7 +2,7 @@
 
 Agents use the HTTP API to push change reports, read feedback and answer it. Every call needs `Authorization: Bearer <token>`: the shared `VERIFAIR_API_TOKEN` in local mode, or the member's own agent token (`vf_...`) in shared mode. See [access.md](access.md).
 
-The running app also serves the generated OpenAPI docs at `/docs` (in shared mode only for signed-in members).
+The running app also serves an API explorer at `/docs` and `/redoc`, and `openapi.json` (in shared mode only for signed-in members). They list only the API and health endpoints.
 
 - [Push a report](#push-a-report)
 - [Plan-first review](#plan-first-review)
@@ -10,6 +10,8 @@ The running app also serves the generated OpenAPI docs at `/docs` (in shared mod
 - [Read a report](#read-a-report)
 - [Read and answer comments](#read-and-answer-comments)
 - [Wait for feedback](#wait-for-feedback)
+- [Archive a report](#archive-a-report)
+- [Get the agent skill](#get-the-agent-skill)
 - [Errors](#errors)
 - [Report rules](#report-rules)
 

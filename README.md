@@ -33,18 +33,20 @@ verifair is a small web service where agents push markdown change-review reports
 ## Features
 
 - **One report per change.** Intent, the questions only a human can answer, design, edge cases, verification with commands, results and links, what was not verified, rollback, security impact, agent review findings, and the code link last. See [the report](#the-report).
-- **A human signs first.** The person who asked for the change reads the agent's report and signs it. Only then does the team get asked to review.
-- **Comment on any text.** Select a sentence to start a thread. Threads are blocking by default; a reviewer can mark one as a suggestion.
-- **Verdicts with rules.** Approve or request changes. Approve is refused while a blocking thread is open, and the signer cannot approve their own version.
+- **A human signs first.** The person who asked for the change reads the agent's report and signs it. Only then does the team get asked to review. The signer or an admin can unsign while nobody has given a verdict.
+- **Comment on any text.** Select a sentence to start a thread. Threads are blocking by default; a reviewer can mark one as a suggestion. [Conventional Comments](https://conventionalcomments.org) label buttons (`issue:`, `nitpick:`, `question:` and more) set the label and whether the thread blocks.
+- **Verdicts with rules.** Approve or request changes. Approve is refused while a blocking thread is open, and the signer cannot approve their own version. Unapprove or withdraw a verdict if you change your mind.
 - **Versions.** The agent pushes a new version after feedback. Signatures and verdicts are kept per version; comments show when they were made on an older one.
 - **Plan first, when needed.** Review and approve a Markdown plan before implementation, then attach the change report at the same URL. Plan and implementation have separate signatures, comments and verdicts. Direct report submission still works.
 - **Optional execution evidence.** Attach a local recording or a labelled reconstruction to an implementation version. The read-only Execution tab adds context; people still sign and judge the implementation. See the [trace format and version-pinned capture recipes](docs/tracing.md).
-- **Built for agents.** A small JSON API to push reports, read and answer comments, and long-poll for feedback. Ships with an [agent skill](#agent-skill).
-- **An Inbox for people.** Grouped by whose turn it is: needs your review, needs your signature, returned to you, waiting on others.
-- **Two modes.** Local mode for one person or a small trusted group. Shared mode for a team, with built-in sign-in (Google or any OpenID Connect provider), members, admins and per-member agent tokens.
-- **Small and plain.** FastAPI, Jinja and htmx, no JavaScript build step, strict CSP. State lives in Postgres, so you can run several replicas. Light and dark theme, works on a phone.
-- **Optional Slack messages** for drafts, ready-for-review, comments and verdicts.
-- **Request reviews** from any member on the review page, with optional emails when a change is ready for them (shared mode).
+- **Built for agents.** A small JSON API to push reports, read and answer comments, long-poll for feedback, and archive or restore a review. Ships with an [agent skill](#agent-skill) you install with one `npx skills` command, and an API explorer at `/docs`.
+- **An Inbox for people.** Grouped by whose turn it is: needs your review, needs your signature, returned to you, needs implementation, waiting on others. **Assigned to me**, **Created by me** and **All reviews** list the rest, with status tabs.
+- **Archive and delete.** Archive a finished or test review (or a whole project) to take it out of the lists; it stays readable and can be restored. Admins can delete one for good.
+- **Two modes.** Local mode for one person or a small trusted group. Shared mode for a team, with built-in sign-in (Google or any OpenID Connect provider), members, admins, per-member agent tokens, optional open sign-up for your own domains, and a first-run guide that connects each member's agent.
+- **Small and plain.** FastAPI, Jinja and htmx, no JavaScript build step, strict CSP. State lives in Postgres, so you can run several replicas. System, light and dark theme, works on a phone.
+- **Safe to open.** Images from other sites in a report are shown as links, not loaded. Local mode refuses unknown hostnames, which blocks DNS rebinding.
+- **Optional Slack messages** for drafts, ready-for-review, comments, verdicts and withdrawn verdicts. Text written by the agent is labelled as such in Slack and email.
+- **Request reviews** from any member on the review page, with optional emails when a change is ready for them, and a welcome email for new members (shared mode).
 
 ## How it works
 
@@ -110,7 +112,7 @@ This is local mode. For a team, use shared mode. See [docs/access.md](docs/acces
 
 | All reviews with status tabs | Review page, dark |
 | --- | --- |
-| ![All reviews list with Open, Awaiting review, Changes requested, Unsigned, Approved and All tabs](docs/images/changes.png) | ![Review page in dark theme with a blocking thread](docs/images/review-dark.png) |
+| ![All reviews list with status tabs from Open to Archived](docs/images/changes.png) | ![Review page in dark theme with a blocking thread](docs/images/review-dark.png) |
 
 | Agent tokens (shared mode) | Members (shared mode) |
 | --- | --- |
@@ -185,8 +187,8 @@ Full reference: [docs/api.md](docs/api.md) (push, read, comments, wait, errors).
 
 | Page | What is in it |
 | --- | --- |
-| [docs/api.md](docs/api.md) | Push a report, read it, read and answer comments, wait for feedback, errors, required sections, provenance |
-| [docs/reviewing.md](docs/reviewing.md) | Inbox and personal views, signing, blocking threads |
+| [docs/api.md](docs/api.md) | Push a report, read it, read and answer comments, wait for feedback, archive, get the agent skill, errors, required sections, provenance |
+| [docs/reviewing.md](docs/reviewing.md) | Inbox and personal views, plan-first reviews, signing and undo, blocking threads, Conventional Comments, archive and delete |
 | [docs/tracing.md](docs/tracing.md) | Optional execution evidence, supported capture versions, local conversion, submission and privacy limits |
 | [docs/access.md](docs/access.md) | Local and shared mode, sign-in with Google and other providers, members and admins, agent tokens, report ownership, moderation, switching from local to shared |
 | [docs/configuration.md](docs/configuration.md) | All environment variables |
@@ -208,6 +210,7 @@ Agents can read all of it as Markdown: [llms.txt](https://romanzdk.github.io/ver
 | `VERIFAIR_OIDC_CLIENT_SECRET` | unset | Shared mode: OAuth client secret |
 | `VERIFAIR_SESSION_SECRET` | unset | Shared mode: signs the session cookie, at least 32 characters, same on every replica |
 | `VERIFAIR_OIDC_ALLOWED_DOMAINS` | unset | Shared mode: email domains that may sign in, for example `example.com`. Required with Google |
+| `VERIFAIR_OPEN_SIGNUP` | `false` | Shared mode: `true` lets anyone from the allowed domains join as a member on first sign-in |
 | `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: email of the first admin |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | H2 headings every report must have |
 | `VERIFAIR_DB_POOL_SIZE` | `10` | Database connections per process |

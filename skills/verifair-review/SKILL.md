@@ -31,7 +31,7 @@ Implementation body = Markdown with these H2 headings, in this order, spelled ex
 Evidence rules:
 - Only results you saw. Re-run what you can; anything copied from earlier notes or not run is ⚠️ with that said.
 - Links a reviewer can open: CI jobs, MRs, dashboards, deployed URLs. No local paths (`/Users/…`, `.superpowers/…`), no secrets.
-- Plain simple language. Markdown only; raw HTML is shown as text.
+- Plain simple language. Markdown only; raw HTML is shown as text, and images on other sites show as links.
 
 ## Push
 
@@ -130,6 +130,7 @@ Both workflows store exact Markdown without trimming/normalization. The 1,048,57
   | 401 | Token wrong, revoked or owner deactivated: stop and tell the user. |
   | 409 `review changed` / `document changed` | Reread metadata, exact snapshot and selected-target feedback; reconsider the edit, then use the new guard. Never blindly retry. |
   | 409 `current plan is not approved` | Read plan status/blockers and ask the human to handle approval; no bypass. |
+  | 409 `This report is archived…` | A person archived the review. Do not push; tell the user. They restore it, or you can `POST /api/reports/$ID/restore` if they ask (owner's or requested-reviewer's token; `/archive` hides it again). |
   | 409 `workflow cannot be changed` | Keep the stored workflow or create a separate review. |
   | 422 content/guard error | Follow the workflow rules above; do not replace omission with null. |
   | 503 | Wait `Retry-After` seconds, then `GET` the report: compare exact snapshot contents and commit to the intended push; a higher version count alone can be another writer. Push only after resolving whether your write was stored. |
@@ -147,7 +148,7 @@ curl -sS --fail-with-body --max-time 60 -G -H "Authorization: Bearer $VERIFAIR_A
 ```
 
 1. Loop `/wait` within the time the user allowed (default 30 min). First call omits `since`; subsequent calls can use `next_since`. A 401 stops the loop. The endpoint signals current-target root comments/verdicts, not a lossless stream or durable cursor. Timestamp cursors can skip other events in the same second.
-2. After **every event or timeout**, reread metadata and `GET /api/reports/$ID/comments?target=$TARGET&open=true`. Replies, signatures, pushes and moderation (including reopening) are non-events. Wait follows the current target revision; an unchanged plan still receives feedback after a body push. Effective approval needs the normal state read.
+2. After **every event or timeout**, reread metadata and `GET /api/reports/$ID/comments?target=$TARGET&open=true`. Replies, signatures, unsigning, pushes, withdrawn verdicts and moderation (including reopening) are non-events, so a verdict you saw may have been withdrawn by the time you read the report. Wait follows the current target revision; an unchanged plan still receives feedback after a body push. Effective approval needs the normal state read.
 3. Feedback envelopes carry `current_version`, `target`, `revision` (null without a document), from the same consistent read as the threads/events. Compare them with metadata and exact snapshot readback; separate requests can see different states. Reread on mismatch before writing. Comment/verdict `version` is the record's target revision, not necessarily the global version.
 4. Reply to each open human thread once with `{body, parent_id}`. Omitted target inherits the root's target; explicit conflicts get 422. Optional `revision` guards the **current** target revision even when replying to an older root; the saved reply retains the root's old revision/anchor. Answer first, then say what changed. Leave human threads open for the reviewer. Shared-mode agent replies do not reopen human-started threads. Resolve only roots you started on your owner's report.
    Human comments may start with a [Conventional Comments](https://conventionalcomments.org) label (`issue:`, `todo:`, `suggestion (non-blocking):`, `question:`, `nitpick:`, `praise:`, `thought:`, `chore:`, `note:`). `issue` and `todo` are things to fix; the others are optional or informational. The thread's `blocking` flag still decides what blocks approval.
