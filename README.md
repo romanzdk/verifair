@@ -22,7 +22,7 @@
 
 <br>
 
-![Demo: an agent pushes a report, the author signs it, a reviewer comments on a sentence, the agent answers and pushes version 2, the author signs again and the reviewer approves](docs/images/demo.gif)
+![Demo: a reviewer opens a review from the Inbox, adds a question comment with a label button to the Design section, then approves the implementation](docs/images/demo.gif)
 
 ## Why
 
