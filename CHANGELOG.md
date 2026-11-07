@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Changed
+
+- The README demo shows the full loop: agent publishes, author signs, reviewer comments, agent replies with version 2, author signs again, reviewer approves.
+
 ## [0.9.0] - 2026-11-07
 
 ### Fixed
