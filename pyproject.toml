@@ -1,6 +1,6 @@
 [project]
 name = "verifair"
-version = "0.7.0"
+version = "0.8.0"
 description = "Self-hosted review tool where coding agents publish change reports with evidence and people sign, comment on and approve them"
 readme = "README.md"
 requires-python = ">=3.15"
