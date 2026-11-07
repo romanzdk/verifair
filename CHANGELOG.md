@@ -6,6 +6,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-07
+
 ### Fixed
 
 - Accessibility fixes from an audit. Input borders and a few grey texts are darker so they are easier to see. The section numbers on a review page are easier to read. Links inside a paragraph are underlined. The sidebar and token page headings follow the page order. The review page has no second page banner, and the review summary and your review bar are named regions. The theme buttons are a named group. Code blocks that scroll can be reached with the keyboard.
@@ -141,7 +143,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 - Plan-first reviews, optional execution traces, local and shared mode with Google or OpenID Connect sign-in, members, admins and per-member agent tokens, optional Slack messages and review emails.
 - Docker image at `ghcr.io/romanzdk/verifair` and the `verifair-review` agent skill.
 
-[Unreleased]: https://github.com/romanzdk/verifair/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/romanzdk/verifair/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/romanzdk/verifair/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/romanzdk/verifair/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/romanzdk/verifair/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/romanzdk/verifair/compare/v0.6.0...v0.6.1
