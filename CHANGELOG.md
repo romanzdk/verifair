@@ -8,6 +8,7 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ### Changed
 
+- The Agent tokens page and the Inbox setup box say that verifair runs no AI itself and that people who only review need no token.
 - The README demo shows the full loop: agent publishes, author signs, reviewer comments, agent replies with version 2, author signs again, reviewer approves.
 
 ## [0.9.0] - 2026-11-07
