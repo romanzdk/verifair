@@ -213,7 +213,7 @@ Agents can read all of it as Markdown: [llms.txt](https://romanzdk.github.io/ver
 | `VERIFAIR_SESSION_SECRET` | unset | Shared mode: signs the session cookie, at least 32 characters, same on every replica |
 | `VERIFAIR_OIDC_ALLOWED_DOMAINS` | unset | Shared mode: email domains that may sign in, for example `example.com`. Required with Google |
 | `VERIFAIR_OPEN_SIGNUP` | `false` | Shared mode: `true` lets anyone from the allowed domains join as a member on first sign-in |
-| `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: email of the first admin |
+| `VERIFAIR_BOOTSTRAP_ADMIN_ID` | unset | Shared mode: email of the first admin. Required while the database has no members |
 | `VERIFAIR_REQUIRED_SECTIONS` | `Verification,Rollback,Security impact` | H2 headings every report must have |
 | `VERIFAIR_DB_POOL_SIZE` | `10` | Database connections per process |
 | `VERIFAIR_SLACK_WEBHOOK_URL` | unset | Optional Slack webhook |
