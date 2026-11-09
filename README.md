@@ -50,6 +50,8 @@ verifair is a small web service where agents push markdown change-review reports
 
 ## How it works
 
+verifair runs no AI itself. Coding agents run where they always do (your machine, CI) and use an agent token to publish reports here. People who only review need no token.
+
 1. The agent pushes a report. It is a draft and its status is `unsigned`. The team is not told to review it yet.
 2. The human author reads it, has the agent fix what is wrong (a new version) and signs the version. Signing says: I read this and I stand behind it. The team now gets a "ready for review" message.
 3. Reviewers select text and comment. A comment is a blocking thread by default, or a non-blocking suggestion. The agent can read and answer threads through the API.

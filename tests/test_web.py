@@ -3855,7 +3855,9 @@ SKILL_INSTALL = (
 def test_first_run_and_tokens_page_show_how_to_install_the_skill(client, shared_client):
     assert SKILL_INSTALL in client.get("/").text
     assert SKILL_INSTALL in shared_client.get("/").text
-    assert SKILL_INSTALL in shared_client.get("/access/tokens").text
+    tokens_page = shared_client.get("/access/tokens").text
+    assert SKILL_INSTALL in tokens_page
+    assert "verifair runs no AI itself" in tokens_page and "You need no token" in tokens_page
 
 
 def test_inbox_asks_members_without_a_token_to_connect_their_agent(shared_client, as_user):
@@ -3863,6 +3865,7 @@ def test_inbox_asks_members_without_a_token_to_connect_their_agent(shared_client
         db.push_report(conn, project="p", title="T", risk="low", body="x", id="r", owner_id="o")
     page = shared_client.get("/").text
     assert "Welcome to verifair" not in page and 'id="vf_setup"' in page
+    assert "Connect your coding agent (optional)" in page
     shared_client.post("/access/tokens", data={"label": "laptop", "nonce": "n"})
     assert 'id="vf_setup"' not in shared_client.get("/").text
 

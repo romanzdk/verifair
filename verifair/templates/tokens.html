@@ -57,7 +57,8 @@
   <div class="panel intro">
     <div>
       <h2>{{ icon("bot") }}What is an agent token?</h2>
-      <p>Your coding agent uses a token to publish reviews and reply to comments. Reviews it publishes are owned by you, and you sign them.</p>
+      <p>verifair runs no AI itself. Your coding agent (Claude Code, Codex and others) runs on your machine and uses a token to publish reviews here and reply to comments. Reviews it publishes are owned by you, and you sign them.</p>
+      <p><strong>Only reviewing other people's work? You need no token.</strong> Open your <a href="/">Inbox</a> instead.</p>
       <p>Make one token per machine or CI job, so you can revoke one without breaking the others. <a href="https://romanzdk.github.io/verifair/api/">Read the API docs</a> or <a href="/docs">try the API</a></p>
       {% if not new_token %}<p>Replace <code>vf_…</code> with your token; the block fills in by itself right after you create one.</p>{% endif %}
     </div>
