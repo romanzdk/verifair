@@ -38,7 +38,7 @@ Attaching, replacing or removing a plan creates a new unsigned report version, e
 
 For a plan that needs approval before work starts, the agent creates a review with `workflow: "plan_first"`, one nonblank Markdown `plan`, and no implementation body. Plans can use any headings or none. There is no browser editor or upload form; the agent submits and revises documents through the API. The report keeps the same ID and URL through both stages. A workflow cannot be changed after creation; existing artifact reviews keep their behavior.
 
-1. Open the review. **Plan** is selected while the plan needs action. Sign the displayed plan revision, then have another person review it. Use text selection, a section comment, or **Comment on plan** for a general concern. Signing rules are the same as for reports: owner only in shared mode, existing trusted cookie identities in local mode.
+1. Open the review. **Plan** is selected while the plan needs action. Sign the displayed plan revision, then have another person review it. Use text selection, a section comment, or the **General comments** form for a general concern. Signing rules are the same as for reports: owner only in shared mode, existing trusted cookie identities in local mode.
 2. Reviewers approve the plan or request changes. Its signature and verdicts belong to the exact Markdown revision. Changed text needs a new signature and approval; unchanged text keeps its approval even when an implementation version is added. A revision number is the snapshot that introduced the text, so plan revision numbers can skip integers. Reverting to earlier text after an edit creates a new revision.
 3. After effective plan approval, the status is **Awaiting implementation**. This is still open work. The agent attaches its normal report under the same ID with the latest `expected_version`. It may omit the plan to inherit it or repeat the exact approved text. It cannot change the plan and submit an implementation in the same push.
 4. **Implementation** then becomes the default document. The owner signs its version and another person gives an implementation verdict. The plan's approval does not approve the implementation. Overall **Approved** requires an approved current plan and implementation.
@@ -49,7 +49,7 @@ An unresolved blocking plan thread pauses implementation attachment, updates, si
 
 Changing a plan after implementation exists preserves the body and its commit in a new snapshot. The plan must be approved again before implementation review can proceed, and that new snapshot needs a fresh implementation signature and verdict. Every body-containing snapshot has a separate implementation review, even when its body was inherited unchanged.
 
-History pages show the exact stored Markdown and the signature and verdicts associated with that document revision. Earlier threads may appear as stale concerns; roots from later revisions are excluded. Threads show their live replies, resolution and blocking state, rather than a frozen view of feedback at snapshot creation. Prior and superseded verdicts remain available. **Current review** status, when shown, describes today's gate separately from historical content. Metadata such as title and links keeps its latest value; only document Markdown is versioned.
+History pages show the exact stored Markdown and the signature and verdicts associated with that document revision. Earlier threads may appear as stale concerns; roots from later revisions are excluded. Threads show their live replies, resolution and blocking state, rather than a frozen view of feedback at snapshot creation. Prior and superseded verdicts remain available. **Current:** followed by a status, when shown, describes today's gate separately from historical content. Metadata such as title and links keeps its latest value; only document Markdown is versioned.
 
 ## Execution
 
@@ -73,7 +73,7 @@ The tree expands with keyboard controls, visible focus and text status labels, a
 
 ## Request a review
 
-In shared mode, any member can ask someone to review a change. Under **Reviewers** on the review page, pick a member and press **Request**. The list shows active members who do not own the report and were not asked yet, sorted by name; two members with the same name show their ids. A requested reviewer who has no current verdict on either review target has a **Remove** button. A current plan verdict still protects the request after implementation attachment. Removing a request does not remove comments or verdicts. The person sees the change in their Inbox (**Needs your review**) once the author has signed the actionable document, and in **My reviews**. Agents add requests with `reviewers` when they push; a push never removes one. Requests are changed on the latest snapshot only.
+In shared mode, any member can ask someone to review a change. Under **Reviewers** on the review page, pick a member and press **Request**. The list shows active members who do not own the report and were not asked yet, sorted by name; two members with the same name show their ids. A requested reviewer who has no current verdict on either review target has a **Remove** button. A current plan verdict still protects the request after implementation attachment. Removing a request does not remove comments or verdicts. The person sees the change in their Inbox (**Needs your review**) once the author has signed the actionable document, and in **Assigned to me**. Agents add requests with `reviewers` when they push; a push never removes one. Requests are changed on the latest snapshot only.
 
 In local mode there is no picker. Agents set `reviewers` when they push, and **Remove** works as in shared mode.
 
@@ -106,7 +106,7 @@ https://verifair.example.com/r/prorate
 
 Someone added after the version was signed gets `Bob asked you to review "<title>" (v3, signed by Alice).` as the first line.
 
-Local identities belong to a browser. In shared mode, sign-in supplies the same id (your email) on every device. In local mode, signing a report without an owner records the signer as the owner, and **My changes** also lists unowned reports whose `author` equals your identity. In shared mode only `author_id` counts, and a report without an owner is frozen (see [Report ownership](access.md#report-ownership)).
+Local identities belong to a browser. In shared mode, sign-in supplies the same id (your email) on every device. In local mode, signing a report without an owner records the signer as the owner, and **Created by me** also lists unowned reports whose `author` equals your identity. In shared mode only `author_id` counts, and a report without an owner is frozen (see [Report ownership](access.md#report-ownership)).
 
 ## Signing
 

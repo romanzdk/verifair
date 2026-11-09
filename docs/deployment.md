@@ -29,7 +29,7 @@ CI publishes the image to `ghcr.io/romanzdk/verifair` for `linux/amd64` and `lin
 
 | Tag | Published on |
 | --- | --- |
-| `main`, `sha-<short commit>` (for example `sha-1787484`) | every push to `main` |
+| `main`, `sha-<short commit>` (for example `sha-1787484`) | every push to `main` (`main` only moves for the newest commit, so a slower run for an older commit leaves it alone) |
 | `1.2.3`, `latest`, `sha-<short commit>` | a `v1.2.3` git tag on a commit in `main` |
 
 Each `v1.2.3` tag also creates a GitHub release. Its notes are that version's section of the [changelog](../CHANGELOG.md), with the image and skill install commands.
@@ -57,7 +57,7 @@ The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When a TLS proxy ru
 - To sign people in, set `VERIFAIR_OIDC_ISSUER`, `VERIFAIR_OIDC_CLIENT_ID`, `VERIFAIR_OIDC_CLIENT_SECRET` and `VERIFAIR_SESSION_SECRET` (see [access.md](access.md#set-up-shared-mode)). This turns on shared mode. The email from sign-in becomes the user id; the display name comes from the member list. The name prompt goes away, and signing and approvals are tied to that identity. No auth proxy is needed.
 - With several replicas, give every replica the same `VERIFAIR_SESSION_SECRET`. A replica with another secret does not accept the session cookie and sends people to sign in again.
 - verifair must be able to reach the provider over HTTPS (for Google: `accounts.google.com` and `oauth2.googleapis.com`) for sign-in. Already signed-in people keep working while the provider is down.
-- Set `VERIFAIR_BASE_URL` to the public HTTPS URL, for example `https://verifair.example.com`. It is used in notification links, in the push response and as the sign-in redirect URI (`VERIFAIR_BASE_URL/auth/callback`), and enables secure cookies. Shared mode refuses to start with an HTTP base URL other than `localhost`. Keep the browser on this origin and have the reverse proxy preserve `Sec-Fetch-Site`.
+- Set `VERIFAIR_BASE_URL` to the public HTTPS URL, for example `https://verifair.example.com`. It is used in notification links, in the push response and as the sign-in redirect URI (`VERIFAIR_BASE_URL/auth/callback`), and enables secure cookies. Shared mode refuses to start with an HTTP base URL other than `localhost` and `127.0.0.1`. Keep the browser on this origin and have the reverse proxy preserve `Sec-Fetch-Site`.
 - Serve it at the root of a domain. Sub-paths (like `/verifair/`) are not supported.
 - verifair needs a Postgres 16 or newer database. Its database role must own the schema and the tables, because every start runs the schema SQL, and Postgres 15 and newer does not let every role create tables in `public`. Where Postgres runs in production is not decided here.
 - For a database on another host, add `sslmode=verify-full` (or at least `sslmode=require`) to `VERIFAIR_DATABASE_URL`, for example `postgresql://verifair:secret@db.example.com:5432/verifair?sslmode=verify-full`.

@@ -11,8 +11,7 @@ Primary source at that commit:
 - [SessionManager and SDK persistence](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/coding-agent/src/core/session-manager.ts)
 - [Branch JSONL exporter](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/coding-agent/src/core/session-export.ts)
 
-The pinned public source copies under `/tmp/verifair-phase3/public-sources/pi-mono-release`
-were used to author the shapes. SDK `SessionManager.create`/`appendMessage` uses
+The shapes follow those sources. SDK `SessionManager.create`/`appendMessage` uses
 the same persisted header and message-entry types as CLI sessions, so there is
 no separate SDK schema fixture. The synthetic custom session ID also exercises
 the SDK's documented custom-ID shape.
