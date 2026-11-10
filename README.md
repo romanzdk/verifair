@@ -92,13 +92,15 @@ docker compose up --build
 
 Open http://localhost:8000. The agent token is `change-me`. Set `VERIFAIR_API_TOKEN` before you start to use another one. Users set a display name (kept in a cookie). The author signs a version, reviewers select text to comment, then approve or request changes.
 
-In a second terminal, push the sample report:
+In a second terminal, load the demo reviews (it needs only Python 3):
 
 ```bash
-VERIFAIR_API_TOKEN=change-me bash scripts/push-sample.sh
+VERIFAIR_API_TOKEN=change-me python3 scripts/demo.py
 ```
 
-Open the Inbox, set your name, open the report and sign it. Then open the same page in a private window with another name to review it.
+It adds four reviews by "Alice": a high-risk change, one with an execution trace, a plan waiting for review, and one already at version 2. Running it again skips what is already there.
+
+Set your name to Alice, the demo author, and sign a review. Then open the same page in a private window with another name to comment and approve it.
 
 The compose passwords and token are for local use. Change them for any shared setup.
 

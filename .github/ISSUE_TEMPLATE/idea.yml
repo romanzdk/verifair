@@ -1,0 +1,17 @@
+name: Idea
+description: Suggest a change or a new feature.
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes:
+      label: The problem
+      description: What is hard or missing today? A real example helps most.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What you would like
+  - type: textarea
+    attributes:
+      label: Agent and setup
+      description: Which coding agent you use (Claude Code, Codex, Cursor…) and how you run verifair.
