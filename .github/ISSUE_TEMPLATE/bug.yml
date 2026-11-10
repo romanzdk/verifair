@@ -1,0 +1,29 @@
+name: Bug
+description: Something does not work as the docs say.
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: How to reproduce
+      description: Steps, a request, or a report body that shows it. Remove anything private.
+  - type: input
+    attributes:
+      label: verifair version
+      description: Shown in the sidebar footer, or the image tag you run.
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Mode
+      options: [Local (API token), Shared (sign-in)]
+  - type: textarea
+    attributes:
+      label: Logs
+      description: Relevant log lines. Remove tokens and emails.
+      render: text

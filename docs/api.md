@@ -103,7 +103,7 @@ For updates, reuse `id` and resend the implementation `body` and required fields
 
 Every push creates a new unsigned report version, even if only the plan changes or is removed. A human must sign the new version before review; earlier signatures and verdicts remain historical. Plan context is read-only, with no separate comments or approval. The POST response remains HTTP 201 with `{id, version, url}`. See [Report and Plan](reviewing.md#report-and-plan) for navigation and history.
 
-`scripts/push-sample.sh` pushes the report template as a draft example with the fixed id `sample-prorate-mid-cycle`, so running it again adds a new version. It sends to `http://localhost:8000` unless you set `VERIFAIR_URL`. For any URL that is not localhost it also needs `VERIFAIR_ALLOW_REMOTE=1`:
+`scripts/demo.py` loads four demo reviews into a local server (see the README quickstart). `scripts/push-sample.sh` pushes the report template as a draft example with the fixed id `sample-prorate-mid-cycle`, so running it again adds a new version. It sends to `http://localhost:8000` unless you set `VERIFAIR_URL`. For any URL that is not localhost it also needs `VERIFAIR_ALLOW_REMOTE=1`:
 
 ```bash
 VERIFAIR_API_TOKEN=change-me bash scripts/push-sample.sh

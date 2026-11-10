@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/demo.py` loads four demo reviews into a local server, so the quickstart shows a full Inbox right away.
+
 ## [0.9.1] - 2026-11-09
 
 ### Changed
