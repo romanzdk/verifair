@@ -619,3 +619,8 @@ html:not(.js) .cform:target { display: block; }
   .verdict textarea:disabled { display: none; }
   .verdict .btn { flex: 1; }
 }
+
+.diagram { display: flex; align-items: flex-start; gap: 4px; margin: 12px 0; }
+.diagram img { background: var(--bg); }
+.content img { max-width: 100%; height: auto; border-radius: 6px; }
+.content p > img:only-child { border: 1px solid var(--border); }

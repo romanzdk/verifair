@@ -423,3 +423,84 @@ document.querySelectorAll("input[data-match]").forEach((input) => {
 document.querySelectorAll("pre, .content").forEach((box) => {
   if (box.scrollWidth > box.clientWidth) box.tabIndex = 0;
 });
+
+// Diagrams are drawn as images, so they add no text nodes: the quote offsets the server
+// computed from the Mermaid source stay valid, and the hidden source can still be shown and
+// commented on.
+const MERMAID = "/static/mermaid-12.2.0.min.js";
+let mermaidReady = null;
+
+function svgImage(svg) {
+  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+  const root = doc.documentElement;
+  const box = root.viewBox?.baseVal;
+  if (box?.width) {
+    root.setAttribute("width", box.width);
+    root.setAttribute("height", box.height);
+    root.removeAttribute("style");
+  }
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(root));
+}
+
+function diagramToggle(pre) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "icon-btn";
+  button.title = "Show diagram source";
+  button.setAttribute("aria-label", "Show diagram source");
+  button.setAttribute("aria-expanded", "false");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "ic");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "/static/icons.svg#code");
+  svg.append(use);
+  button.append(svg);
+  button.addEventListener("click", () => {
+    pre.hidden = !pre.hidden;
+    button.setAttribute("aria-expanded", String(!pre.hidden));
+  });
+  return button;
+}
+
+async function drawDiagrams() {
+  const codes = [...document.querySelectorAll("section .content pre > code.language-mermaid:not([data-drawn])")];
+  if (!codes.length) return;
+  mermaidReady ??= new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = MERMAID;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.append(script);
+  });
+  try { await mermaidReady; } catch { mermaidReady = null; return; }
+  const theme = document.documentElement.dataset.theme
+    || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const font = getComputedStyle(document.body).fontFamily;
+  mermaid.initialize({
+    startOnLoad: false, securityLevel: "strict", htmlLabels: false,
+    flowchart: { htmlLabels: false }, theme: theme === "dark" ? "dark" : "default", fontFamily: font,
+  });
+  for (const [i, code] of codes.entries()) {
+    code.dataset.drawn = "";
+    const pre = code.parentElement;
+    const id = `vf_diagram_${Date.now()}_${i}`;
+    try {
+      const { svg } = await mermaid.render(id, code.textContent);
+      const img = document.createElement("img");
+      img.alt = "Diagram";
+      img.src = svgImage(svg);
+      const figure = document.createElement("div");
+      figure.className = "diagram";
+      figure.append(img, diagramToggle(pre));
+      pre.before(figure);
+      pre.hidden = !pre.querySelector("mark");
+      figure.querySelector("button").setAttribute("aria-expanded", String(!pre.hidden));
+    } catch {
+      document.getElementById(`d${id}`)?.remove();
+    }
+  }
+}
+
+drawDiagrams();
+document.body.addEventListener("htmx:afterSwap", drawDiagrams);
