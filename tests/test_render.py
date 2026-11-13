@@ -523,3 +523,13 @@ def test_external_images_become_links_and_local_ones_stay():
     assert "<img" in render_markdown("![dot](data:image/png;base64,iVBORw0KGgo=)")
     assert "<img" not in render_markdown("![x](//evil.example/x.png)")
     assert "&lt;b&gt;" in render_markdown("![<b>](https://e.com/x.png)")
+
+
+def test_mermaid_fence_stays_a_code_block_the_page_script_can_find():
+    html = render.render_markdown("```mermaid\nflowchart LR\n  A --> B\n```")
+    assert html == '<pre><code class="language-mermaid">flowchart LR\n  A --&gt; B\n</code></pre>\n'
+
+
+def test_uploaded_image_path_renders_as_an_image():
+    html = render.render_markdown("![Inbox](/images/" + "a" * 64 + ".png)")
+    assert html == f'<p><img src="/images/{"a" * 64}.png" alt="Inbox" /></p>\n'
