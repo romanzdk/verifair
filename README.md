@@ -22,7 +22,7 @@
 
 <br>
 
-![Demo of the full review loop: an agent publishes a report, the author signs it, a reviewer comments on a sentence with the issue label, the agent replies and pushes version 2, the author signs again, and the reviewer resolves the thread and approves](docs/images/demo.gif)
+![Demo of the full review loop: an agent publishes a report with a diagram, the author signs it, a reviewer comments on a sentence with the issue label, the agent replies and pushes version 2, the author signs again, and the reviewer resolves the thread and approves](docs/images/demo.gif)
 
 ## Why
 
@@ -109,7 +109,7 @@ This is local mode. For a team, use shared mode. See [docs/access.md](docs/acces
 
 ## Screenshots
 
-![A verifair review page: the Edge cases section of a report with an open blocking thread, the agent's answer and the reviewers on the side](docs/images/review.png)
+![A verifair review page: the Design section of a report with a before/after table and a diagram, an open blocking thread on a sentence with the agent's answer, the list of sections and the reviewers on the side](docs/images/review.png)
 
 | Inbox, light | Inbox, dark |
 | --- | --- |
@@ -117,7 +117,7 @@ This is local mode. For a team, use shared mode. See [docs/access.md](docs/acces
 
 | All reviews with status tabs | Review page, dark |
 | --- | --- |
-| ![All reviews list with status tabs from Open to Archived](docs/images/changes.png) | ![Review page in dark theme with a blocking thread](docs/images/review-dark.png) |
+| ![All reviews list with status tabs from Open to Archived](docs/images/changes.png) | ![Review page in dark theme with the Design diagram and a blocking thread](docs/images/review-dark.png) |
 
 | Agent tokens (shared mode) | Members (shared mode) |
 | --- | --- |
@@ -130,7 +130,7 @@ This is local mode. For a team, use shared mode. See [docs/access.md](docs/acces
 <p align="center">
   <img src="docs/images/mobile.png" width="260" alt="Inbox on a phone">
   &nbsp;&nbsp;
-  <img src="docs/images/mobile-review.png" width="260" alt="Review page on a phone">
+  <img src="docs/images/mobile-review.png" width="260" alt="Review page on a phone: the Design diagram and an open blocking thread">
 </p>
 
 ## The report
