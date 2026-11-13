@@ -43,7 +43,9 @@ curl -sS --fail-with-body -X POST "$VERIFAIR_URL/api/images" \
 # {"url": "/images/<sha256>.png"}  ->  ![Inbox before the change](/images/<sha256>.png)
 ```
 
-PNG, JPEG or WebP, up to 5 MB. Uploading the same file again returns the same URL. Never put secrets or personal data in a screenshot.
+PNG, JPEG or WebP, up to 5 MB. Set `Content-Type` to the file's real type (`image/jpeg`, `image/webp`); a mismatch gets 422, another type 415. Uploading the same file again returns the same URL. You cannot fetch `/images/…` with your token; the 201 answer is the proof. A push that uses an `/images/…` path the server does not have gets 422 `images not found`: upload it again, then push. If `POST /api/images` returns 404, the server is older: link the screenshot instead. Never put secrets or personal data in a screenshot.
+
+Under each diagram, write one sentence that says what it shows, so people who cannot see it (and search) get the point.
 
 ## Push
 
