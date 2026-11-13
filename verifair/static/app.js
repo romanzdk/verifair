@@ -78,7 +78,12 @@ document.addEventListener("mouseup", (event) => {
     popover.hidden = true;
     return;
   }
-  pending = { section: within.section, text, range: within.range };
+  // the browser leaves hidden text out of a selection, but the server matches quotes against the
+  // diagram source too, so a selection across a diagram takes the full text and shows the source
+  const hidden = [...within.section.querySelectorAll(".diagram + pre[hidden]")]
+    .filter((pre) => within.range.intersectsNode(pre));
+  hidden.forEach((pre) => showSource(pre, true));
+  pending = { section: within.section, text: hidden.length ? within.range.toString().trim() : text, range: within.range };
   placePopover(within.range.getBoundingClientRect());
 });
 
@@ -187,6 +192,24 @@ function clearHighlights() {
   if (window.CSS?.highlights) CSS.highlights.delete("vf-quote");
 }
 
+// A highlight over a whole range also paints over the diagram images inside it, so it is built
+// from the range's text pieces only
+function textRanges(range) {
+  const root = range.commonAncestorContainer;
+  const walker = document.createTreeWalker(root.nodeType === Node.ELEMENT_NODE ? root : root.parentNode, NodeFilter.SHOW_TEXT);
+  const pieces = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (!range.intersectsNode(node)) continue;
+    const piece = document.createRange();
+    piece.selectNodeContents(node);
+    if (node === range.startContainer) piece.setStart(node, range.startOffset);
+    if (node === range.endContainer) piece.setEnd(node, range.endOffset);
+    pieces.push(piece);
+  }
+  return pieces;
+}
+
 function highlight() {
   clearHighlights();
   const spanning = [];
@@ -203,7 +226,7 @@ function highlight() {
     }
   });
   if (spanning.length && window.CSS?.highlights) {
-    CSS.highlights.set("vf-quote", new Highlight(...spanning));
+    CSS.highlights.set("vf-quote", new Highlight(...spanning.flatMap(textRanges)));
   }
 }
 
