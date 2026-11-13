@@ -63,6 +63,7 @@ EXPLORER_DARK = (
     "img,video{filter:invert(100%) hue-rotate(180deg)}"
 )
 MAX_BODY = 1024 * 1024
+MAX_IMAGE = 5 * 1024 * 1024
 READYZ_TIMEOUT = 2
 log = logging.getLogger("verifair")
 SIGN_IN = "Sign in to use verifair."
@@ -165,8 +166,9 @@ class BodyLimit:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
+        limit = MAX_IMAGE if scope["path"] == "/api/images" else self.limit
         declared = Headers(scope=scope).get("content-length", "")
-        if declared.isdigit() and int(declared) > self.limit:
+        if declared.isdigit() and int(declared) > limit:
             return await JSONResponse(TOO_LARGE, 413)(scope, receive, send)
         received = 0
         refused = False
@@ -179,7 +181,7 @@ class BodyLimit:
                 return {"type": "http.disconnect"}
             message = await receive()
             received += len(message.get("body", b""))
-            if received > self.limit:
+            if received > limit:
                 refused = True
                 await JSONResponse(TOO_LARGE, 413)(scope, receive, send)
                 return {"type": "http.disconnect"}
@@ -320,7 +322,7 @@ def create_app(settings: Settings) -> FastAPI:
             response = PlainTextResponse(DB_UNAVAILABLE, 503, headers={"Retry-After": "5"})
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
-        if not path.startswith("/static/"):
+        if not path.startswith(("/static/", "/images/")):
             response.headers["Cache-Control"] = "no-store"
         if settings.https:
             # a day, so a broken certificate does not lock users out for long

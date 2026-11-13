@@ -14,7 +14,7 @@ from urllib.parse import quote as url_quote
 from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 from pydantic import AfterValidator
@@ -1022,6 +1022,16 @@ def _report_page(id, request, conn, user, tab, version=None):
             }
         ctx["active_project"] = report["project"]
         return _page(request, conn, user, "report.html", ctx)
+
+
+@router.get("/images/{name}")
+def image(name: str, conn: Conn):
+    id, _, ext = name.partition(".")
+    row = db.get_image(conn, id) if len(id) == 64 else None
+    if row is None or db.IMAGE_EXTENSIONS.get(row["content_type"]) != ext:
+        raise HTTPException(404, "image not found")
+    cache = "private, max-age=31536000, immutable"
+    return Response(row["data"], media_type=row["content_type"], headers={"Cache-Control": cache})
 
 
 @router.get("/r/{id}")
