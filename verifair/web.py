@@ -1025,13 +1025,17 @@ def _report_page(id, request, conn, user, tab, version=None):
 
 
 @router.get("/images/{name}")
-def image(name: str, conn: Conn):
+def image(name: str, request: Request, conn: Conn):
     id, _, ext = name.partition(".")
-    row = db.get_image(conn, id) if len(id) == 64 else None
-    if row is None or db.IMAGE_EXTENSIONS.get(row["content_type"]) != ext:
+    content_type = db.image_type(conn, id) if len(id) == 64 else None
+    if content_type is None or db.IMAGE_EXTENSIONS.get(content_type) != ext:
         raise HTTPException(404, "image not found")
-    cache = "private, max-age=31536000, immutable"
-    return Response(row["data"], media_type=row["content_type"], headers={"Cache-Control": cache})
+    # the id is the content hash, so the ETag never changes; revalidating keeps a deleted image
+    # from being served out of a browser cache
+    headers = {"Cache-Control": "private, no-cache", "ETag": f'"{id}"'}
+    if request.headers.get("if-none-match") == headers["ETag"]:
+        return Response(status_code=304, headers=headers)
+    return Response(db.image_data(conn, id), media_type=content_type, headers=headers)
 
 
 @router.get("/r/{id}")

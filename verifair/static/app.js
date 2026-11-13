@@ -429,43 +429,9 @@ document.querySelectorAll("pre, .content").forEach((box) => {
 // commented on.
 const MERMAID = "/static/mermaid-12.2.0.min.js";
 let mermaidReady = null;
+let diagramCount = 0;
 
-function svgImage(svg) {
-  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
-  const root = doc.documentElement;
-  const box = root.viewBox?.baseVal;
-  if (box?.width) {
-    root.setAttribute("width", box.width);
-    root.setAttribute("height", box.height);
-    root.removeAttribute("style");
-  }
-  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(root));
-}
-
-function diagramToggle(pre) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "icon-btn";
-  button.title = "Show diagram source";
-  button.setAttribute("aria-label", "Show diagram source");
-  button.setAttribute("aria-expanded", "false");
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", "ic");
-  svg.setAttribute("aria-hidden", "true");
-  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", "/static/icons.svg#code");
-  svg.append(use);
-  button.append(svg);
-  button.addEventListener("click", () => {
-    pre.hidden = !pre.hidden;
-    button.setAttribute("aria-expanded", String(!pre.hidden));
-  });
-  return button;
-}
-
-async function drawDiagrams() {
-  const codes = [...document.querySelectorAll("section .content pre > code.language-mermaid:not([data-drawn])")];
-  if (!codes.length) return;
+function loadMermaid() {
   mermaidReady ??= new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = MERMAID;
@@ -473,34 +439,130 @@ async function drawDiagrams() {
     script.onerror = reject;
     document.head.append(script);
   });
-  try { await mermaidReady; } catch { mermaidReady = null; return; }
+  return mermaidReady;
+}
+
+function setupMermaid() {
   const theme = document.documentElement.dataset.theme
     || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-  const font = getComputedStyle(document.body).fontFamily;
   mermaid.initialize({
-    startOnLoad: false, securityLevel: "strict", htmlLabels: false,
-    flowchart: { htmlLabels: false }, theme: theme === "dark" ? "dark" : "default", fontFamily: font,
+    startOnLoad: false, securityLevel: "strict", htmlLabels: false, flowchart: { htmlLabels: false },
+    maxTextSize: 20000, maxEdges: 300,
+    theme: theme === "dark" ? "dark" : "default", fontFamily: getComputedStyle(document.body).fontFamily,
   });
-  for (const [i, code] of codes.entries()) {
-    code.dataset.drawn = "";
+}
+
+async function diagramImage(source) {
+  const id = `vf_diagram_${++diagramCount}`;
+  let svg;
+  try {
+    ({ svg } = await mermaid.render(id, source));
+  } finally {
+    document.getElementById(`d${id}`)?.remove();
+  }
+  const root = new DOMParser().parseFromString(svg, "image/svg+xml").documentElement;
+  const box = root.viewBox?.baseVal;
+  if (box?.width) {
+    root.setAttribute("width", box.width);
+    root.setAttribute("height", box.height);
+    root.removeAttribute("style");
+  }
+  const labels = [...new Set([...root.querySelectorAll("text")].map((t) => [...t.querySelectorAll("tspan:not(:has(tspan))")].map((line) => line.textContent).join(" ").replace(/\s+/g, " ").trim() || t.textContent.trim()).filter(Boolean))];
+  const alt = labels.length ? `Diagram: ${labels.join(", ")}`.slice(0, 500) : "Diagram";
+  const src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(root));
+  return { src, alt };
+}
+
+function sourceHasThread(pre) {
+  const section = pre.closest("section");
+  const content = section?.querySelector(".content");
+  return !!content && [...document.querySelectorAll('.thread[data-quote][data-found="true"]')].some((thread) =>
+    thread.dataset.sectionSlug === section.id
+    && findRange(content, thread.dataset.quote, thread.dataset.matchStart)?.intersectsNode(pre));
+}
+
+function showSource(pre, shown) {
+  pre.hidden = !shown;
+  const button = document.querySelector(`[aria-controls="${pre.id}"]`);
+  const label = shown ? "Hide diagram source" : "Show diagram source";
+  button?.setAttribute("aria-expanded", String(shown));
+  button?.setAttribute("aria-label", label);
+  if (button) button.title = label;
+}
+
+function diagramToggle(pre) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "icon-btn";
+  button.setAttribute("aria-controls", pre.id);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "ic");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "/static/icons.svg#code");
+  svg.append(use);
+  button.append(svg);
+  button.addEventListener("click", () => showSource(pre, pre.hidden));
+  return button;
+}
+
+async function drawDiagrams() {
+  const codes = [...document.querySelectorAll("section .content pre > code.language-mermaid:not([data-drawn])")];
+  if (!codes.length) return;
+  codes.forEach((code) => { code.dataset.drawn = ""; });
+  try {
+    await loadMermaid();
+  } catch (error) {
+    console.warn("verifair: Mermaid did not load", error);
+    mermaidReady = null;
+    codes.forEach((code) => { delete code.dataset.drawn; });
+    return;
+  }
+  setupMermaid();
+  for (const code of codes) {
     const pre = code.parentElement;
-    const id = `vf_diagram_${Date.now()}_${i}`;
     try {
-      const { svg } = await mermaid.render(id, code.textContent);
+      const { src, alt } = await diagramImage(code.textContent);
       const img = document.createElement("img");
-      img.alt = "Diagram";
-      img.src = svgImage(svg);
+      Object.assign(img, { src, alt });
+      const scroll = document.createElement("div");
+      scroll.className = "diagram-scroll";
+      scroll.append(img);
+      img.addEventListener("load", () => { scroll.tabIndex = scroll.scrollWidth > scroll.clientWidth ? 0 : -1; });
+      pre.id ||= `vf_src_${diagramCount}`;
       const figure = document.createElement("div");
       figure.className = "diagram";
-      figure.append(img, diagramToggle(pre));
+      figure.append(scroll, diagramToggle(pre));
       pre.before(figure);
-      pre.hidden = !pre.querySelector("mark");
-      figure.querySelector("button").setAttribute("aria-expanded", String(!pre.hidden));
-    } catch {
-      document.getElementById(`d${id}`)?.remove();
+      showSource(pre, sourceHasThread(pre));
+    } catch (error) {
+      console.warn("verifair: diagram not drawn", error);
+      pre.classList.add("diagram-failed");
+    }
+  }
+}
+
+async function redrawDiagrams() {
+  if (!mermaidReady || !window.mermaid) return;
+  setupMermaid();
+  for (const figure of document.querySelectorAll(".diagram")) {
+    const code = figure.nextElementSibling?.querySelector("code.language-mermaid");
+    const img = figure.querySelector("img");
+    if (!code || !img) continue;
+    try {
+      Object.assign(img, await diagramImage(code.textContent));
+    } catch (error) {
+      console.warn("verifair: diagram not redrawn", error);
     }
   }
 }
 
 drawDiagrams();
-document.body.addEventListener("htmx:afterSwap", drawDiagrams);
+document.body.addEventListener("htmx:afterSwap", () => {
+  drawDiagrams();
+  document.querySelectorAll(".diagram + pre").forEach((pre) => { if (sourceHasThread(pre)) showSource(pre, true); });
+});
+globalThis.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", redrawDiagrams);
+if (typeof MutationObserver !== "undefined") {
+  new MutationObserver(redrawDiagrams).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}

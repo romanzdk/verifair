@@ -212,6 +212,8 @@ def _write_error(error: Exception) -> JSONResponse:
         )
     if isinstance(error, db.PlanNotApproved):
         return JSONResponse({"detail": str(error), "plan_revision": error.plan_revision}, 409)
+    if isinstance(error, db.MissingImages):
+        return JSONResponse({"detail": str(error), "images": error.ids}, 422)
     return JSONResponse(
         {"detail": str(error)},
         409 if isinstance(error, (db.WorkflowMismatch, db.MissingDocument)) else 422,
@@ -285,7 +287,23 @@ IMAGE_MAGIC = {
 }
 
 
-@router.post("/images", status_code=201)
+IMAGE_BODY = {
+    "required": True,
+    "content": {t: {"schema": {"type": "string", "format": "binary"}} for t in IMAGE_MAGIC},
+}
+
+
+class ImageOut(BaseModel):
+    url: str
+
+
+@router.post(
+    "/images",
+    status_code=201,
+    response_model=ImageOut,
+    openapi_extra={"requestBody": IMAGE_BODY},
+    responses={413: {"description": "Over 5 MB"}, 415: {"description": "Not PNG, JPEG or WebP"}},
+)
 async def upload_image(request: Request):
     content_type = request.headers.get("content-type", "").partition(";")[0].strip().lower()
     if content_type not in IMAGE_MAGIC:
