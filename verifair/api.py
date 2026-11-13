@@ -278,6 +278,26 @@ def _metadata_supplied(sent: set[str]) -> set[str]:
     return sent | PROVENANCE if sent & PROVENANCE else sent
 
 
+IMAGE_MAGIC = {
+    "image/png": b"\x89PNG\r\n\x1a\n",
+    "image/jpeg": b"\xff\xd8\xff",
+    "image/webp": b"RIFF",
+}
+
+
+@router.post("/images", status_code=201)
+async def upload_image(request: Request):
+    content_type = request.headers.get("content-type", "").partition(";")[0].strip().lower()
+    if content_type not in IMAGE_MAGIC:
+        raise HTTPException(415, "Send a PNG, JPEG or WebP image.")
+    data = await request.body()
+    webp = content_type == "image/webp"
+    if not data.startswith(IMAGE_MAGIC[content_type]) or (webp and data[8:12] != b"WEBP"):
+        raise HTTPException(422, f"The file is not a valid {content_type}.")
+    id = await run_with_conn(request.app, db.save_image, data, content_type)
+    return {"url": f"/images/{id}.{db.IMAGE_EXTENSIONS[content_type]}"}
+
+
 @router.post("/reports", status_code=201)
 def push_report(body: ReportIn, request: Request, conn: Conn, background: BackgroundTasks):
     if body.body is not None:

@@ -118,6 +118,12 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     last_used_at TEXT,
     seq BIGINT GENERATED ALWAYS AS IDENTITY
 );
+CREATE TABLE IF NOT EXISTS images (
+    id TEXT PRIMARY KEY,
+    content_type TEXT NOT NULL,
+    data BYTEA NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS comments_report_parent ON comments(report_id, parent_id);
 CREATE INDEX IF NOT EXISTS verdicts_report ON verdicts(report_id);
 CREATE INDEX IF NOT EXISTS reports_project ON reports(project);
@@ -720,11 +726,43 @@ def delete_report(conn: Connection, id: str) -> bool:
     with _write(conn):
         if _lock_report(conn, id) is None:
             return False
+        images = _images_used(conn, "WHERE report_id=%s", (id,))
         for table in ("comments", "verdicts", "signatures", "review_requests", "versions"):
             conn.execute(f"DELETE FROM {table} WHERE report_id=%s", (id,))
         conn.execute("DELETE FROM reports WHERE id=%s", (id,))
+        if images:
+            images -= _images_used(conn, "", ())
+            conn.execute("DELETE FROM images WHERE id = ANY(%s)", (list(images),))
     log.info("report deleted id=%s", id)
     return True
+
+
+IMAGE_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+IMAGE_URL = re.compile(r"/images/([0-9a-f]{64})\.")
+
+
+def _images_used(conn: Connection, where: str, params: tuple) -> set[str]:
+    rows = conn.execute(
+        f"SELECT body AS text FROM versions {where} UNION ALL SELECT plan FROM versions {where}"
+        f" UNION ALL SELECT body FROM comments {where}",
+        params * 3,
+    )
+    return {m for row in rows if row["text"] for m in IMAGE_URL.findall(row["text"])}
+
+
+def save_image(conn: Connection, data: bytes, content_type: str) -> str:
+    id = hashlib.sha256(data).hexdigest()
+    with _write(conn):
+        conn.execute(
+            "INSERT INTO images (id, content_type, data, created_at) VALUES (%s, %s, %s, %s)"
+            " ON CONFLICT (id) DO NOTHING",
+            (id, content_type, data, _now()),
+        )
+    return id
+
+
+def get_image(conn: Connection, id: str) -> Row | None:
+    return conn.execute("SELECT content_type, data FROM images WHERE id=%s", (id,)).fetchone()
 
 
 def _by_report(conn: Connection, sql: str, ids: list[str]) -> dict[str, list[Row]]:
