@@ -63,7 +63,7 @@ Expand the indented call tree to read kind, title, status and known timing. Deta
 
 A diagram in a report is drawn from its Mermaid source. To comment on part of it, open the source with the **Show diagram source** button (the `<>` icon next to the diagram) and select the text there. Screenshots the agent uploaded show inline.
 
-The report header shows the ticket and any merge or pull request from the report's links as a short label made from the URL, such as `billing-service!231`. The labels the agent sent stay in the **Links** line at the bottom. See [API](api.md) for the rules.
+The report header shows the ticket and any merge or pull request from the report's links as a short label made from the URL, such as `billing-service!231`. Any other links the agent sent stay in the **Links** line at the bottom, with its labels. Reports in the current template list their merge requests in the **Changes** section. See [API](api.md) for the rules.
 
 ![Execution tab: the ticket and merge request links in the header, then the attachment version, reported commit and plan revision, two imported Claude Code runs with partial coverage warnings, and the call tree with a failed pytest run opened next to the plan used for this implementation](images/execution.png)
 
