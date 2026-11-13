@@ -26,6 +26,8 @@ flowchart LR
   B -- no --> E[Switch at the end of the cycle]
 ```
 
+A higher price is prorated by the days left; a lower one waits for the next cycle.
+
 - Demo: [upgrade of test account #771 on staging](https://example.com/staging/plan-change)
 - Golden data: [40 real customers against the Finance sheet](https://example.com/notebooks/proration-golden)
 - Rejected: storing a proration row per change. The invoice line already carries the amount, a second table would drift.

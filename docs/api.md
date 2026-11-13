@@ -382,9 +382,13 @@ curl -sS --fail-with-body -X POST "$VERIFAIR_URL/api/images" \
   -H "Authorization: Bearer $VERIFAIR_API_TOKEN" -H "Content-Type: image/png" --data-binary @inbox.png
 ```
 
-The answer is `201 {"url": "/images/<sha256>.png"}`. Use that path in the report: `![Inbox after the change](/images/<sha256>.png)`. The same file always gets the same URL. Other types get 415 `"Send a PNG, JPEG or WebP image."`; a file whose bytes do not match the type gets 422 `"The file is not a valid image/png."`.
+The answer is `201 {"url": "/images/<sha256>.png"}`. Use that path in the report: `![Inbox after the change](/images/<sha256>.png)`. The same file always gets the same URL. Other types get 415 `"Send a PNG, JPEG or WebP image."`. verifair checks only that the file starts with the signature of the type you sent; a file that does not gets 422 `"The file is not a valid image/png."`. It does not decode the image, so send the real file.
 
-`GET /images/<sha256>.<ext>` serves the image to anyone who can open reports: everyone in local mode, signed-in members in shared mode. Deleting a report deletes the images that only it used, in any version, plan or comment. An image that no report uses yet is kept.
+A report or plan that uses an `/images/…` path that does not exist is refused with 422 `{"detail": "images not found", "images": ["<sha256>"]}` and nothing is saved. Upload the file again and push again.
+
+`GET /images/<sha256>.<ext>` serves the image to anyone who can open reports: everyone in local mode, signed-in members in shared mode. Agent tokens do not work there, so treat the 201 answer as the proof that the upload worked. Browsers revalidate the image on each view (`Cache-Control: private, no-cache` with an `ETag`), so a deleted image stops showing.
+
+Deleting a report deletes the images that only it used, in any version, plan or comment. It also deletes images uploaded more than 7 days ago that no report uses.
 
 ## Get the agent skill
 
@@ -403,7 +407,7 @@ d=~/.claude/skills/verifair-review && mkdir -p "$d" && curl -fsS -H "Authorizati
 | 404 | `"report not found"`, `"version not found"`, `"parent not found"` or `"comment not found"` |
 | 409 | `"id belongs to another project"`, `"This report is archived. Restore it before pushing a new version."`, `"workflow cannot be changed"`, `"review changed"` with `current_version`, `"document changed"` with `target`/`current_revision`, `"current plan is not approved"` with `plan_revision`, or `"implementation has not been attached"` |
 | 415 | `"Send a PNG, JPEG or WebP image."` (`POST /api/images`) |
-| 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"quote not found"`, `"ambiguous quote"`, `"unknown section"`, `"missing sections"`, workflow/content/guard errors described above, `"artifact plans are read-only"`, `"plan revision is required"`, `"reply target conflicts with root target"`, or, in shared mode, `"inactive reviewers"` |
+| 422 | a list of field errors (pydantic style), `"images not found"` with `images`, `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"quote not found"`, `"ambiguous quote"`, `"unknown section"`, `"missing sections"`, workflow/content/guard errors described above, `"artifact plans are read-only"`, `"plan revision is required"`, `"reply target conflicts with root target"`, or, in shared mode, `"inactive reviewers"` |
 | 413 | `"request body too large"`: the request body is over 1 MB (1,048,576 bytes), or 5 MB for `POST /api/images`. Checked before the body is parsed, for API and web routes |
 | 503 | not JSON: the plain text `The database is not available. Try again in a moment.` with a `Retry-After: 5` header. The database cannot be reached, or no connection was free within 10 seconds. Web pages answer the same way. If the connection drops while a write is being saved, the change may already be stored: read it back before sending it again |
 

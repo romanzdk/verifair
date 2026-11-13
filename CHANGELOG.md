@@ -10,11 +10,11 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 - `scripts/demo.py` loads four demo reviews into a local server, so the quickstart shows a full Inbox right away.
 - Mermaid diagrams: a ```` ```mermaid ```` block in a report or plan is drawn as a diagram, with a button that shows its source so it can still be quoted. Mermaid 12.2.0 is served by verifair itself and loads only on pages that have a diagram.
-- `POST /api/images` uploads a PNG, JPEG or WebP screenshot (up to 5 MB) and returns a `/images/…` URL to use in a report. Deleting a report deletes the images only it used.
+- `POST /api/images` uploads a PNG, JPEG or WebP screenshot (up to 5 MB) and returns a `/images/…` URL to use in a report. A push that uses an unknown `/images/…` path is refused with 422 `images not found`. Deleting a report deletes the images only it used, and images no report has used for 7 days.
 
 ### Changed
 
-- New report layout: Intent, Design, Edge cases, Verification, Not verified, Rollback, Security impact, Agent reviews, Judge this, Changes. Design shows a before/after, a diagram and links to runs instead of merge requests. Agent reviews is one row per review round with counts. Judge this comes after the evidence. Changes lists every merge request in merge order. The template, the agent skill and the demo reviews follow it; older reports keep their layout.
+- New report layout: Intent, Design, Edge cases, Verification, Not verified, Rollback, Security impact, Agent reviews, Judge this, Changes. Design shows a before/after, a diagram and links to runs instead of merge requests. Agent reviews is one row per review round with counts. Judge this comes after the evidence. Changes lists every merge request in merge order. The template, the agent skill and the demo reviews follow it; older reports keep their layout. If you set `VERIFAIR_REQUIRED_SECTIONS` yourself, drop `Links` from it: the new template has no Links section.
 
 ## [0.9.1] - 2026-11-09
 
