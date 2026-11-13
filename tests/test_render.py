@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -322,7 +323,6 @@ def test_report_template_has_ten_sections_and_no_html_comments():
     sections = split_sections(body)
     assert [s.heading for s in sections] == [
         "Intent",
-        "Judge this",
         "Design",
         "Edge cases",
         "Verification",
@@ -330,9 +330,12 @@ def test_report_template_has_ten_sections_and_no_html_comments():
         "Rollback",
         "Security impact",
         "Agent reviews",
-        "Links",
+        "Judge this",
+        "Changes",
     ]
     assert all("&lt;!--" not in s.html and s.html.startswith("<blockquote>") for s in sections)
+    skill = (Path(__file__).parents[1] / "skills" / "verifair-review" / "SKILL.md").read_text()
+    assert re.findall(r"^\| `## ([^`]+)` \|", skill, re.M) == [s.heading for s in sections]
 
 
 def test_section_less_threads_are_general_not_orphaned(conn):

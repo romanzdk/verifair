@@ -19,9 +19,6 @@ def body(intent, judge, design, edges, verification, not_verified, rollback, sec
     return f"""## Intent
 {intent}
 
-## Judge this
-{judge}
-
 ## Design
 {design}
 
@@ -45,9 +42,17 @@ def body(intent, judge, design, edges, verification, not_verified, rollback, sec
 {security}
 
 ## Agent reviews
-| Finding | Severity | Outcome | Reason |
-|---|---|---|---|
+| Round | Reviewers | Findings | Fixed | Dismissed |
+|---|---|---|---|---|
 {reviews}
+
+## Judge this
+{judge}
+
+## Changes
+| # | Repo | Merge request | What it changes | Status |
+|---|---|---|---|---|
+| 1 | demo | local only | the change described above | open |
 """
 
 
@@ -58,6 +63,10 @@ ROUNDING = body(
     " Is that fine until the follow-up?",
     "`round_amount(amount, currency)` reads minor units from the currency table."
     " All three callers pass the currency.\n\n"
+    "| | 1234.6 JPY | 1.2346 BHD |\n|---|---|---|\n"
+    "| Before | 1234.60 | 1.23 |\n| After | 1235 | 1.235 |\n\n"
+    "```mermaid\nflowchart LR\n"
+    "  A[Amount] --> B[Look up currency] --> C[Round to its minor units]\n```\n\n"
     "Rejected: rounding only the total. It changes every stored line amount.",
     "| JPY | 0 decimals | `test_jpy_rounding` |\n"
     "| BHD | 3 decimals | `test_bhd_rounding` |\n"
@@ -66,7 +75,7 @@ ROUNDING = body(
     "- JPY totals can drift by one minor unit (found by the review sub-agent, see Execution).",
     "Revert the commit. No data changes.",
     "None.",
-    "| JPY total drift | medium | not fixed | Needs a product decision, listed above |",
+    "| 1 | Python, quant | 2 | 1 | 1 |\n| 2 | Python, quant | 0 | 0 | 0 |",
 )
 
 
@@ -174,7 +183,7 @@ CACHE_V1 = body(
     "- Memory use with all 40k products was not measured.",
     "Revert the commit.",
     "None.",
-    "| none | — | — | — |",
+    "| 1 | Python | 0 | 0 | 0 |",
 )
 
 CACHE_V2 = body(
@@ -190,7 +199,7 @@ CACHE_V2 = body(
     "- None left.",
     "Revert the commit.",
     "None.",
-    "| none | — | — | — |",
+    "| 1 | Python | 0 | 0 | 0 |",
 )
 
 REPORTS = [

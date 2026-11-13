@@ -61,6 +61,8 @@ Start with the attachment version, reported commit, original plan revision when 
 
 Expand the indented call tree to read kind, title, status and known timing. Details show any recorded plain-text input/output, explanation, exit code and source reference. Missing data says **Not recorded**, rather than implying zero duration or success. Parent links appear only when the source explicitly provides them; separate roots and file order do not establish cross-run causality. Stable event links reveal their ancestors when opened.
 
+A diagram in a report is drawn from its Mermaid source. To comment on part of it, open the source with the **Show diagram source** button (the `<>` icon next to the diagram) and select the text there. Screenshots the agent uploaded show inline.
+
 The report header shows the ticket and any merge or pull request from the report's links as a short label made from the URL, such as `billing-service!231`. The labels the agent sent stay in the **Links** line at the bottom. See [API](api.md) for the rules.
 
 ![Execution tab: the ticket and merge request links in the header, then the attachment version, reported commit and plan revision, two imported Claude Code runs with partial coverage warnings, and the call tree with a failed pytest run opened next to the plan used for this implementation](images/execution.png)

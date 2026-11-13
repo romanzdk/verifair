@@ -1,21 +1,33 @@
 ## Intent
-> The problem in plain words, the ticket, and what this change does not cover.
+> The problem in plain words, the ticket, what this change does not cover, and the decision the reader will be asked to make.
 
 Customers who upgrade mid-month are charged the full new price today. Finance wants the charge prorated by remaining days, so an upgrade on day 20 of 30 costs one third of the difference.
 
 **Out of scope:** downgrades (stay end-of-cycle), annual plans.
 
-## Judge this
-> The questions only a human can answer: product intent, trade-offs, risk you accept.
-
-- Is "first day" the day the cycle starts, or the day after the previous invoice?
-- Is rounding once at the end acceptable to Finance, or should each line round?
+**You will be asked:** when the proration starts, and whether rounding once is fine for Finance.
 
 ## Design
-> How it works in a few lines, plus one alternative you rejected and why.
+> What changes, shown rather than told: a before/after example, a diagram, links to runs, demos or screenshots. One alternative you rejected and why. Merge requests go in Changes.
 
-- New `prorate(old, new, cycle_start, cycle_end, today)` in the pricing module. Pure function, no I/O.
-- Called from the plan-change handler only when the new price is higher.
+A new pure function, `prorate()`, is called by the plan-change handler only when the new price is higher.
+
+**Before / after:** upgrade from 10 EUR to 40 EUR on day 20 of a 30-day cycle.
+
+| | Invoice line today |
+| --- | --- |
+| Before | 30.00 EUR, the full difference |
+| After | 10.00 EUR, the difference for the 10 days left |
+
+```mermaid
+flowchart LR
+  A[Plan change] --> B{New price higher?}
+  B -- yes --> C[Prorate by days left] --> D[Invoice line today]
+  B -- no --> E[Switch at the end of the cycle]
+```
+
+- Demo: [upgrade of test account #771 on staging](https://example.com/staging/plan-change)
+- Golden data: [40 real customers against the Finance sheet](https://example.com/notebooks/proration-golden)
 - Rejected: storing a proration row per change. The invoice line already carries the amount, a second table would drift.
 
 ## Edge cases
@@ -50,7 +62,7 @@ Customers who upgrade mid-month are charged the full new price today. Finance wa
 ## Rollback
 > How to undo this change and what it leaves behind.
 
-Revert merge request !231 and redeploy. No schema change and no data migration. Invoices already issued with a prorated line stay as they are.
+Revert the merge requests in Changes, newest first, and redeploy. No schema change and no data migration. Invoices already issued with a prorated line stay as they are.
 
 ## Security impact
 > What the change touches that matters for security, or "None" with the reason.
@@ -58,18 +70,25 @@ Revert merge request !231 and redeploy. No schema change and no data migration. 
 None. The change only reads prices and dates that the handler already loads. It adds no input from users, no new endpoint and no new permission.
 
 ## Agent reviews
-> What the agent reviewers found and what you did with each finding.
+> Which reviewers ran and how often, with counts. The details stay in the merge requests; a dismissed finding a human must accept goes to Judge this.
 
-| Finding | Severity | Disposition | Reason |
-| --- | --- | --- | --- |
-| Proration used a fixed 30-day month | high | fixed | Now uses the real cycle length |
-| Handler could prorate twice on a retried request | high | fixed | Now idempotent per change id |
-| "Add a proration table" | low | dismissed | Rejected in Design, the invoice line is the source of truth |
+| Round | Reviewers | Findings | Fixed | Dismissed |
+| --- | --- | --- | --- | --- |
+| 1 | quant, Python, security | 3 | 2 | 1 |
+| 2 | quant, Python, security | 0 | 0 | 0 |
 
-## Links
-> Ticket, deploy, notebook, then the code last.
+The dismissed finding is the second question in Judge this.
 
-- Ticket: [BILL-412](https://example.com/tickets/BILL-412)
-- Staging: [plan change page](https://example.com/staging/plan-change)
-- Notebook: [proration golden](https://example.com/notebooks/proration-golden)
-- Code: [merge request !231](https://gitlab.example.com/billing/billing-service/-/merge_requests/231)
+## Judge this
+> The questions only a human can answer: product intent, trade-offs, risk you accept.
+
+- Is "first day" the day the cycle starts, or the day after the previous invoice?
+- Is rounding once at the end acceptable to Finance, or should each line round? (The quant reviewer flagged this; we kept one rounding.)
+
+## Changes
+> One row per merge request, in merge order, with its status. Put the ticket and dashboards in the report's links instead.
+
+| # | Repo | Merge request | What it changes | Status |
+| --- | --- | --- | --- | --- |
+| 1 | billing-service | [!231](https://gitlab.example.com/billing/billing-service/-/merge_requests/231) | `prorate()` and the plan-change handler | open |
+| 2 | invoice-ui | [!88](https://gitlab.example.com/billing/invoice-ui/-/merge_requests/88) | shows the prorated line on the invoice | open, merge after !231 |

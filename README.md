@@ -38,6 +38,7 @@ verifair is a small web service where agents push markdown change-review reports
 - **Verdicts with rules.** Approve or request changes. Approve is refused while a blocking thread is open, and the signer cannot approve their own version. Unapprove or withdraw a verdict if you change your mind.
 - **Versions.** The agent pushes a new version after feedback. Signatures and verdicts are kept per version; comments show when they were made on an older one.
 - **Plan first, when needed.** Review and approve a Markdown plan before implementation, then attach the change report at the same URL. Plan and implementation have separate signatures, comments and verdicts. Direct report submission still works.
+- **Diagrams and screenshots.** A Mermaid block in a report is drawn as a diagram, with its source one click away. Agents upload screenshots through the API and show them in the report; images from other sites stay links.
 - **Optional execution evidence.** Attach a local recording or a labelled reconstruction to an implementation version. The read-only Execution tab adds context; people still sign and judge the implementation. See the [trace format and version-pinned capture recipes](docs/tracing.md).
 - **Built for agents.** A small JSON API to push reports, read and answer comments, long-poll for feedback, and archive or restore a review. Ships with an [agent skill](#agent-skill) you install with one `npx skills` command, and an API explorer at `/docs`.
 - **An Inbox for people.** Grouped by whose turn it is: needs your review, needs your signature, returned to you, needs implementation, waiting on others. **Assigned to me**, **Created by me** and **All reviews** list the rest, with status tabs.
@@ -134,20 +135,20 @@ This is local mode. For a team, use shared mode. See [docs/access.md](docs/acces
 
 ## The report
 
-[docs/report-template.md](docs/report-template.md) is the layout agents should follow. Each section has a one-line hint shown as a quote. What the human must decide comes first, the evidence after.
+[docs/report-template.md](docs/report-template.md) is the layout agents should follow. Each section has a one-line hint shown as a quote. The reader first sees what changes and the evidence, and the decisions come last, once they understand the change.
 
 | Section | Why it is there |
 | --- | --- |
-| `Intent` | The problem, the ticket and what is out of scope. |
-| `Judge this` | The questions only a human can answer, so reviewers know where to look. |
-| `Design` | How it works, and one option that was rejected. |
+| `Intent` | The problem, the ticket, what is out of scope, and the decision the reader will be asked to make. |
+| `Design` | What changes, shown: a before/after example, a diagram, links to runs, demos and screenshots, and one option that was rejected. |
 | `Edge cases` | One row per worry, with the check that proves it. |
 | `Verification` | What each check proves, the command, the result (✅, ⚠️ or ❌, with a reason for anything not run), a link, and whether it fails if the change is reverted. |
 | `Not verified / assumptions` | What was not checked or was taken on trust. |
 | `Rollback` | How to undo the change. |
 | `Security impact` | What it touches that matters for security, or `None` with the reason. |
-| `Agent reviews` | What the agent reviewers found, how bad it was, what was done and why. |
-| `Links` | Ticket, deploy, notebook, and the code last. |
+| `Agent reviews` | Which agent reviewers ran, how many rounds, and how many findings were fixed or dismissed. |
+| `Judge this` | The questions only a human can answer, asked once the reader knows the design and the evidence. |
+| `Changes` | One row per merge request, in merge order, with its status. |
 
 `Verification`, `Rollback` and `Security impact` are required by default. See [Report rules](docs/api.md#report-rules).
 

@@ -17,21 +17,33 @@ Implementation body = Markdown with these H2 headings, in this order, spelled ex
 
 | Section | What goes in it |
 |---|---|
-| `## Intent` | The problem in plain words, the ticket, what is out of scope. |
-| `## Judge this` | 2–4 questions only a human can answer (product intent, trade-offs, risk to accept). Not "please review". |
-| `## Design` | How it works in a few lines, and one rejected alternative with the reason. |
+| `## Intent` | The problem in plain words, the ticket, what is out of scope, and one line naming the decision the reader will be asked to make. |
+| `## Design` | What changes, shown: a **Before / after** with a real example (output, log line, data row, API response, screenshot), a Mermaid diagram of the flow, and links to runs, demos, notebooks, staging. One line on how it works, one rejected alternative with the reason. No list of merge requests here. |
 | `## Edge cases` | Table: case · how it is handled · which check proves it. |
 | `## Verification` | Table: proves · command · result (✅ / ⚠️ / ❌, reason for anything not ✅) · link · fails on revert (yes/no). |
 | `## Not verified / assumptions` | What you did not check or took on trust, one bullet each. At least one bullet. |
 | `## Rollback` | How to undo it and what that leaves behind (data written meanwhile, migrations). |
 | `## Security impact` | What it touches that matters, or `None` with the reason. |
-| `## Agent reviews` | Table: finding · severity · fixed / dismissed · reason. |
-| `## Links` | Ticket, deploy, notebook, CI run; the code (MR/commit) last. Nothing hosted → "none, local only" and the commit sha as text. |
+| `## Agent reviews` | Summary only, one row per round: round · reviewers that ran · findings · fixed · dismissed. No per-finding rows; the details stay in the merge requests. A dismissed finding a human must accept becomes a question in `Judge this`. |
+| `## Judge this` | Last before Changes, so the reader knows the design and evidence first. 2–4 questions only a human can answer (product intent, trade-offs, risk to accept). Not "please review". |
+| `## Changes` | Table, one row per merge request in merge order: # · repo · MR link · what it changes · status (open, merged, merge after !N). Nothing hosted → one row with "local only" and the commit sha as text. |
 
 Evidence rules:
 - Only results you saw. Re-run what you can; anything copied from earlier notes or not run is ⚠️ with that said.
 - Links a reviewer can open: CI jobs, MRs, dashboards, deployed URLs. No local paths (`/Users/…`, `.superpowers/…`), no secrets.
 - Plain simple language. Markdown only; raw HTML is shown as text, and images on other sites show as links.
+
+### Diagrams and screenshots
+
+A ```` ```mermaid ```` block is drawn as a diagram on the page; reviewers can open its source. Keep it small: the flow that changed, with the changed parts named. For a screenshot (UI, chart, dashboard panel), upload the file and use the URL it returns:
+
+```bash
+curl -sS --fail-with-body -X POST "$VERIFAIR_URL/api/images" \
+  -H "Authorization: Bearer $VERIFAIR_API_TOKEN" -H "Content-Type: image/png" --data-binary @before.png
+# {"url": "/images/<sha256>.png"}  ->  ![Inbox before the change](/images/<sha256>.png)
+```
+
+PNG, JPEG or WebP, up to 5 MB. Uploading the same file again returns the same URL. Never put secrets or personal data in a screenshot.
 
 ## Push
 
@@ -46,7 +58,7 @@ print(json.dumps({
   "id": "short-stable-slug",
   "project": "repo-name", "title": "What changes, under 200 chars",
   "risk": "low|medium|high", "body": Path(sys.argv[1]).read_bytes().decode("utf-8"),
-  "links": [{"label": "Merge request", "url": "https://…"}],
+  "ticket_url": "https://…", "links": [{"label": "Dashboard", "url": "https://…"}],
   "reviewers": ["bob@example.com"],
   "agent": "claude", "model": "<your model>", "commit": "<sha the report describes>",
 }))
@@ -161,6 +173,8 @@ curl -sS --fail-with-body --max-time 60 -G -H "Authorization: Bearer $VERIFAIR_A
 | Mistake | Instead |
 |---|---|
 | Own headings ("What changed", "Open items") | The exact sections above; questions go in `Judge this` |
+| Design that lists merge requests | Before/after, diagram and links to runs in Design; merge requests in `Changes` |
+| One `Agent reviews` row per finding | One row per round with counts; findings a human must accept go to `Judge this` |
 | Verification as "tests pass" | One row per claim, with command, result and link |
 | Pushing v2 seconds after v1 for typos | Proofread first; versions are for real changes |
 | Resolving the reviewer's thread after replying | Reply, leave it open |

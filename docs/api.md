@@ -64,7 +64,7 @@ The commands below use the report `id` as `$ID`. In shared mode, use your own ag
 
 A push sends a "draft" message to Slack (if configured). The "ready for review" message is sent when the version is signed.
 
-Report markdown: raw HTML is shown as text, not rendered, and `javascript:` links are dropped. An image on another site (`![chart](https://…)`) is shown as a link, "Image from <host>: <alt text>", that opens it in a new tab: loading it automatically would tell that site who opened the report. Images from the verifair server itself and `data:` images are shown inline. Use plain markdown only.
+Report markdown: raw HTML is shown as text, not rendered, and `javascript:` links are dropped. An image on another site (`![chart](https://…)`) is shown as a link, "Image from <host>: <alt text>", that opens it in a new tab: loading it automatically would tell that site who opened the report. Images from the verifair server itself (see [Upload an image](#upload-an-image)) and `data:` images are shown inline. A ```` ```mermaid ```` code block is drawn as a diagram in the browser, with a button that shows its source; quotes and comments use the source text. Use plain markdown only.
 
 ### Optional plan
 
@@ -373,6 +373,19 @@ Archiving does not end a running [wait](#wait-for-feedback): it ends with `timeo
 
 Deleting a report for good is not in the API: an admin does it in the app. A wait on a deleted report ends with 404, and the id can then be used by a new push, which starts a new report without the old history.
 
+## Upload an image
+
+`POST /api/images` stores a screenshot for use in reports. Send the raw file with `Content-Type` `image/png`, `image/jpeg` or `image/webp`, up to 5 MB (5,242,880 bytes):
+
+```bash
+curl -sS --fail-with-body -X POST "$VERIFAIR_URL/api/images" \
+  -H "Authorization: Bearer $VERIFAIR_API_TOKEN" -H "Content-Type: image/png" --data-binary @inbox.png
+```
+
+The answer is `201 {"url": "/images/<sha256>.png"}`. Use that path in the report: `![Inbox after the change](/images/<sha256>.png)`. The same file always gets the same URL. Other types get 415 `"Send a PNG, JPEG or WebP image."`; a file whose bytes do not match the type gets 422 `"The file is not a valid image/png."`.
+
+`GET /images/<sha256>.<ext>` serves the image to anyone who can open reports: everyone in local mode, signed-in members in shared mode. Deleting a report deletes the images that only it used, in any version, plan or comment. An image that no report uses yet is kept.
+
 ## Get the agent skill
 
 The usual way to install the skill is `npx skills add romanzdk/verifair@v<server version> --skill verifair-review -g` (the **Agent tokens** page shows it with the right version). Without Node.js, or on a fork that cannot reach GitHub, download it from the server: `GET /api/skill` returns the `verifair-review` skill (`SKILL.md`, `text/markdown`) that ships with this server. It needs a token like the rest of the API. This command saves it for Claude Code; other agents read the same file from their own skills folder:
@@ -389,8 +402,9 @@ d=~/.claude/skills/verifair-review && mkdir -p "$d" && curl -fsS -H "Authorizati
 | 403 | shared mode only: `"This report belongs to another member."`, `"This report has no owner. Push it again with an agent token under a new id."`, `"author_id must be the token owner."`, `"Agent tokens can only resolve threads the agent started on its owner's reports."` or `"Only the report's owner and its requested reviewers can archive or restore it with a token."` |
 | 404 | `"report not found"`, `"version not found"`, `"parent not found"` or `"comment not found"` |
 | 409 | `"id belongs to another project"`, `"This report is archived. Restore it before pushing a new version."`, `"workflow cannot be changed"`, `"review changed"` with `current_version`, `"document changed"` with `target`/`current_revision`, `"current plan is not approved"` with `plan_revision`, or `"implementation has not been attached"` |
+| 415 | `"Send a PNG, JPEG or WebP image."` (`POST /api/images`) |
 | 422 | a list of field errors (pydantic style), `"replies cannot set section, quote, prefix or suffix"`, `"quote requires section"`, `"quote not found"`, `"ambiguous quote"`, `"unknown section"`, `"missing sections"`, workflow/content/guard errors described above, `"artifact plans are read-only"`, `"plan revision is required"`, `"reply target conflicts with root target"`, or, in shared mode, `"inactive reviewers"` |
-| 413 | `"request body too large"`: the request body is over 1 MB (1,048,576 bytes). Checked before the body is parsed, for API and web routes |
+| 413 | `"request body too large"`: the request body is over 1 MB (1,048,576 bytes), or 5 MB for `POST /api/images`. Checked before the body is parsed, for API and web routes |
 | 503 | not JSON: the plain text `The database is not available. Try again in a moment.` with a `Retry-After: 5` header. The database cannot be reached, or no connection was free within 10 seconds. Web pages answer the same way. If the connection drops while a write is being saved, the change may already be stored: read it back before sending it again |
 
 An unknown section also lists the valid headings: `{"detail": "unknown section", "sections": ["Intent", "Edge cases"]}`. Missing sections lists the required headings the body lacks, in the configured order. Inactive reviewers lists every requested id that is not an active member: `{"detail": "inactive reviewers", "reviewers": ["ghost@example.com"]}`.

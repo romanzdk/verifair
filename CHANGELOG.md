@@ -9,6 +9,12 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 ### Added
 
 - `scripts/demo.py` loads four demo reviews into a local server, so the quickstart shows a full Inbox right away.
+- Mermaid diagrams: a ```` ```mermaid ```` block in a report or plan is drawn as a diagram, with a button that shows its source so it can still be quoted. Mermaid 12.2.0 is served by verifair itself and loads only on pages that have a diagram.
+- `POST /api/images` uploads a PNG, JPEG or WebP screenshot (up to 5 MB) and returns a `/images/…` URL to use in a report. Deleting a report deletes the images only it used.
+
+### Changed
+
+- New report layout: Intent, Design, Edge cases, Verification, Not verified, Rollback, Security impact, Agent reviews, Judge this, Changes. Design shows a before/after, a diagram and links to runs instead of merge requests. Agent reviews is one row per review round with counts. Judge this comes after the evidence. Changes lists every merge request in merge order. The template, the agent skill and the demo reviews follow it; older reports keep their layout.
 
 ## [0.9.1] - 2026-11-09
 
