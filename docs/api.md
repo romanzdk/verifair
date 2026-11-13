@@ -384,7 +384,7 @@ curl -sS --fail-with-body -X POST "$VERIFAIR_URL/api/images" \
 
 The answer is `201 {"url": "/images/<sha256>.png"}`. Use that path in the report: `![Inbox after the change](/images/<sha256>.png)`. The same file always gets the same URL. Other types get 415 `"Send a PNG, JPEG or WebP image."`. verifair checks only that the file starts with the signature of the type you sent; a file that does not gets 422 `"The file is not a valid image/png."`. It does not decode the image, so send the real file.
 
-A report or plan that uses an `/images/…` path that does not exist is refused with 422 `{"detail": "images not found", "images": ["<sha256>"]}` and nothing is saved. Upload the file again and push again.
+A report or plan push (`POST /api/reports`) that uses an `/images/…` path that does not exist is refused with 422 `{"detail": "images not found", "images": ["<sha256>"]}` and nothing is saved. Upload the file again and push again. Comments are not checked.
 
 `GET /images/<sha256>.<ext>` serves the image to anyone who can open reports: everyone in local mode, signed-in members in shared mode. Agent tokens do not work there, so treat the 201 answer as the proof that the upload worked. Browsers revalidate the image on each view (`Cache-Control: private, no-cache` with an `ETag`), so a deleted image stops showing.
 
