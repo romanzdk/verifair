@@ -32,7 +32,7 @@ verifair is a small web service where agents push markdown change-review reports
 
 ## Features
 
-- **One report per change.** Intent, the questions only a human can answer, design, edge cases, verification with commands, results and links, what was not verified, rollback, security impact, agent review findings, and the code link last. See [the report](#the-report).
+- **One report per change.** Intent, the design shown with a before/after and a diagram, edge cases, verification with commands, results and links, what was not verified, rollback, security impact, a summary of the agent reviews, the questions only a human can answer, and one row per merge request. See [the report](#the-report).
 - **A human signs first.** The person who asked for the change reads the agent's report and signs it. Only then does the team get asked to review. The signer or an admin can unsign while nobody has given a verdict.
 - **Comment on any text.** Select a sentence to start a thread. Threads are blocking by default; a reviewer can mark one as a suggestion. [Conventional Comments](https://conventionalcomments.org) label buttons (`issue:`, `nitpick:`, `question:` and more) set the label and whether the thread blocks.
 - **Verdicts with rules.** Approve or request changes. Approve is refused while a blocking thread is open, and the signer cannot approve their own version. Unapprove or withdraw a verdict if you change your mind.
