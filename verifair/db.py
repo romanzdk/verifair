@@ -32,6 +32,7 @@ Connection = psycopg.Connection[Row]
 CONNECT_KWARGS: dict[str, Any] = {"autocommit": True, "row_factory": dict_row}
 SCHEMA_LOCK = 7_265_100_001
 USERS_LOCK = 7_265_100_002
+IMAGE_LOCK = 7_265_100_003
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reports (
@@ -283,9 +284,6 @@ def _write(conn: Connection, report_id: str | None = None) -> Iterator[None]:
             _lock_images(conn, shared=True)
             _lock_report(conn, report_id)
         yield
-
-
-IMAGE_LOCK = 7_265_100_002
 
 
 def _lock_images(conn: Connection, shared: bool) -> None:
@@ -765,7 +763,8 @@ def delete_report(conn: Connection, id: str) -> bool:
 
 
 IMAGE_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
-IMAGE_URL = re.compile(r"/images/([0-9a-f]{64})\.")
+# a path on this server: not part of a longer URL such as https://cdn.example.com/images/…
+IMAGE_URL = re.compile(r"(?<![^\s(<\[\"'])/images/([0-9a-f]{64})\.")
 
 
 UNUSED_IMAGE_TTL = timedelta(days=7)
@@ -790,7 +789,7 @@ def save_image(conn: Connection, data: bytes, content_type: str) -> str:
     with _write(conn):
         conn.execute(
             "INSERT INTO images (id, content_type, data, created_at) VALUES (%s, %s, %s, %s)"
-            " ON CONFLICT (id) DO NOTHING",
+            " ON CONFLICT (id) DO UPDATE SET created_at = EXCLUDED.created_at",
             (id, content_type, data, _now()),
         )
     return id

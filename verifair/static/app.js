@@ -430,6 +430,7 @@ document.querySelectorAll("pre, .content").forEach((box) => {
 const MERMAID = "/static/mermaid-12.2.0.min.js";
 let mermaidReady = null;
 let diagramCount = 0;
+let sourceCount = 0;
 
 function loadMermaid() {
   mermaidReady ??= new Promise((resolve, reject) => {
@@ -521,6 +522,7 @@ async function drawDiagrams() {
   setupMermaid();
   for (const code of codes) {
     const pre = code.parentElement;
+    pre.id ||= `vf_src_${++sourceCount}`;
     try {
       const { src, alt } = await diagramImage(code.textContent);
       const img = document.createElement("img");
@@ -529,7 +531,6 @@ async function drawDiagrams() {
       scroll.className = "diagram-scroll";
       scroll.append(img);
       img.addEventListener("load", () => { scroll.tabIndex = scroll.scrollWidth > scroll.clientWidth ? 0 : -1; });
-      pre.id ||= `vf_src_${diagramCount}`;
       const figure = document.createElement("div");
       figure.className = "diagram";
       figure.append(scroll, diagramToggle(pre));

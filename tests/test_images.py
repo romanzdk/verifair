@@ -187,3 +187,26 @@ def test_openapi_describes_the_image_upload(client):
     op = client.get("/openapi.json").json()["paths"]["/api/images"]["post"]
     assert set(op["requestBody"]["content"]) == {"image/png", "image/jpeg", "image/webp"}
     assert {"201", "413", "415"} <= set(op["responses"])
+
+
+def test_an_external_link_that_looks_like_an_image_path_is_not_checked(client):
+    body = f"![x](https://cdn.example.com/images/{'c' * 64}.png)"
+    payload = {"project": "p", "title": "t", "risk": "low", "body": body}
+    assert client.post("/api/reports", json=payload, headers=H).status_code == 201
+
+
+def test_uploading_again_restarts_the_7_day_clock(client, settings):
+    url = upload(client).json()["url"]
+    with closing(db.connect(settings.database_url)) as conn:
+        conn.execute("UPDATE images SET created_at=%s", ("2020-01-01T00:00:00+00:00",))
+    upload(client)
+    _push(client, "any", "## Intent\nno image")
+    with closing(db.connect(settings.database_url)) as conn:
+        assert db.delete_report(conn, "any")
+    assert client.get(url).status_code == 200
+
+
+def test_advisory_lock_keys_are_distinct():
+    keys = [v for k, v in vars(db).items() if k.endswith("_LOCK") and isinstance(v, int)]
+    assert len(keys) >= 3
+    assert len(keys) == len(set(keys))
