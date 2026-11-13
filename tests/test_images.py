@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import threading
 from contextlib import closing
 
 from fastapi.testclient import TestClient
@@ -29,7 +30,19 @@ def test_upload_returns_a_url_that_serves_the_image(client):
     assert image.content == PNG
     assert image.headers["content-type"] == "image/png"
     assert image.headers["x-content-type-options"] == "nosniff"
-    assert image.headers["cache-control"] == "private, max-age=31536000, immutable"
+    assert image.headers["cache-control"] == "private, no-cache"
+    assert image.headers["etag"] == f'"{digest}"'
+
+
+def test_a_cached_image_is_revalidated_with_its_etag(client, settings):
+    url = upload(client).json()["url"]
+    etag = client.get(url).headers["etag"]
+    again = client.get(url, headers={"If-None-Match": etag})
+    assert (again.status_code, again.content) == (304, b"")
+    _push(client, "r", f"## Intent\n![a]({url})")
+    with closing(db.connect(settings.database_url)) as conn:
+        db.delete_report(conn, "r")
+    assert client.get(url, headers={"If-None-Match": etag}).status_code == 404
 
 
 def test_same_image_twice_gives_the_same_url(client):
@@ -111,3 +124,66 @@ def test_images_in_an_older_version_or_plan_count_as_used(client, settings):
     with closing(db.connect(settings.database_url)) as conn:
         assert db.delete_report(conn, "gone")
     assert client.get(url).status_code == 200
+
+
+def test_push_with_an_unknown_image_is_refused(client):
+    missing = "b" * 64
+    payload = {"project": "p", "title": "t", "risk": "low", "body": f"![x](/images/{missing}.png)"}
+    r = client.post("/api/reports", json=payload, headers=H)
+    assert (r.status_code, r.json()) == (422, {"detail": "images not found", "images": [missing]})
+
+
+def test_an_image_used_only_in_a_comment_is_kept(client, settings):
+    url = upload(client).json()["url"]
+    _push(client, "gone", f"## Intent\n![a]({url})")
+    _push(client, "talk", "## Intent\nno image")
+    with closing(db.connect(settings.database_url)) as conn:
+        db.add_comment(
+            conn, report_id="talk", version=1, author_id="u", author_name="U", body=f"![a]({url})"
+        )
+        assert db.delete_report(conn, "gone")
+    assert client.get(url).status_code == 200
+
+
+def test_deleting_any_report_sweeps_unused_images_older_than_7_days(client, settings):
+    old = upload(client).json()["url"]
+    new = upload(client, JPEG, "image/jpeg").json()["url"]
+    _push(client, "any", "## Intent\nno image")
+    with closing(db.connect(settings.database_url)) as conn:
+        conn.execute(
+            "UPDATE images SET created_at=%s WHERE id=%s", ("2020-01-01T00:00:00+00:00", old[8:72])
+        )
+        assert db.delete_report(conn, "any")
+    assert client.get(old).status_code == 404
+    assert client.get(new).status_code == 200
+
+
+def test_delete_waits_for_a_push_in_progress_before_judging_images_unused(client, settings):
+    url = upload(client).json()["url"]
+    _push(client, "gone", f"## Intent\n![a]({url})")
+    done = threading.Event()
+    pusher = db.connect(settings.database_url)
+    deleter = db.connect(settings.database_url)
+    worker = threading.Thread(target=lambda: (db.delete_report(deleter, "gone"), done.set()))
+    with closing(pusher), closing(deleter):
+        with db._write(pusher, "other-lock"):
+            worker.start()
+            assert not done.wait(0.5)
+            pusher.execute(
+                "INSERT INTO reports (id, project, title, risk, author, created_at,"
+                " updated_at) VALUES ('other', 'p', 't', 'low', 'a', 'x', 'x')"
+            )
+            pusher.execute(
+                "INSERT INTO versions (report_id, version, body, created_at)"
+                " VALUES ('other', 1, %s, 'x')",
+                (f"![a]({url})",),
+            )
+        worker.join(5)
+    assert done.is_set()
+    assert client.get(url).status_code == 200
+
+
+def test_openapi_describes_the_image_upload(client):
+    op = client.get("/openapi.json").json()["paths"]["/api/images"]["post"]
+    assert set(op["requestBody"]["content"]) == {"image/png", "image/jpeg", "image/webp"}
+    assert {"201", "413", "415"} <= set(op["responses"])

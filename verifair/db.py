@@ -280,8 +280,19 @@ def _write(conn: Connection, report_id: str | None = None) -> Iterator[None]:
     # and verdict ids commit in id order, which the /wait id cursor relies on.
     with conn.transaction():
         if report_id is not None:
+            _lock_images(conn, shared=True)
             _lock_report(conn, report_id)
         yield
+
+
+IMAGE_LOCK = 7_265_100_002
+
+
+def _lock_images(conn: Connection, shared: bool) -> None:
+    # writes that may add an image reference hold it shared; deleting images holds it alone, so
+    # the "still used?" check sees every committed reference. Always taken before a report lock.
+    fn = "pg_advisory_xact_lock_shared" if shared else "pg_advisory_xact_lock"
+    conn.execute(f"SELECT {fn}(%s)", (IMAGE_LOCK,))
 
 
 def _check_version(conn: Connection, report_id: str, expected: int | None) -> None:
@@ -493,6 +504,10 @@ def push_report(
     if owner_id is not None:
         author_id = owner_id
     with _write(conn):
+        _lock_images(conn, shared=True)
+        missing = _missing_images(conn, body, plan)
+        if missing:
+            raise MissingImages(missing)
         existing = _lock_report(conn, id) if id else None
         if existing is None:
             base = slugify(title)
@@ -724,15 +739,27 @@ def archive_project(conn: Connection, project: str, by: str) -> int:
 
 def delete_report(conn: Connection, id: str) -> bool:
     with _write(conn):
+        _lock_images(conn, shared=False)
         if _lock_report(conn, id) is None:
             return False
-        images = _images_used(conn, "WHERE report_id=%s", (id,))
+        rows = conn.execute(
+            "SELECT body AS text FROM versions WHERE report_id=%s"
+            " UNION ALL SELECT plan FROM versions WHERE report_id=%s"
+            " UNION ALL SELECT body FROM comments WHERE report_id=%s",
+            (id, id, id),
+        )
+        images = {m for row in rows if row["text"] for m in IMAGE_URL.findall(row["text"])}
         for table in ("comments", "verdicts", "signatures", "review_requests", "versions"):
             conn.execute(f"DELETE FROM {table} WHERE report_id=%s", (id,))
         conn.execute("DELETE FROM reports WHERE id=%s", (id,))
-        if images:
-            images -= _images_used(conn, "", ())
-            conn.execute("DELETE FROM images WHERE id = ANY(%s)", (list(images),))
+        stale = (datetime.now(UTC) - UNUSED_IMAGE_TTL).isoformat(timespec="seconds")
+        conn.execute(
+            "DELETE FROM images i WHERE (i.id = ANY(%s) OR i.created_at < %s)"
+            " AND NOT EXISTS (SELECT 1 FROM versions v"
+            "  WHERE strpos(v.body, i.id) > 0 OR strpos(v.plan, i.id) > 0)"
+            " AND NOT EXISTS (SELECT 1 FROM comments c WHERE strpos(c.body, i.id) > 0)",
+            (list(images), stale),
+        )
     log.info("report deleted id=%s", id)
     return True
 
@@ -741,13 +768,21 @@ IMAGE_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp
 IMAGE_URL = re.compile(r"/images/([0-9a-f]{64})\.")
 
 
-def _images_used(conn: Connection, where: str, params: tuple) -> set[str]:
-    rows = conn.execute(
-        f"SELECT body AS text FROM versions {where} UNION ALL SELECT plan FROM versions {where}"
-        f" UNION ALL SELECT body FROM comments {where}",
-        params * 3,
-    )
-    return {m for row in rows if row["text"] for m in IMAGE_URL.findall(row["text"])}
+UNUSED_IMAGE_TTL = timedelta(days=7)
+
+
+class MissingImages(ValueError):
+    def __init__(self, ids: list[str]):
+        super().__init__("images not found")
+        self.ids = ids
+
+
+def _missing_images(conn: Connection, *texts: str | None) -> list[str]:
+    ids = sorted({m for text in texts if text for m in IMAGE_URL.findall(text)})
+    if not ids:
+        return []
+    found = conn.execute("SELECT id FROM images WHERE id = ANY(%s)", (ids,))
+    return sorted(set(ids) - {row["id"] for row in found})
 
 
 def save_image(conn: Connection, data: bytes, content_type: str) -> str:
@@ -761,8 +796,14 @@ def save_image(conn: Connection, data: bytes, content_type: str) -> str:
     return id
 
 
-def get_image(conn: Connection, id: str) -> Row | None:
-    return conn.execute("SELECT content_type, data FROM images WHERE id=%s", (id,)).fetchone()
+def image_type(conn: Connection, id: str) -> str | None:
+    row = conn.execute("SELECT content_type FROM images WHERE id=%s", (id,)).fetchone()
+    return row and row["content_type"]
+
+
+def image_data(conn: Connection, id: str) -> bytes | None:
+    row = conn.execute("SELECT data FROM images WHERE id=%s", (id,)).fetchone()
+    return row and row["data"]
 
 
 def _by_report(conn: Connection, sql: str, ids: list[str]) -> dict[str, list[Row]]:

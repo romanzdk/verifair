@@ -621,6 +621,11 @@ html:not(.js) .cform:target { display: block; }
 }
 
 .diagram { display: flex; align-items: flex-start; gap: 4px; margin: 12px 0; }
-.diagram img { background: var(--bg); }
+.diagram-scroll { overflow-x: auto; min-width: 0; }
+.content .diagram img { max-width: none; border-radius: 0; background: var(--bg); }
+pre.diagram-failed::before {
+  content: "This diagram could not be drawn, so its source is shown."; display: block; margin-bottom: 8px;
+  font-family: var(--font); color: var(--text-subtle);
+}
 .content img { max-width: 100%; height: auto; border-radius: 6px; }
 .content p > img:only-child { border: 1px solid var(--border); }
