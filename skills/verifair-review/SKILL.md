@@ -20,7 +20,7 @@ Implementation body = Markdown with these H2 headings, in this order, spelled ex
 | `## Intent` | The problem in plain words, the ticket, what is out of scope, and one line naming the decision the reader will be asked to make. |
 | `## Design` | What changes, shown: a **Before / after** with a real example (output, log line, data row, API response, screenshot), a Mermaid diagram of the flow, and links to runs, demos, notebooks, staging. One line on how it works, one rejected alternative with the reason. No list of merge requests here. |
 | `## Edge cases` | Table: case · how it is handled · which check proves it. |
-| `## Verification` | Table: proves · command · result (✅ / ⚠️ / ❌, reason for anything not ✅) · link · fails on revert (yes/no). |
+| `## Verification` | Table: proves · command · result (✅ / ⚠️ / ❌, reason for anything not ✅) · link · fails on revert (yes/no). Under it, evidence blocks when a link is not enough: the claim in bold, then only the lines that prove it (request and response, notebook output, log excerpt, or an uploaded screenshot). |
 | `## Not verified / assumptions` | What you did not check or took on trust, one bullet each. At least one bullet. |
 | `## Rollback` | How to undo it and what that leaves behind (data written meanwhile, migrations). |
 | `## Security impact` | What it touches that matters, or `None` with the reason. |
@@ -32,6 +32,7 @@ Evidence rules:
 - Only results you saw. Re-run what you can; anything copied from earlier notes or not run is ⚠️ with that said.
 - Links a reviewer can open: CI jobs, MRs, dashboards, deployed URLs. No local paths (`/Users/…`, `.superpowers/…`), no secrets.
 - Plain simple language. Markdown only; raw HTML is shown as text, and images on other sites show as links.
+- Evidence blocks: a few lines, not the whole log or notebook. Remove secrets, tokens and personal data. Screenshots go through the image upload.
 
 ### Diagrams and screenshots
 
@@ -178,6 +179,7 @@ curl -sS --fail-with-body --max-time 60 -G -H "Authorization: Bearer $VERIFAIR_A
 | Design that lists merge requests | Before/after, diagram and links to runs in Design; merge requests in `Changes` |
 | One `Agent reviews` row per finding | One row per round with counts; findings a human must accept go to `Judge this` |
 | Verification as "tests pass" | One row per claim, with command, result and link |
+| Whole log or notebook pasted as proof | The few lines that prove the row, plus a link to the rest |
 | Pushing v2 seconds after v1 for typos | Proofread first; versions are for real changes |
 | Resolving the reviewer's thread after replying | Reply, leave it open |
 | Signing or approving "to unblock" | Only humans sign and give verdicts |
