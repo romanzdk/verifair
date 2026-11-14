@@ -338,6 +338,14 @@ def test_report_template_has_ten_sections_and_no_html_comments():
     assert re.findall(r"^\| `## ([^`]+)` \|", skill, re.M) == [s.heading for s in sections]
 
 
+def test_report_template_verification_shows_evidence_blocks_under_the_table():
+    body = (Path(__file__).parents[1] / "docs" / "report-template.md").read_text()
+    verification = re.search(r"^## Verification\n(.*?)^## ", body, re.M | re.S).group(1)
+    after_table = verification.split("| --- |", 1)[1]
+    assert "```" in after_table
+    assert re.search(r"^\*\*.+:\*\*", after_table, re.M)
+
+
 def test_section_less_threads_are_general_not_orphaned(conn):
     kwargs = {"report_id": "r", "version": 1, "author_id": "u", "author_name": "U"}
     general = add_comment(conn, body="g", **kwargs)

@@ -44,7 +44,7 @@ A higher price is prorated by the days left; a lower one waits for the next cycl
 | Currency rounding | Round half-even to cents, once, at the end | golden file |
 
 ## Verification
-> Evidence, not claims: what each check proves, the command, the result (✅ passed, ⚠️ not run or partial, ❌ failed; give a reason for anything but ✅), a link to the run, and whether it fails if the change is reverted.
+> Evidence, not claims: what each check proves, the command, the result (✅ passed, ⚠️ not run or partial, ❌ failed; give a reason for anything but ✅), a link to the run, and whether it fails if the change is reverted. When a link is not enough, paste the key output under the table: a request and response, a notebook output, a log excerpt or a screenshot. Start each with the claim it proves in bold, and keep only the lines that prove it.
 
 | Proves | Command | Result | Link | Fails on revert |
 | --- | --- | --- | --- | --- |
@@ -53,6 +53,26 @@ A higher price is prorated by the days left; a lower one waits for the next cycl
 | 40 real customers match the Finance sheet | notebook, run all cells | ✅ 40/40 match | [notebook](https://example.com/notebooks/proration-golden) | no, it reads past invoices |
 | Upgrade works on staging | upgrade test account #771 in the UI | ✅ invoice line 13.33 EUR | [staging](https://example.com/staging/plan-change) | yes |
 | No new errors after deploy | log query, last 2h | ⚠️ 40 minutes only, staging was redeployed | [log query](https://example.com/logs?q=plan-change) | no |
+
+**Upgrade works on staging:** the plan-change call for test account #771 and the invoice line it wrote.
+
+```http
+POST /accounts/771/plan
+{"plan": "pro"}
+```
+
+```json
+{"invoice_line": {"description": "Pro upgrade, prorated", "amount": "13.33", "currency": "EUR"}}
+```
+
+**40 real customers match the Finance sheet:** first rows of the notebook output.
+
+| Customer | Ours | Finance | Match |
+| --- | --- | --- | --- |
+| 10231 | 13.33 | 13.33 | ✅ |
+| 10498 | 4.67 | 4.67 | ✅ |
+| 11870 | 26.00 | 26.00 | ✅ |
+| 37 more | | | ✅ 40/40 |
 
 ## Not verified / assumptions
 > What you did not check and what you took on trust, so the reviewer can decide whether to trust it too.

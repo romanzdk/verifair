@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Changed
+
+- The report template and the agent skill show evidence blocks under the Verification table: a request and response, notebook output or log lines that prove a row when a link is not enough.
+
 ## [0.10.0] - 2026-11-13
 
 ### Added
