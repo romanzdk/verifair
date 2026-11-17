@@ -51,7 +51,7 @@ A higher price is prorated by the days left; a lower one waits for the next cycl
 | Proration math for all edge cases | `pytest tests/test_pricing.py` | ✅ 212 passed | [CI job #8812](https://example.com/ci/8812) | yes |
 | Retried request does not prorate twice | `pytest tests/test_plan_change.py::test_retry` | ✅ passed | [CI job #8812](https://example.com/ci/8812) | yes |
 | 40 real customers match the Finance sheet | notebook, run all cells | ✅ 40/40 match | [notebook](https://example.com/notebooks/proration-golden) | no, it reads past invoices |
-| Upgrade works on staging | upgrade test account #771 in the UI | ✅ invoice line 13.33 EUR | [staging](https://example.com/staging/plan-change) | yes |
+| Upgrade works on staging | `POST /accounts/771/plan` on staging | ✅ invoice line 13.33 EUR | [staging](https://example.com/staging/plan-change) | yes |
 | No new errors after deploy | log query, last 2h | ⚠️ 40 minutes only, staging was redeployed | [log query](https://example.com/logs?q=plan-change) | no |
 
 **Upgrade works on staging:** the plan-change call for test account #771 and the invoice line it wrote.
