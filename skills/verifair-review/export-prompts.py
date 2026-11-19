@@ -33,6 +33,7 @@ CODEX_CONTEXT = (
     "<environment_context>",
     "[Historical user;",
     "[Historical assistant;",
+    "<skill>",
 )
 
 
@@ -118,6 +119,12 @@ def codex_prompt(record: dict) -> str | None:
     return prompt_text({"type": "user", "message": {"content": content}})
 
 
+def is_subagent(meta: dict) -> bool:
+    payload = meta.get("payload")
+    source = payload.get("source") if isinstance(payload, dict) else None
+    return isinstance(source, dict) and "subagent" in source
+
+
 def read_prompts(path: str) -> list[str]:
     prompts = []
     previous_source = None
@@ -125,12 +132,16 @@ def read_prompts(path: str) -> list[str]:
         for line in lines:
             try:
                 record = json.loads(line)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, RecursionError):
                 previous_source = None
                 continue
             if not isinstance(record, dict):
                 previous_source = None
                 continue
+            if record.get("type") == "session_meta" and is_subagent(record):
+                raise ValueError(
+                    f"{path} is a subagent session: another agent wrote its prompts, not the author"
+                )
             if not (text := prompt_text(record) or codex_prompt(record)):
                 previous_source = None
                 continue
@@ -189,10 +200,13 @@ def main() -> None:
     args = parser.parse_args()
     try:
         prompts = read_prompts(args.session)[: args.upto]
-    except OSError as error:
+    except (OSError, ValueError) as error:
         parser.error(str(error))
     if not prompts:
-        parser.error(f"no prompts found in {args.session}")
+        parser.error(
+            f"no prompts found in {args.session}: expected a Claude Code session or a Codex"
+            " rollout-*.jsonl file (`codex exec --json` output has no prompts)"
+        )
     if unknown := sorted(args.drop - set(range(1, len(prompts) + 1))):
         parser.error(f"--drop: no prompt numbered {unknown} (there are {len(prompts)})")
     print(section(prompts, args.drop), end="")
