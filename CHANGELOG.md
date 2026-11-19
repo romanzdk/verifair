@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Added
+
+- A static demo on the docs site, linked from the top of the README as "Try the demo review": the four `scripts/demo.py` reviews, rebuilt on every docs deploy by `scripts/snapshot-demo.sh`. Commenting, signing and verdicts are off there.
+
 ### Changed
 
 - `docker compose up` pulls the release image instead of building it, and no longer publishes Postgres on port 5432, so it does not clash with a Postgres already on your machine. To run your checkout, run from source; contributors start a test database with one `docker run` line (see Contributing in the README).
