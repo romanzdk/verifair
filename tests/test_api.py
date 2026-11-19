@@ -1,4 +1,5 @@
 import asyncio
+import importlib.metadata
 import json
 import re
 import threading
@@ -2412,7 +2413,17 @@ def test_skill_is_served_to_agents_with_a_token(client):
 def test_skill_links_work_outside_the_repository():
     # installs copy only the skill folder, and /api/skill serves the file alone
     skill = (Path(__file__).parents[1] / "skills/verifair-review/SKILL.md").read_text()
-    assert re.findall(r"\]\((?!https://|#|/)([^)]+)\)", skill) == []
+    inline = re.findall(r"\]\((?!https://|#|/images/)([^)]+)\)", skill)
+    reference = re.findall(r"^\[[^\]]+\]:\s*(?!https://)(\S+)", skill, re.M)
+    assert inline + reference == []
+
+
+def test_skill_links_to_the_docs_of_its_own_version():
+    # the skill a server hands out must not read docs that changed after its release
+    version = importlib.metadata.version("verifair")
+    skill = (Path(__file__).parents[1] / "skills/verifair-review/SKILL.md").read_text()
+    refs = re.findall(r"github\.com/romanzdk/verifair/blob/([^/]+)/", skill)
+    assert refs and set(refs) == {f"v{version}"}, f"link the skill's docs to blob/v{version}/"
 
 
 def test_skill_missing_from_the_install_is_a_404(client, monkeypatch, tmp_path):
