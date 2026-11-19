@@ -1202,6 +1202,20 @@ def get_user(conn: Connection, id: str) -> Row | None:
     return conn.execute("SELECT * FROM users WHERE id=%s", (id,)).fetchone()
 
 
+def seen_names(conn: Connection, ids: Collection[str]) -> dict[str, str]:
+    # local mode keeps no users, so a requested reviewer is named by their last signature or verdict
+    if not ids:
+        return {}
+    rows = conn.execute(
+        "SELECT DISTINCT ON (id) id, name FROM ("
+        " SELECT signer_id AS id, signer_name AS name, created_at FROM signatures"
+        " UNION ALL SELECT reviewer_id, reviewer_name, created_at FROM verdicts"
+        ") seen WHERE id = ANY(%s) ORDER BY id, created_at DESC",
+        (list(ids),),
+    ).fetchall()
+    return {row["id"]: row["name"] for row in rows}
+
+
 def list_users(conn: Connection) -> list[Row]:
     return conn.execute(
         'SELECT * FROM users ORDER BY role != \'admin\', name COLLATE "C", id COLLATE "C"'
