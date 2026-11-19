@@ -40,6 +40,16 @@ Feedback that helps:
 
 The author answers or resolves the thread like any other.
 
+## Evals, DSPy and prompt coaching
+
+Evals and tools like [DSPy](https://dspy.ai) improve prompts by measuring them: you run the same prompt on many test cases, score the results and tune it. That works for prompts that run again and again, such as a system prompt, a skill, a `CLAUDE.md` or a product feature.
+
+Most prompts typed into a coding agent run once. There is no test set to score them on, so feedback from a person is the practical option. The two work together:
+
+- **No evals yet?** Start here. A teammate's comment needs no setup, no test cases and no tooling.
+- **Already using evals?** A teammate who knows the project still sees what a score does not: context about the codebase the agent was missing, an unclear goal, a habit that costs extra rounds.
+- **Same advice again and again?** Move it into something reusable, like a `CLAUDE.md` rule, a skill or a prompt template. That reusable text is what evals and DSPy can then measure and tune.
+
 ## Limits
 
 - Claude Code sessions only for now. Other agents can still paste a prompts section by hand.

@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Changed
+
+- The prompt coaching docs explain how it fits with evals and DSPy: start without any setup, and move repeated advice into reusable prompts that evals can measure.
+
 ## [0.11.0] - 2026-11-19
 
 ### Added
