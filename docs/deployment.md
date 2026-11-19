@@ -1,10 +1,33 @@
 # Deployment
 
+- [Deploy with your agent](#deploy-with-your-agent)
 - [Run from source](#run-from-source)
 - [Docker](#docker)
 - [Kubernetes](#kubernetes)
 - [Deploying](#deploying)
 - [Upgrading an existing HTTP deployment](#upgrading-an-existing-http-deployment)
+
+## Deploy with your agent
+
+Paste this into your coding agent (Claude Code, Codex or another). It asks what you need, shows its plan before it changes anything, and at the end connects itself to verifair:
+
+```text
+Set up verifair (https://github.com/romanzdk/verifair) for me.
+Read https://romanzdk.github.io/verifair/llms-full.txt first and follow its docs.
+
+1. Ask me: run it on this machine with Docker, or deploy it to Kubernetes?
+2. Ask only what that choice needs:
+   - Docker: nothing more.
+   - Kubernetes: which kube context and namespace, the bundled Postgres or my own,
+     and whether I only want to try it (port-forward) or run it for a team
+     (domain, TLS, sign-in provider).
+3. Show me the plan and the commands, and wait for my OK before you change anything.
+4. Rules: use the latest release tag, not main. Never put secrets in git or ask me
+   to paste them in chat. Never put verifair on a domain without sign-in.
+5. When it runs: check that /readyz answers and give me the URL. Then install the
+   verifair-review skill and set VERIFAIR_URL and VERIFAIR_API_TOKEN for yourself,
+   so you can publish a review.
+```
 
 ## Run from source
 
