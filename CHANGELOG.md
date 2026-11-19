@@ -8,6 +8,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ### Changed
 
+- `docker compose up` pulls the release image instead of building it, and no longer publishes Postgres on port 5432, so it does not clash with a Postgres already on your machine. Contributors start a test database with one `docker run` line (see Contributing in the README).
+- The README says prompt export is automatic only for Claude Code today.
 - The prompt coaching docs explain how it fits with evals and DSPy: start without any setup, and move repeated advice into reusable prompts that evals can measure.
 
 ## [0.11.0] - 2026-11-19

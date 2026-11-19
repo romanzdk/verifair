@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths: &docs-paths
       - README.md
+      - CHANGELOG.md
       - docs/**
       - mkdocs.yml
       - docs_hooks.py
