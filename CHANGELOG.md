@@ -26,7 +26,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 - A signer who opens their approved review sees who approved it, instead of "Someone else has to approve it".
 - In local mode, a requested reviewer shows under the name they last signed or reviewed with, once they have done either, instead of their id.
 - The demo's high-risk review no longer shows the report template's hint lines.
-- The status column in review lists is wide enough for "Awaiting implementation", which spilled into the risk column. In the static demo, list times are counted when the page is viewed ("waiting 3d"), as in the app, instead of a long date that was cut off.
+- The status column in review lists is wide enough for "Awaiting implementation", which spilled into the risk column. The title column keeps its width at 1024px.
+- The static demo shows list times as the app does ("waiting <1m"), not as a long date that was cut off.
 
 ## [0.11.0] - 2026-11-19
 

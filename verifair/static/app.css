@@ -231,7 +231,7 @@ details.me summary .ic14 { color: var(--text-subtle); }
 .tabs a.zero .tab-n { background: none; color: var(--text-subtle); }
 .list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .chg {
-  display: grid; grid-template-columns: 16px minmax(0, 1fr) 160px 72px 24px 72px 36px 72px; column-gap: 12px;
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) 160px 72px 24px 72px 36px 72px; column-gap: 8px;
   align-items: center; min-height: 56px; padding: 8px 16px; border-top: 1px solid var(--border); color: inherit;
 }
 .chg:first-child { border-top: 0; }
@@ -258,6 +258,7 @@ details.me summary .ic14 { color: var(--text-subtle); }
 .stack { display: flex; align-items: center; gap: 8px; }
 .stack .more { font-size: 12px; color: var(--text-muted); }
 .chg .cm { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.chg .badge { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 20px; }
 .chg .when { font-size: 12px; color: var(--text-muted); text-align: right; white-space: nowrap; }
 .chg .when.wait { color: var(--text); }
 .chg-ph { display: none; }

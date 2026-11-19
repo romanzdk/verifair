@@ -22,12 +22,6 @@ export BASE="$base" ORIGIN="$url"
 export HEAD='<script>try { const t = localStorage.getItem("vf-demo-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>'
 export NOTE='<p class="banner" role="status">Static demo: commenting, signing and verdicts are off. <a href="https://github.com/romanzdk/verifair#quickstart">Run verifair</a> to try them.</p>'
 export OFF='<script>
-// relative times like "4m ago" would stay frozen at the time of the snapshot, so count them again
-const age = (s) => s < 60 ? "<1m" : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`;
-for (const t of document.querySelectorAll("time.when")) {
-  const s = (Date.now() - Date.parse(t.dateTime)) / 1000;
-  t.textContent = t.classList.contains("wait") ? `waiting ${age(s)}` : s < 60 ? "just now" : s < 2592000 ? `${age(s)} ago` : t.title.replace(/ \d\d:\d\d UTC$/, "");
-}
 const pressTheme = (form, theme) => { for (const b of form.querySelectorAll("button")) b.setAttribute("aria-pressed", b.value === theme); };
 for (const f of document.querySelectorAll(".theme-form")) pressTheme(f, document.documentElement.dataset.theme || "system");
 for (const e of ["submit", "htmx:confirm", "click"]) addEventListener(e, (ev) => {
