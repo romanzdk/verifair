@@ -1,4 +1,4 @@
-"""Print the prompts you typed in one Claude Code session as a `## Prompts` report section.
+"""Print your Claude Code or Codex session prompts as a `## Prompts` report section.
 
 Usage: python3 -I export-prompts.py SESSION.jsonl [--upto N] [--drop 1-3,5]
 
@@ -28,6 +28,12 @@ SLASH_COMMAND = re.compile(r"<command-name>(.*?)</command-name>")
 COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.DOTALL)
 T3_HANDOFF = ("Context handoff (", "\nUser message:\n")
 T3_QUOTE = re.compile(r"\[[^\]\n]*\]\((t3-citation://[^)\s]+)\)")
+CODEX_CONTEXT = (
+    "# AGENTS.md instructions",
+    "<environment_context>",
+    "[Historical user;",
+    "[Historical assistant;",
+)
 
 
 def readable_quote(link: re.Match) -> str:
@@ -75,16 +81,70 @@ def prompt_text(record: dict) -> str | None:
     return text or None
 
 
+def codex_prompt(record: dict) -> str | None:
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    if record.get("type") == "event_msg" and payload.get("type") == "user_message":
+        text = payload.get("message")
+        if not isinstance(text, str):
+            return None
+        images = sum(
+            len(value)
+            for key in ("images", "local_images")
+            if isinstance(value := payload.get(key), list)
+        )
+        content = [{"type": "text", "text": text}] + [{"type": "image"}] * images
+    elif (
+        record.get("type") == "response_item"
+        and payload.get("type") == "message"
+        and payload.get("role") == "user"
+        and isinstance(payload.get("content"), list)
+    ):
+        content = []
+        for block in payload["content"]:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "input_text" and isinstance(block.get("text"), str):
+                text = block["text"]
+                content.append({"type": "text", "text": text})
+            elif block.get("type") == "input_image":
+                content.append({"type": "image"})
+    else:
+        return None
+    content = [
+        block for block in content if not block.get("text", "").lstrip().startswith(CODEX_CONTEXT)
+    ]
+    return prompt_text({"type": "user", "message": {"content": content}})
+
+
 def read_prompts(path: str) -> list[str]:
     prompts = []
+    previous_source = None
     with open(path, encoding="utf-8", errors="replace") as lines:
         for line in lines:
             try:
                 record = json.loads(line)
             except json.JSONDecodeError:
+                previous_source = None
                 continue
-            if isinstance(record, dict) and (text := prompt_text(record)):
-                prompts.append(text)
+            if not isinstance(record, dict):
+                previous_source = None
+                continue
+            if not (text := prompt_text(record) or codex_prompt(record)):
+                previous_source = None
+                continue
+            source = record.get("type")
+            if (
+                source in ("event_msg", "response_item")
+                and previous_source in ("event_msg", "response_item")
+                and source != previous_source
+                and prompts[-1] == text
+            ):
+                previous_source = None
+                continue
+            prompts.append(text)
+            previous_source = source
     return prompts
 
 
@@ -114,7 +174,7 @@ def section(prompts: list[str], drop: set[int]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("session", help="Claude Code session file (~/.claude/projects/*/*.jsonl)")
+    parser.add_argument("session", help="Claude Code session or Codex rollout .jsonl file")
     parser.add_argument(
         "--upto",
         type=int,

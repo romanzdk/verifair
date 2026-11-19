@@ -154,3 +154,225 @@ def test_no_prompts_or_no_file_fails_with_a_message(tmp_path):
         assert result.returncode == 2
         assert result.stdout == ""
         assert "Traceback" not in result.stderr
+
+
+def _codex_user(*content):
+    return {
+        "type": "response_item",
+        "payload": {"type": "message", "role": "user", "content": list(content)},
+    }
+
+
+def _codex_event(text, **extra):
+    return {"type": "event_msg", "payload": {"type": "user_message", "message": text, **extra}}
+
+
+def _export_records(tmp_path, records, *args, check=True):
+    session = tmp_path / "rollout.jsonl"
+    session.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+    return subprocess.run(
+        [sys.executable, "-I", str(SCRIPT), str(session), *args],
+        capture_output=True,
+        text=True,
+        check=check,
+    )
+
+
+CODEX_RECORDS = [
+    {"type": "session_meta", "payload": {"cli_version": "0.167.0", "cwd": "/private/project"}},
+    _codex_user(
+        {
+            "type": "input_text",
+            "text": "# AGENTS.md instructions for /private/project\nprivate rules",
+        }
+    ),
+    _codex_user(
+        {"type": "input_text", "text": "<environment_context>private cwd</environment_context>"}
+    ),
+    _codex_user(
+        {"type": "input_text", "text": "Context handoff (full_thread_summary):\nprivate history"}
+    ),
+    _codex_user(
+        {
+            "type": "input_text",
+            "text": "[Historical user; user_message; thread=x]\nprivate old task",
+        }
+    ),
+    _codex_user(
+        {
+            "type": "input_text",
+            "text": "[Historical assistant; assistant_message; thread=x]\nprivate old reply",
+        }
+    ),
+    {
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": "private policy"}],
+        },
+    },
+    {
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "private reply"}],
+        },
+    },
+    {
+        "type": "response_item",
+        "payload": {"type": "function_call_output", "output": "private tool output"},
+    },
+    _codex_user({"type": "input_text", "text": "Fix the login.\n\n## Intent\nKeep it simple."}),
+    _codex_user(
+        {"type": "input_text", "text": "<environment_context>private cwd</environment_context>"},
+        {"type": "input_text", "text": "Why is this red?"},
+        {"type": "input_image", "image_url": "file:///private/screenshot.png"},
+    ),
+    _codex_user({"type": "input_text", "text": "Try again"}),
+    _codex_user({"type": "input_text", "text": "Try again"}),
+    {"type": "compacted", "payload": {"message": "private summary"}},
+    {"type": "response_item", "payload": None},
+]
+
+
+def test_codex_rollout_exports_prompts_without_injected_context(tmp_path):
+    out = _export_records(tmp_path, CODEX_RECORDS).stdout
+
+    assert "> Fix the login.\n>\n> ## Intent\n> Keep it simple." in out
+    assert "> Why is this red?\n>\n> [image]" in out
+    assert out.count("> Try again") == 2
+    assert "private" not in out
+    assert section_headings("## Intent\n\nx\n\n" + out) == ["Intent", "Prompts"]
+    assert [line for line in out.splitlines() if line.startswith("**")] == [
+        "**1.**",
+        "**2.**",
+        "**3.**",
+        "**4.**",
+    ]
+
+
+def test_codex_preview_selection_keeps_original_numbers(tmp_path):
+    out = _export_records(tmp_path, CODEX_RECORDS, "--upto", "3", "--drop", "1-2").stdout
+
+    assert out.endswith("**3.**\n\n> Try again\n")
+    assert "Fix the login" not in out
+    assert "Why is this red" not in out
+
+
+def test_codex_mirrored_events_do_not_duplicate_prompts(tmp_path):
+    records = [
+        _codex_user({"type": "input_text", "text": "Try again"}),
+        _codex_event("Try again"),
+        _codex_user({"type": "input_text", "text": "Try again"}),
+        _codex_event("Try again"),
+        _codex_event(
+            "Look at this", images=["/private/image.png"], local_images=["/private/local.png"]
+        ),
+        {"type": "event_msg", "payload": {"type": "agent_message", "message": "private reply"}},
+    ]
+    out = _export_records(tmp_path, records).stdout
+
+    assert out.count("> Try again") == 2
+    assert "> Look at this" in out
+    assert out.count("> [image]") == 2
+    assert "private" not in out
+
+
+def test_codex_exec_output_without_prompts_fails_closed(tmp_path):
+    result = _export_records(
+        tmp_path,
+        [
+            {"type": "thread.started", "thread_id": "t1"},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "private reply"}},
+        ],
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "no prompts found" in result.stderr
+
+
+def test_codex_events_skip_injected_context_and_malformed_attachments(tmp_path):
+    out = _export_records(
+        tmp_path,
+        [
+            _codex_event("# AGENTS.md instructions\nprivate rules"),
+            _codex_event("<environment_context>private cwd</environment_context>"),
+            _codex_event("[Historical user; user_message; thread=x]\nprivate old task"),
+            _codex_event("Keep this", images=123, local_images="/private/image.png"),
+            _codex_event(None),
+        ],
+    ).stdout
+
+    assert "private" not in out
+    assert "[image]" not in out
+    assert out.endswith("**1.**\n\n> Keep this\n")
+
+
+def test_codex_mixed_rollout_preserves_unmirrored_prompts(tmp_path):
+    records = [
+        _codex_user({"type": "input_text", "text": "Earlier real prompt"}),
+        _codex_user({"type": "input_text", "text": "Current real prompt"}),
+        _codex_event("Current real prompt"),
+        _codex_user({"type": "input_text", "text": "Last real prompt"}),
+        _codex_event("Try again"),
+        _codex_user({"type": "input_text", "text": "Try again"}),
+        _codex_event("Try again"),
+        _codex_user({"type": "input_text", "text": "Try again"}),
+    ]
+    out = _export_records(tmp_path, records).stdout
+
+    assert [line for line in out.splitlines() if line.startswith("> ")] == [
+        "> Earlier real prompt",
+        "> Current real prompt",
+        "> Last real prompt",
+        "> Try again",
+        "> Try again",
+    ]
+
+
+def test_codex_prompts_can_be_uploaded_and_read_in_a_report(tmp_path, client):
+    prompts = _export_records(tmp_path, CODEX_RECORDS, "--upto", "2", "--drop", "1").stdout
+    body = "## Intent\n\nFix the login.\n\n" + prompts
+    headers = {"Authorization": "Bearer t"}
+    response = client.post(
+        "/api/reports",
+        headers=headers,
+        json={
+            "id": "codex-prompts",
+            "project": "login",
+            "title": "Login",
+            "risk": "low",
+            "body": body,
+        },
+    )
+
+    assert response.status_code == 201
+    snapshot = client.get("/api/reports/codex-prompts/versions/1", headers=headers)
+    assert snapshot.json()["body"] == body
+    page = client.get("/r/codex-prompts")
+    assert page.status_code == 200
+    assert "Why is this red?" in page.text
+    assert "<blockquote>" in page.text
+    assert "[image]" in page.text
+    assert "private screenshot" not in page.text
+
+
+def test_codex_repeated_prompt_after_turn_boundary_is_not_a_mirror(tmp_path):
+    for boundary in [
+        {"type": "event_msg", "payload": {"type": "task_started"}},
+        {"type": "turn_context", "payload": {}},
+        {"type": "response_item", "payload": {"type": "message", "role": "assistant"}},
+    ]:
+        out = _export_records(
+            tmp_path,
+            [
+                _codex_event("Again"),
+                boundary,
+                _codex_user({"type": "input_text", "text": "Again"}),
+            ],
+        ).stdout
+        assert out.count("> Again") == 2
