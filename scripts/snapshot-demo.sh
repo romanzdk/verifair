@@ -1,5 +1,6 @@
 #!/bin/sh
 # Saves the pages of a running verifair, loaded with scripts/demo.py, as a static demo.
+# Run it against an empty database that holds only the demo: every page Alice can see is published.
 # Usage: scripts/snapshot-demo.sh <output dir> <URL path the output is served at>
 # Example: scripts/snapshot-demo.sh site/demo /verifair/demo
 set -eu
