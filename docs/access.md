@@ -105,7 +105,7 @@ Startup prints one line with the reason and exits with code 1 when:
 - `VERIFAIR_OIDC_ISSUER` is set without `VERIFAIR_OIDC_CLIENT_ID`, `VERIFAIR_OIDC_CLIENT_SECRET` or `VERIFAIR_SESSION_SECRET`, or the session secret is shorter than 32 characters.
 - The issuer or `VERIFAIR_BASE_URL` is not HTTPS (plain HTTP is only allowed for `localhost` and `127.0.0.1`).
 - The issuer is Google and `VERIFAIR_OIDC_ALLOWED_DOMAINS` is not set.
-- `VERIFAIR_OPEN_SIGNUP` is `true` without `VERIFAIR_OIDC_ALLOWED_DOMAINS`, or is not `true` or `false`.
+- `VERIFAIR_OPEN_SIGNUP` is `true` without `VERIFAIR_OIDC_ALLOWED_DOMAINS`, or is not `true`, `false`, `1` or `0`.
 - `VERIFAIR_IDENTITY_HEADER` is set. The trusted-header mode was removed. See [Moving from the identity header](#moving-from-the-identity-header).
 - The database has no members and `VERIFAIR_BOOTSTRAP_ADMIN_ID` is not set.
 - `VERIFAIR_BOOTSTRAP_ADMIN_ID` is set without `VERIFAIR_OIDC_ISSUER`, so a missing issuer does not quietly start local mode.

@@ -34,10 +34,11 @@ from that checkout (docs/access.md for sign-in).
 
 ## Run from source
 
-To run from source, start only the database and point verifair at it:
+To run from source, start a database and point verifair at it:
 
 ```bash
-docker compose up -d db
+docker run -d --name verifair-dev-db -e POSTGRES_USER=verifair -e POSTGRES_PASSWORD=verifair \
+  -p 127.0.0.1:5432:5432 postgres:18
 uv sync
 export VERIFAIR_API_TOKEN=change-me
 export VERIFAIR_DATABASE_URL=postgresql://verifair:verifair@localhost:5432/verifair
@@ -70,10 +71,10 @@ To run it on your own machine with its own database, use Docker Compose from a r
 ```bash
 git checkout v1.2.3
 printf 'VERIFAIR_API_TOKEN=%s\n' "$(openssl rand -hex 32)" > .env
-docker compose up -d --build
+docker compose up -d
 ```
 
-Compose publishes Postgres on `127.0.0.1:5432` for running from source; if that port is taken, remove the `ports` of `db`.
+Compose pulls the image of the release you checked out. `docker compose up --build` builds your checkout instead. Postgres is reachable only inside Compose, so it does not clash with a Postgres already on your machine.
 
 ```bash
 docker run --rm -e VERIFAIR_API_TOKEN=change-me \

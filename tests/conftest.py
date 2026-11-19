@@ -114,7 +114,7 @@ def admin_conn():
         info = conninfo.conninfo_to_dict(TEST_DATABASE_URL)
         where = f"{info.get('host')}:{info.get('port', 5432)}/{info.get('dbname')}"
         pytest.exit(
-            f"Postgres is not reachable at {where}. Run: docker compose up -d db", returncode=2
+            f"Postgres is not reachable at {where}. See Contributing in README.md.", returncode=2
         )
     with c:
         yield c

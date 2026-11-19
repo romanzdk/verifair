@@ -35,7 +35,7 @@ When the agent writes the code, the prompts are the part a person wrote. With [p
 ## Features
 
 - **One report per change.** Intent, the design shown with a before/after and a diagram, edge cases, verification with commands, results and links, what was not verified, rollback, security impact, a summary of the agent reviews, the questions only a human can answer, and one row per merge request. See [the report](#the-report).
-- **Prompt coaching.** Other tools let you see the prompts behind a change. verifair lets teammates comment on each one, right where they review the change. An author can add the prompts they typed to the review, and teammates suggest clearer ones: missing context, a vague goal, no way to check the result. Opt-in, previewed and trimmed by the author before anything is shared, and never blocking. See [prompt coaching](docs/prompt-coaching.md).
+- **Prompt coaching.** Other tools let you see the prompts behind a change. verifair lets teammates comment on each one, right where they review the change. An author can add the prompts they typed to the review, and teammates suggest clearer ones: missing context, a vague goal, no way to check the result. Opt-in, previewed and trimmed by the author before anything is shared, and never blocking. The export is automatic for Claude Code today; with other agents, paste the prompts by hand ([#56](https://github.com/romanzdk/verifair/issues/56)). See [prompt coaching](docs/prompt-coaching.md).
 - **A human signs first.** The person who asked for the change reads the agent's report and signs it. Only then does the team get asked to review. The signer or an admin can unsign while nobody has given a verdict.
 - **Comment on any text.** Select a sentence to start a thread. Threads are blocking by default; a reviewer can mark one as a suggestion. [Conventional Comments](https://conventionalcomments.org) label buttons (`issue:`, `nitpick:`, `question:` and more) set the label and whether the thread blocks.
 - **Verdicts with rules.** Approve or request changes. Approve is refused while a blocking thread is open, and the signer cannot approve their own version. Unapprove or withdraw a verdict if you change your mind.
@@ -91,7 +91,7 @@ You need Docker with Compose.
 ```bash
 git clone https://github.com/romanzdk/verifair.git
 cd verifair
-docker compose up --build
+docker compose up
 ```
 
 Open http://localhost:8000. The agent token is `change-me`. Set `VERIFAIR_API_TOKEN` before you start to use another one. Users set a display name (kept in a cookie). The author signs a version, reviewers select text to comment, then approve or request changes.
@@ -256,13 +256,14 @@ verifair reviews the change report, not the diff.
 Issues and pull requests are welcome. Keep changes small and the language plain.
 
 ```bash
-docker compose up -d db
+docker run -d --name verifair-dev-db -e POSTGRES_USER=verifair -e POSTGRES_PASSWORD=verifair \
+  -p 127.0.0.1:5432:5432 postgres:18
 uv sync
 uv run pytest
 uv run ruff check . && uv run ruff format --check .
 ```
 
-Each test gets its own schema in that database and drops it at the end. Set `VERIFAIR_TEST_DATABASE_URL` to use another Postgres. To reset everything, including the data, run `docker compose down -v`. `tests/test_js.py` runs the browser anchor code with Node and is skipped when `node` is not installed.
+Each test gets its own schema in that database and drops it at the end. If port 5432 is taken, publish another port and set `VERIFAIR_TEST_DATABASE_URL` to match. To remove the database, run `docker rm -f verifair-dev-db`. `docker compose up --build` runs the app from your checkout instead of the release image; `docker compose pull` switches back. `tests/test_js.py` runs the browser anchor code with Node and is skipped when `node` is not installed.
 
 ## License
 

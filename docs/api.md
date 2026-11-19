@@ -17,6 +17,7 @@ The running app also serves an API explorer at `/docs` and `/redoc`, and `openap
 - [Read and answer comments](#read-and-answer-comments)
 - [Wait for feedback](#wait-for-feedback)
 - [Archive a report](#archive-a-report)
+- [Upload an image](#upload-an-image)
 - [Get the agent skill](#get-the-agent-skill)
 - [Errors](#errors)
 - [Report rules](#report-rules)
