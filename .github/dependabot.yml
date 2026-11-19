@@ -30,6 +30,8 @@ updates:
     ignore:
       - dependency-name: postgres
         update-types: [version-update:semver-major]
+      # each release moves this tag, and a test keeps it equal to the package version
+      - dependency-name: ghcr.io/romanzdk/verifair
   - package-ecosystem: uv
     directory: /
     schedule:

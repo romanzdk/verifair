@@ -94,6 +94,8 @@ cd verifair
 docker compose up
 ```
 
+This runs the latest release image, not the code you cloned. To run your checkout, see [Run from source](docs/deployment.md#run-from-source).
+
 Open http://localhost:8000. The agent token is `change-me`. Set `VERIFAIR_API_TOKEN` before you start to use another one. Users set a display name (kept in a cookie). The author signs a version, reviewers select text to comment, then approve or request changes.
 
 In a second terminal, load the demo reviews (it needs only Python 3):
@@ -256,14 +258,14 @@ verifair reviews the change report, not the diff.
 Issues and pull requests are welcome. Keep changes small and the language plain.
 
 ```bash
-docker run -d --name verifair-dev-db -e POSTGRES_USER=verifair -e POSTGRES_PASSWORD=verifair \
+docker run -d --rm --name verifair-dev-db -e POSTGRES_USER=verifair -e POSTGRES_PASSWORD=verifair \
   -p 127.0.0.1:5432:5432 postgres:18
 uv sync
 uv run pytest
 uv run ruff check . && uv run ruff format --check .
 ```
 
-Each test gets its own schema in that database and drops it at the end. If port 5432 is taken, publish another port and set `VERIFAIR_TEST_DATABASE_URL` to match. To remove the database, run `docker rm -f verifair-dev-db`. `docker compose up --build` runs the app from your checkout instead of the release image; `docker compose pull` switches back. `tests/test_js.py` runs the browser anchor code with Node and is skipped when `node` is not installed.
+Each test gets its own schema in that database and drops it at the end. If port 5432 is taken, publish another port and set `VERIFAIR_TEST_DATABASE_URL` to match. `docker stop verifair-dev-db` removes the database and its data. `tests/test_js.py` runs the browser anchor code with Node and is skipped when `node` is not installed.
 
 ## License
 
