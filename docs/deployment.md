@@ -119,7 +119,7 @@ Open http://localhost:8000. To add the demo reviews, run this from the repositor
 VERIFAIR_API_TOKEN=$(sed -n 's/^VERIFAIR_API_TOKEN=//p' deploy/kustomize/example/secrets.env) python3 scripts/demo.py
 ```
 
-If port 8000 is taken on your machine, forward another one (`8080:80`) and use that port in the URL and in `VERIFAIR_URL`. The port-forward stops when you stop the command. To use another namespace, change `namespace` in `kustomization.yaml` and the name in `namespace.yaml`.
+If port 8000 is taken on your machine, forward another one (`8080:80`), set `VERIFAIR_BASE_URL=http://localhost:8080` in `kustomization.yaml`, and use that URL in the browser and as `VERIFAIR_URL` (also for `scripts/demo.py`). The port-forward stops when you stop the command. To use another namespace, change `namespace` in `kustomization.yaml` and the name in `namespace.yaml`.
 
 On the first install verifair can restart once or twice while Postgres creates its database. Keep `db.env`: Postgres keeps the password it was created with. With another password, the new verifair pod logs `password authentication failed` and restarts while the old one keeps running; put the old `db.env` back and apply again. The `.env` files are git-ignored. `kubectl delete -k .` deletes the namespace, and the database volume with it.
 
