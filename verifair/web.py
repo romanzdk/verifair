@@ -552,7 +552,8 @@ def report_context(
     all_requested = db.requested_reviewers(conn, id)
     requested = [p for p in all_requested if p != signer_id]
     users = db.list_users(conn) if shared or resolved_by or requested else []
-    names = db.seen_names(conn, requested) | {u["id"]: u["name"] for u in users}
+    names = {u["id"]: u["name"] for u in users}
+    names |= db.seen_names(conn, [p for p in requested if p not in names])
     judged = rules.latest_verdicts(verdicts, revision)
     can_change = version == current and not readonly_plan
     protected = {
@@ -778,8 +779,9 @@ def index(request: Request, conn: Conn, user: User, scope: str | None = None):
 def _change_rows(conn: db.Connection, reports: list[db.Row]) -> list[dict]:
     ids = [report["id"] for report in reports]
     verdicts_by, requests_by = db.verdicts_by_report(conn, ids), db.requests_by_report(conn, ids)
-    requested = {person for people in requests_by.values() for person in people}
-    names = db.seen_names(conn, requested) | {u["id"]: u["name"] for u in db.list_users(conn)}
+    names = {u["id"]: u["name"] for u in db.list_users(conn)}
+    unnamed = {p for people in requests_by.values() for p in people if p not in names}
+    names |= db.seen_names(conn, unnamed)
     rows = []
     for report in reports:
         report = dict(report)

@@ -21,11 +21,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 ### Fixed
 
 - The prompt export script runs on Python 3.9, the `python3` that macOS ships. It failed there with a `TypeError`.
-
-### Fixed
-
 - A signer who opens their approved review sees who approved it, instead of "Someone else has to approve it".
-- In local mode, a requested reviewer shows under the name they last signed or reviewed with, not their id.
+- In local mode, a requested reviewer shows under the name they last signed or reviewed with, once they have done either, instead of their id.
 - The demo's high-risk review no longer shows the report template's hint lines.
 
 ## [0.11.0] - 2026-11-19
