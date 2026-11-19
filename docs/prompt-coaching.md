@@ -1,6 +1,6 @@
 # Prompt coaching
 
-When an agent writes the code, the prompts are the part a person wrote. They decide what gets built, how many rounds it takes, and what the agent never heard about. Code review gives feedback on the code. Prompt coaching gives feedback on the prompts, so people learn from each other how to work with agents.
+When an agent writes the code, the prompts are the part a person wrote. They decide what gets built, how many rounds it takes, and what the agent never heard about. Code review gives feedback on the code. Prompt coaching gives feedback on the prompts, so people learn from each other how to work with agents. Some tools already let you read the prompts behind a change; here teammates comment on single prompts, on the same page where they review the change.
 
 An author can add the prompts they typed in the agent session to their review. Teammates then comment on them like on any other part of the report: what was unclear, what context was missing, how they would have asked.
 
