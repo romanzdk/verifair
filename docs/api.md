@@ -392,7 +392,7 @@ Deleting a report deletes the images that only it used, in any version, plan or 
 
 ## Get the agent skill
 
-The usual way to install the skill is `npx skills add romanzdk/verifair@v<server version> --skill verifair-review -g` (the **Agent tokens** page shows it with the right version). Without Node.js, or on a fork that cannot reach GitHub, download it from the server: `GET /api/skill` returns the `verifair-review` skill (`SKILL.md`, `text/markdown`) that ships with this server. It needs a token like the rest of the API. This command saves it for Claude Code; other agents read the same file from their own skills folder:
+The usual way to install the skill is `npx skills add romanzdk/verifair@v<server version> --skill verifair-review -g` (the **Agent tokens** page shows it with the right version). Without Node.js, or on a fork that cannot reach GitHub, download it from the server: `GET /api/skill` returns the `verifair-review` skill (`SKILL.md`, `text/markdown`) that ships with this server. It needs a token like the rest of the API. It does not include `export-prompts.py`, which the skill's optional prompts section uses; install with `npx skills` for that. This command saves it for Claude Code; other agents read the same file from their own skills folder:
 
 ```bash
 d=~/.claude/skills/verifair-review && mkdir -p "$d" && curl -fsS -H "Authorization: Bearer $VERIFAIR_API_TOKEN" "${VERIFAIR_URL%/}/api/skill" -o "$d/SKILL.md.new" && grep -q "^name: verifair-review" "$d/SKILL.md.new" && mv "$d/SKILL.md.new" "$d/SKILL.md" || rm -f "$d/SKILL.md.new"
