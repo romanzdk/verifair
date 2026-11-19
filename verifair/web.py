@@ -552,7 +552,7 @@ def report_context(
     all_requested = db.requested_reviewers(conn, id)
     requested = [p for p in all_requested if p != signer_id]
     users = db.list_users(conn) if shared or resolved_by or requested else []
-    names = {u["id"]: u["name"] for u in users}
+    names = db.seen_names(conn, requested) | {u["id"]: u["name"] for u in users}
     judged = rules.latest_verdicts(verdicts, revision)
     can_change = version == current and not readonly_plan
     protected = {
@@ -633,7 +633,7 @@ def report_context(
         if gate
         else UNSIGNED
         if signature is None
-        else SELF_REVIEW
+        else _self_review(selected_status, judged)
         if signer_id == user_id
         else None,
         "user_id": user_id,
@@ -648,6 +648,13 @@ def report_context(
         else [],
         "requests_note": not can_change and (shared or bool(all_requested)),
     }
+
+
+def _self_review(status: str, judged: dict[str, db.Row]) -> str:
+    approvers = [v["reviewer_name"] for v in judged.values() if v["verdict"] == "approve"]
+    if status == "approved" and approvers:
+        return f"You signed this report. {', '.join(approvers)} approved it."
+    return SELF_REVIEW
 
 
 def _labels(users: list[db.Row]) -> dict[str, str]:
@@ -771,7 +778,8 @@ def index(request: Request, conn: Conn, user: User, scope: str | None = None):
 def _change_rows(conn: db.Connection, reports: list[db.Row]) -> list[dict]:
     ids = [report["id"] for report in reports]
     verdicts_by, requests_by = db.verdicts_by_report(conn, ids), db.requests_by_report(conn, ids)
-    names = {u["id"]: u["name"] for u in db.list_users(conn)}
+    requested = {person for people in requests_by.values() for person in people}
+    names = db.seen_names(conn, requested) | {u["id"]: u["name"] for u in db.list_users(conn)}
     rows = []
     for report in reports:
         report = dict(report)

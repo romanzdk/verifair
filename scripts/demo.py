@@ -5,6 +5,7 @@ Usage: VERIFAIR_API_TOKEN=change-me python3 scripts/demo.py
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -251,7 +252,7 @@ REPORTS = [
         "project": "billing",
         "title": "Prorate mid-cycle plan changes",
         "risk": "high",
-        "body": TEMPLATE.read_text(),
+        "body": re.sub(r"^> .*\n\n", "", TEMPLATE.read_text(), flags=re.M),
         "author": "Alice",
         "commit": "a1b2c3d",
     },

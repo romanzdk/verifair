@@ -92,3 +92,11 @@ def test_demo_fills_alices_inbox(settings, make_app):
         "Waiting on others",
     ):
         assert group in inbox
+
+
+def test_demo_reports_have_no_template_hints():
+    demo = load_demo()
+    hints = [line for line in demo.TEMPLATE.read_text().splitlines() if line.startswith("> ")]
+    assert hints
+    for report in demo.REPORTS:
+        assert not any(hint in report.get("body", "") for hint in hints), report["id"]

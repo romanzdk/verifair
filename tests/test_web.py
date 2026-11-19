@@ -3006,6 +3006,34 @@ def test_text_colours_pass_contrast_in_both_themes():
         assert "color: var(--warn-text)" in css.split(rule)[1].split("}")[0], rule
 
 
+def test_signer_sees_who_approved_their_report(client):
+    push(client)
+    sign(client)
+    client.cookies.set("vf_name", "Rita")
+    assert (
+        client.post("/r/prorate/verdict", data={"version": 1, "verdict": "approve"}).status_code
+        == 200
+    )
+    client.cookies.set("vf_id", "signer00")
+    client.cookies.set("vf_name", "Signer")
+    form = client.get("/r/prorate").text.split('id="vf_verdict"')[1].split("</form>")[0]
+    assert '<p class="note">You signed this report. Rita approved it.</p>' in form
+    assert web.SELF_REVIEW not in form
+
+
+def test_local_mode_names_a_requested_reviewer_by_the_name_they_used(client):
+    push(client, id="earlier")
+    client.cookies.set("vf_id", "review00")
+    client.cookies.set("vf_name", "Rita")
+    client.post("/r/earlier/sign", data={"version": 1})
+    push(client, reviewers=["review00"])
+    client.cookies.set("vf_id", "viewer00")
+    client.cookies.set("vf_name", "Vic")
+    page = client.get("/r/prorate").text
+    assert '<span class="rn" title="Rita">Rita</span>' in page and ">review00<" not in page
+    assert "reviewers: Rita review requested" in client.get("/changes").text
+
+
 def test_signer_sees_why_they_cannot_review_their_own_report(client):
     push(client)
     client.cookies.set("vf_id", "signer00")
