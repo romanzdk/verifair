@@ -156,7 +156,7 @@ To let your coding agent set it up, locally or on Kubernetes, paste the prompt f
 
 ## Agent skill
 
-[skills/verifair-review/SKILL.md](skills/verifair-review/SKILL.md) teaches a coding agent to write the report in this template, push it, and wait for and answer review feedback. It never signs or gives verdicts. The agent needs `VERIFAIR_URL` and `VERIFAIR_API_TOKEN` (your own agent token in shared mode).
+[skills/verifair-review/SKILL.md](skills/verifair-review/SKILL.md) teaches a coding agent to write the report in this template, push it, and wait for and answer review feedback. It never signs or gives verdicts. On request it can also add the author's own prompts as a `## Prompts` section, so teammates can suggest clearer prompts. The agent needs `VERIFAIR_URL` and `VERIFAIR_API_TOKEN` (your own agent token in shared mode).
 
 Install it with [skills](https://github.com/vercel-labs/skills), which works for Claude Code, Codex, Cursor and many other agents:
 
