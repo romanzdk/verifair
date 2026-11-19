@@ -37,7 +37,7 @@ from that checkout (docs/access.md for sign-in).
 To run from source, start a database and point verifair at it:
 
 ```bash
-docker run -d --name verifair-dev-db -e POSTGRES_USER=verifair -e POSTGRES_PASSWORD=verifair \
+docker run -d --rm --name verifair-dev-db -e POSTGRES_USER=verifair -e POSTGRES_PASSWORD=verifair \
   -p 127.0.0.1:5432:5432 postgres:18
 uv sync
 export VERIFAIR_API_TOKEN=change-me
@@ -74,7 +74,7 @@ printf 'VERIFAIR_API_TOKEN=%s\n' "$(openssl rand -hex 32)" > .env
 docker compose up -d
 ```
 
-Compose pulls the image of the release you checked out. `docker compose up --build` builds your checkout instead. Postgres is reachable only inside Compose, so it does not clash with a Postgres already on your machine.
+Compose pulls the image of the release you checked out. Postgres is reachable only inside Compose, so it does not clash with a Postgres already on your machine.
 
 ```bash
 docker run --rm -e VERIFAIR_API_TOKEN=change-me \

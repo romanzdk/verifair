@@ -15,7 +15,7 @@ def test_the_kubernetes_manifests_deploy_the_current_version():
 def test_compose_runs_the_current_release_image():
     version = importlib.metadata.version("verifair")
     compose = (ROOT / "docker-compose.yml").read_text()
-    assert f"image: ghcr.io/romanzdk/verifair:${{VERIFAIR_VERSION:-{version}}}\n" in compose, (
+    assert f"image: ghcr.io/romanzdk/verifair:{version}\n" in compose, (
         f"bump the app image tag in docker-compose.yml to {version}"
     )
 
@@ -23,5 +23,6 @@ def test_compose_runs_the_current_release_image():
 def test_compose_does_not_publish_postgres():
     # a host that already runs Postgres on 5432 would fail the first `docker compose up`
     compose = (ROOT / "docker-compose.yml").read_text()
+    assert "\n  app:\n" in compose
     db = compose.split("\n  app:\n")[0]
     assert "ports:" not in db
