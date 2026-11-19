@@ -31,6 +31,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # The demo review on the site is a snapshot of a real verifair loaded with scripts/demo.py
     services:
       postgres:
@@ -64,8 +65,7 @@ jobs:
         run: |
           uv run --locked --no-dev uvicorn verifair.asgi:app > uvicorn.log 2>&1 &
           for _ in $(seq 30); do curl -fs -o /dev/null http://localhost:8000/readyz && break; sleep 1; done
-          python3 scripts/demo.py || { cat uvicorn.log; exit 1; }
-          scripts/snapshot-demo.sh site/demo /verifair/demo
+          python3 scripts/demo.py && scripts/snapshot-demo.sh site/demo /verifair/demo || { cat uvicorn.log; exit 1; }
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         if: github.ref == 'refs/heads/main'
         with:
