@@ -9,6 +9,8 @@
 
 **Review the evidence, not the diff.** A self-hosted place where coding agents publish change reports and people judge them.
 
+**[Try the demo review →](https://romanzdk.github.io/verifair/demo/r/demo-currency-rounding.html)** (a static copy: you can read it, but not comment)
+
 <sub>How to say it: **verifier** (/ˈvɛrɪfaɪər/, like the word) or **veri-fair** (/ˈvɛrifɛər/, “very fair”). Both are fine.</sub>
 
 [![CI](https://github.com/romanzdk/verifair/actions/workflows/ci.yml/badge.svg)](https://github.com/romanzdk/verifair/actions/workflows/ci.yml)
