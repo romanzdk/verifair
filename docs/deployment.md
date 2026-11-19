@@ -2,6 +2,7 @@
 
 - [Run from source](#run-from-source)
 - [Docker](#docker)
+- [Kubernetes](#kubernetes)
 - [Deploying](#deploying)
 - [Upgrading an existing HTTP deployment](#upgrading-an-existing-http-deployment)
 
@@ -49,6 +50,57 @@ The image runs as user `10001`, not root, so it works with Kubernetes `runAsNonR
 This needs a running Postgres. `host.docker.internal` reaches a Postgres on your own machine (Docker Desktop). On Linux, or for another server, replace it with the database host.
 
 The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When a TLS proxy runs next to verifair in the same pod, you can set `UVICORN_HOST=127.0.0.1` so only the proxy can reach it. The image `HEALTHCHECK` still works then, because it runs inside the container.
+
+## Kubernetes
+
+[`deploy/kustomize`](../deploy/kustomize) has [Kustomize](https://kustomize.io/) manifests. They need Kubernetes 1.30 or newer.
+
+| Folder | What it has |
+| --- | --- |
+| `base` | verifair's Deployment and Service. Settings come from the ConfigMap `verifair-config` and the Secret `verifair-secrets` |
+| `postgres` | optional: one Postgres 18 pod with a 5 GiB volume, and `VERIFAIR_DATABASE_URL` pointing to it |
+| `example` | the overlay to copy: namespace `verifair`, the settings, the secrets and the bundled Postgres |
+
+The image tag in `base` is the current release. Each release changes it, so a new checkout deploys the new version.
+
+### Try it
+
+This runs verifair in local mode, with no sign-in, and opens it through a port-forward:
+
+```bash
+cd deploy/kustomize/example
+printf 'VERIFAIR_API_TOKEN=%s\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > secrets.env
+kubectl apply -k .
+kubectl -n verifair rollout status deploy/verifair
+kubectl -n verifair port-forward svc/verifair 8000:80
+```
+
+Open http://localhost:8000. To add the demo reviews, run this from the repository root in another terminal:
+
+```bash
+VERIFAIR_API_TOKEN=$(sed -n 's/^VERIFAIR_API_TOKEN=//p' deploy/kustomize/example/secrets.env) python3 scripts/demo.py
+```
+
+On the first install verifair can restart once or twice while Postgres creates its database. `secrets.env` is git-ignored; keep it, because Postgres keeps the password it started with.
+
+### Run it for a team
+
+Copy `example` into your own repository and change it:
+
+1. **Your own Postgres.** Remove `../postgres` from `components`. Put `VERIFAIR_DATABASE_URL` in `secrets.env`, with `sslmode=verify-full` when it is on another host, and drop `POSTGRES_PASSWORD`. The bundled Postgres has no backups and no upgrades; it is for trying verifair out.
+2. **HTTPS.** Uncomment `ingress.yaml` in `resources`, set your host, the TLS secret and `ingressClassName` if your cluster needs one.
+3. **Sign-in.** Turn on shared mode (see [access.md](access.md#set-up-shared-mode)):
+   - in `configMapGenerator`: `VERIFAIR_BASE_URL=https://<your host>`, `VERIFAIR_OIDC_ISSUER`, `VERIFAIR_OIDC_CLIENT_ID`, `VERIFAIR_OIDC_ALLOWED_DOMAINS` and `VERIFAIR_BOOTSTRAP_ADMIN_ID`
+   - in `secrets.env`: `VERIFAIR_OIDC_CLIENT_SECRET` and `VERIFAIR_SESSION_SECRET`, and remove `VERIFAIR_API_TOKEN`
+4. **The image tag.** Pin it in your overlay, so a change in this repository does not upgrade you:
+
+   ```yaml
+   images:
+     - name: ghcr.io/romanzdk/verifair
+       newTag: 1.2.3
+   ```
+
+Keep secrets out of git: create `secrets.env` on deploy, or replace the `secretGenerator` with your own secret tool (Sealed Secrets, External Secrets) that makes a Secret named `verifair-secrets`. The rest of [Deploying](#deploying) applies too: replicas, `FORWARDED_ALLOW_IPS`, backups.
 
 ## Deploying
 

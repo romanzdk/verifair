@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: verifair
+resources:
+  - namespace.yaml
+  - ../base
+  # - ingress.yaml
+components:
+  # Remove to use your own Postgres, and set VERIFAIR_DATABASE_URL below instead
+  - ../postgres
+configMapGenerator:
+  - name: verifair-config
+    literals:
+      - VERIFAIR_BASE_URL=http://localhost:8000
+secretGenerator:
+  - name: verifair-secrets
+    envs:
+      - secrets.env

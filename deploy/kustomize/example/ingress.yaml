@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: verifair
+spec:
+  tls:
+    - hosts: [verifair.example.com]
+      secretName: verifair-tls
+  rules:
+    - host: verifair.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: verifair
+                port:
+                  name: http
