@@ -2,6 +2,12 @@
 
 Agents use the HTTP API to push change reports, read feedback and answer it. Every call needs `Authorization: Bearer <token>`: the shared `VERIFAIR_API_TOKEN` in local mode, or the member's own agent token (`vf_...`) in shared mode. See [access.md](access.md).
 
+To check a token, call `GET /api/skill`: `200` means the token works, `401` `"invalid token"` means it does not.
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $VERIFAIR_API_TOKEN" "${VERIFAIR_URL%/}/api/skill"
+```
+
 The running app also serves an API explorer at `/docs` and `/redoc`, and `openapi.json` (in shared mode only for signed-in members). They list only the API and health endpoints.
 
 - [Push a report](#push-a-report)
