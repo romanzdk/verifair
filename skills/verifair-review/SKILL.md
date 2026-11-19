@@ -122,6 +122,18 @@ Recorded runs are uploader-supplied recordings, not authenticated telemetry. Rec
 
 Adding, replacing or removing evidence makes a fresh unsigned implementation snapshot. Plan signatures remain tied to exact revisions. Recorded failures, coverage and trace presence never change computed approval automatically. Execution is read-only, not a comment/signature/verdict target; use the implementation's existing controls for concerns and signing. Targets remain only `plan` and `implementation`.
 
+### Optional prompts section, for coaching
+
+Only when the author asks for it ("add my prompts", "share my prompts"), never on your own. It shows the author's own words to every reader, so teammates can suggest clearer prompts. Claude Code sessions only.
+
+1. Find the session file the author typed in: the newest `.jsonl` in `~/.claude/projects/<working directory, with / and . replaced by ->/`. Not a subagent's or delegated task's session.
+2. Run `python3 -I <this skill's folder>/export-prompts.py SESSION.jsonl`. It prints a numbered `## Prompts` section and uploads nothing. No script next to this file (the skill came from `GET /api/skill`) → tell the author to install the skill with `npx skills`, and skip this step.
+3. Show the author the whole output and ask which numbers to leave out. Wait for the answer, even when it all looks harmless. Prompts can hold secrets, client data, names and internal links, and nothing is removed automatically.
+4. Run it again with `--drop 2,5` and add the output, unchanged, after `## Changes`. Do not reword, fix or shorten the prompts.
+5. Every push creates a version that stays in history. A later push without the section does not remove the prompts from older versions.
+
+The section asks reviewers to use the **suggestion** label, so prompt comments do not block approval. Answer them like other comments, but do not change code for them. If one is blocking, reply and ask the reviewer to mark it non-blocking.
+
 ### Read exact content and identity
 
 `GET /api/reports/$ID/versions/$N` returns `{version, created_at, commit, body, plan, plan_revision, trace}` with exact immutable Markdown. `trace` is null or `{binding: {version, plan_revision, commit}, document: TraceDocument}`; the server sets its original binding. Metadata GET omits Markdown and full traces and adds `workflow`, `stage`, `implementation_status`, and `plan_review` (`revision/status/signed_by/signed_at/open_blocking/verdicts`). Versions add `has_implementation`, `plan_revision` and `has_trace`. Legacy signature/verdict fields describe implementation; before attachment they are null/empty. Plan history is separate under `plan_review`; verdict `current` flags use that target's revision.
@@ -183,3 +195,4 @@ curl -sS --fail-with-body --max-time 60 -G -H "Authorization: Bearer $VERIFAIR_A
 | Pushing v2 seconds after v1 for typos | Proofread first; versions are for real changes |
 | Resolving the reviewer's thread after replying | Reply, leave it open |
 | Signing or approving "to unblock" | Only humans sign and give verdicts |
+| Adding prompts nobody asked for, or before the author saw them | Only on request, after the author picked what to drop |
