@@ -126,11 +126,10 @@ Adding, replacing or removing evidence makes a fresh unsigned implementation sna
 
 Only when the author asks for it ("add my prompts", "share my prompts"), never on your own. It shows the author's own words to every reader, so teammates can suggest clearer prompts. Claude Code sessions only.
 
-1. Find the session file the author typed in: the newest `.jsonl` in `~/.claude/projects/<working directory, with / and . replaced by ->/`. Not a subagent's or delegated task's session.
-2. Run `python3 -I <this skill's folder>/export-prompts.py SESSION.jsonl`. It prints a numbered `## Prompts` section and uploads nothing. No script next to this file (the skill came from `GET /api/skill`) → tell the author to install the skill with `npx skills`, and skip this step.
-3. Show the author the whole output and ask which numbers to leave out. Wait for the answer, even when it all looks harmless. Prompts can hold secrets, client data, names and internal links, and nothing is removed automatically.
-4. Run it again with `--drop 2,5` and add the output, unchanged, after `## Changes`. Do not reword, fix or shorten the prompts.
-5. Every push creates a version that stays in history. A later push without the section does not remove the prompts from older versions.
+1. Find the session file the author typed in: usually the newest `.jsonl` in `~/.claude/projects/<working directory, every character except letters and digits replaced by ->/`. Not a subagent's or delegated task's session. Show the author its file name and first prompt, and use it only after they confirm it is theirs.
+2. Run `python3 -I <this skill's folder>/export-prompts.py SESSION.jsonl`. It prints a numbered `## Prompts` section and uploads nothing. On an error or `no prompts found`, tell the author and add no section. No script next to this file (the skill came from `GET /api/skill`) → tell the author to install the skill with `npx skills`, and skip this step.
+3. Show the author the whole output and how many prompts it has (N). Tell them that every reader of the report sees it, and that a pushed version stays in history: removing a prompt later does not remove it from older versions, so a leaked secret must be rotated. Ask which numbers or ranges to leave out, for example `1-12` for prompts about other work. Wait for the answer, even when it all looks harmless. Prompts can hold secrets, client data, names and internal links, and nothing is removed automatically.
+4. Run it again with `--upto N --drop <their choice>`. `--upto` leaves out the author's answer and anything typed after the preview. Add the output, unchanged, after `## Changes`. Do not reword, fix or shorten the prompts.
 
 The section asks reviewers to use the **suggestion** label, so prompt comments do not block approval. Answer them like other comments, but do not change code for them. If one is blocking, reply and ask the reviewer to mark it non-blocking.
 
