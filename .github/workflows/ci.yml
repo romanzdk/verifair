@@ -47,6 +47,11 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q
+      # The skill's prompt exporter runs on the author's own python3; macOS still ships 3.9
+      - name: Run the prompt exporter on Python 3.9
+        run: |
+          printf '%s\n' '{"type": "user", "message": {"content": "Fix the login."}}' > "$RUNNER_TEMP/session.jsonl"
+          uv run --no-project --python 3.9 python -I skills/verifair-review/export-prompts.py "$RUNNER_TEMP/session.jsonl" | grep -q "> Fix the login."
 
   manifests:
     runs-on: ubuntu-latest

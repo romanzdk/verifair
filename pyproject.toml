@@ -32,7 +32,7 @@ module-root = ""
 line-length = 100
 target-version = "py315"
 # These run on the user's own python3, not the app's Python
-per-file-target-version = { "skills/**" = "py310", "scripts/**" = "py310" }
+per-file-target-version = { "skills/**" = "py39", "scripts/**" = "py39" }
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
