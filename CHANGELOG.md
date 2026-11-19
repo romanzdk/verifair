@@ -9,6 +9,7 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 ### Added
 
 - Kustomize manifests in `deploy/kustomize`: a base, an optional bundled Postgres and an example overlay to copy. The Kubernetes section of `docs/deployment.md` shows how to try it with a port-forward and what to change for a team.
+- A prompt in `docs/deployment.md` to paste into your coding agent: it asks whether to run verifair with Docker or on Kubernetes, shows its plan, deploys it and connects itself with the agent skill.
 
 ## [0.10.1] - 2026-11-14
 
