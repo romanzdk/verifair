@@ -32,11 +32,21 @@ RECORDS = [
         [
             {"type": "text", "text": "why is this red?"},
             {"type": "image", "source": {}},
+            {"type": "document", "source": {}},
+            "not a block",
+            {"type": "text"},
         ]
     ),
     _user("<system-reminder>\nnoise\n</system-reminder>use `uv` not pip"),
     _user(
         "Context handoff (full_thread_summary):\nold stuff\n\nUser message:\nship it\n> with care"
+    ),
+    _user("Context handoff (full_thread_summary):\nsummary written by the agent"),
+    _user("Delegated task node:delegated-task:x (fix it) [completed]:\nagent result"),
+    _user(
+        'see this [Attached image "a.png" is saved at: /Users/me/a.png]\n\n'
+        '<t3_context version="1">\n<context kind="image" id="i1">\nattachmentId: secret-id\n'
+        "</context>\n</t3_context>"
     ),
     _user(
         "[Assistant quote](t3-citation://v1/a/b/c?text=%22Has+to+answer%22%3A+only%0A%0A"
@@ -45,28 +55,33 @@ RECORDS = [
 ]
 
 
-def _run(tmp_path, *args):
+def _run(tmp_path, *args, check=True):
     session = tmp_path / "session.jsonl"
     lines = [json.dumps(r) for r in RECORDS]
-    session.write_text("\n".join(lines[:3] + ["{not json"] + lines[3:]) + "\n")
+    raw = "\n".join(lines[:3] + ["{not json"] + lines[3:]).encode() + b"\n\xff\xfe broken\n"
+    session.write_bytes(raw)
     return subprocess.run(
         [sys.executable, "-I", str(SCRIPT), str(session), *args],
         capture_output=True,
         text=True,
-        check=True,
-    ).stdout
+        check=check,
+    )
 
 
 def test_exports_only_what_the_person_typed(tmp_path):
-    out = _run(tmp_path)
+    out = _run(tmp_path).stdout
 
     assert out.startswith("## Prompts\n")
     assert "> Add a dark mode toggle." in out
     assert "> /implement fix the login bug" in out
-    assert "> why is this red?\n>\n> [image]" in out
+    assert '> see this [Attached image "a.png"]' in out
+    assert "> why is this red?\n>\n> [image]\n>\n> [attachment]" in out
     assert "> use `uv` not pip" in out
     assert "> ship it\n> > with care" in out
-    assert '> On ""Has to answer": only blocking": adjust On "x"' in out
+    assert (
+        '> On the agent\'s text ""Has to answer": only blocking": adjust On the agent\'s text "x"'
+        in out
+    )
     for noise in (
         "Done.",
         "tool_result",
@@ -79,16 +94,20 @@ def test_exports_only_what_the_person_typed(tmp_path):
         "interrupted",
         "noise",
         "old stuff",
+        "summary written by the agent",
+        "agent result",
+        "/Users/me",
+        "secret-id",
         "t3-citation",
     ):
         assert noise not in out
     assert [line for line in out.splitlines() if line.startswith("**")] == [
-        f"**{n}.**" for n in range(1, 7)
+        f"**{n}.**" for n in range(1, 8)
     ]
 
 
 def test_prompt_text_cannot_start_a_report_section(tmp_path):
-    body = "## Intent\n\nx\n\n" + _run(tmp_path)
+    body = "## Intent\n\nx\n\n" + _run(tmp_path).stdout
 
     assert section_headings(body) == ["Intent", "Prompts"]
     prompts = split_sections(body)[-1]
@@ -96,7 +115,7 @@ def test_prompt_text_cannot_start_a_report_section(tmp_path):
 
 
 def test_drop_keeps_the_original_numbers(tmp_path):
-    out = _run(tmp_path, "--drop", "1,4")
+    out = _run(tmp_path, "--drop", "1,4").stdout
 
     assert "dark mode" not in out
     assert "uv" not in out
@@ -105,4 +124,33 @@ def test_drop_keeps_the_original_numbers(tmp_path):
         "**3.**",
         "**5.**",
         "**6.**",
+        "**7.**",
     ]
+
+
+def test_drop_takes_ranges_and_upto_ignores_later_prompts(tmp_path):
+    out = _run(tmp_path, "--upto", "4", "--drop", "1-2").stdout
+
+    assert [line for line in out.splitlines() if line.startswith("**")] == ["**3.**", "**4.**"]
+    assert "ship it" not in out
+
+
+def test_unknown_drop_number_fails_instead_of_publishing(tmp_path):
+    for bad in ("8", "0", "a,b", "3-1"):
+        result = _run(tmp_path, "--drop", bad, check=False)
+
+        assert result.returncode == 2, bad
+        assert result.stdout == ""
+
+
+def test_no_prompts_or_no_file_fails_with_a_message(tmp_path):
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text(json.dumps(RECORDS[0]) + "\n")
+    for path in (empty, tmp_path / "missing.jsonl"):
+        result = subprocess.run(
+            [sys.executable, "-I", str(SCRIPT), str(path)], capture_output=True, text=True
+        )
+
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert "Traceback" not in result.stderr
