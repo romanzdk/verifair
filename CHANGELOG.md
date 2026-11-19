@@ -12,6 +12,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 - A prompt in `docs/deployment.md` to paste into your coding agent: it asks whether to run verifair with Docker or on Kubernetes, shows its plan, deploys it and connects itself with the agent skill.
 - Prompt coaching, with its own docs page and a demo review: the skill's `export-prompts.py` prints the prompts the author typed in a Claude Code session as a `## Prompts` section. The agent adds it only on request, after the author has read it and dropped what should stay private. Reviewers comment with the **suggestion** label, so it does not block approval.
 
+### Fixed
+
+- The agent skill's links to the API and tracing docs now work in an installed copy and in the copy from `GET /api/skill`. The skill and `docs/api.md` show how to check a token: `GET /api/skill` answers `200` for a working token and `401` for a wrong one.
+
 ## [0.10.1] - 2026-11-14
 
 ### Changed

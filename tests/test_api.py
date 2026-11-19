@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import threading
 import time
 from contextlib import closing
@@ -2406,6 +2407,12 @@ def test_skill_is_served_to_agents_with_a_token(client):
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/markdown")
     assert r.text == (Path(__file__).parents[1] / "skills/verifair-review/SKILL.md").read_text()
     assert client.get("/api/skill").status_code == 401
+
+
+def test_skill_links_work_outside_the_repository():
+    # installs copy only the skill folder, and /api/skill serves the file alone
+    skill = (Path(__file__).parents[1] / "skills/verifair-review/SKILL.md").read_text()
+    assert re.findall(r"\]\((?!https://|#|/)([^)]+)\)", skill) == []
 
 
 def test_skill_missing_from_the_install_is_a_404(client, monkeypatch, tmp_path):
