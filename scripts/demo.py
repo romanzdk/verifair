@@ -9,7 +9,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 URL = os.environ.get("VERIFAIR_URL", "http://localhost:8000").rstrip("/")
 TEMPLATE = Path(__file__).resolve().parents[1] / "docs" / "report-template.md"
@@ -226,6 +226,25 @@ CACHE_V2 = body(
     "| 1 | Python | 0 | 0 | 0 |",
 )
 
+WEBHOOKS = body(
+    "Failed webhook deliveries are dropped. Retry them 5 times with backoff, then park them"
+    " for a person to replay.",
+    "- A receiver that is down for more than 2 hours loses nothing, but gets events late and"
+    " out of order. Is that acceptable for the partners?",
+    "Failed deliveries go to a `webhook_retries` table. A worker retries after 1, 5, 15 and 60"
+    " minutes, then marks the row parked. The admin page lists parked rows with a Replay button.",
+    "| Receiver returns 410 | parked at once, no retries | `test_gone_is_parked` |\n"
+    "| Worker restarts mid-retry | the row is picked up again | `test_retry_survives_restart` |",
+    "| Retries and parking | `pytest -q tests/test_webhooks.py` | ✅ 18 passed | — | yes |",
+    "- Ordering under retries was not tested with a real partner.",
+    "Stop the worker and revert. Parked rows stay in the table and can be replayed later.",
+    "The replay button is admin-only.",
+    "| 1 | Python | 1 | 1 | 0 |",
+)
+
+ALICE = ("alice-demo", "Alice")
+BOB = ("bob-demo", "Bob")
+
 REPORTS = [
     {
         "id": "demo-prorate-mid-cycle",
@@ -244,6 +263,7 @@ REPORTS = [
         "body": ROUNDING,
         "trace": ROUNDING_TRACE,
         "author": "Alice",
+        "reviewers": [BOB[0]],
         "commit": "4e5f6a7",
     },
     {
@@ -254,6 +274,7 @@ REPORTS = [
         "workflow": "plan_first",
         "plan": PLAN,
         "author": "Alice",
+        "reviewers": [BOB[0]],
     },
     {
         "id": "demo-price-cache",
@@ -262,6 +283,7 @@ REPORTS = [
         "risk": "low",
         "body": CACHE_V1,
         "author": "Alice",
+        "reviewers": [BOB[0]],
         "commit": "9f20c4d",
     },
     {
@@ -274,7 +296,39 @@ REPORTS = [
         "commit": "d51a7e2",
         "expected_version": 1,
     },
+    {
+        "id": "demo-webhook-retries",
+        "project": "shop",
+        "title": "Retry failed webhook deliveries",
+        "risk": "medium",
+        "body": WEBHOOKS,
+        "author": "Bob",
+        "reviewers": [ALICE[0]],
+        "commit": "7c3e9b1",
+    },
 ]
+
+PLAN_TARGET = {"target": "plan", "revision": 1}
+
+# What people do after a version is pushed, so the demo shows every inbox group.
+# Agent tokens cannot sign or give verdicts, so this goes through the web pages.
+ACTIONS = {
+    ("demo-currency-rounding", 1): [(ALICE, "sign", {})],
+    ("demo-export-ledger", 1): [
+        (ALICE, "sign", PLAN_TARGET),
+        (BOB, "verdict", PLAN_TARGET | {"verdict": "approve"}),
+    ],
+    ("demo-price-cache", 1): [
+        (ALICE, "sign", {}),
+        (
+            BOB,
+            "verdict",
+            {"verdict": "request_changes", "summary": "Discounts change often. Never cache them."},
+        ),
+    ],
+    ("demo-price-cache", 2): [(ALICE, "sign", {}), (BOB, "verdict", {"verdict": "approve"})],
+    ("demo-webhook-retries", 1): [(BOB, "sign", {})],
+}
 
 
 def call(token, path, payload=None):
@@ -286,6 +340,19 @@ def call(token, path, payload=None):
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.load(response)
+
+
+def act(person, id, action, form):
+    request = urllib.request.Request(
+        f"{URL}/r/{id}/{action}",
+        data=urlencode(form).encode(),
+        headers={
+            "Cookie": f"vf_id={person[0]}; vf_name={person[1]}",
+            "Sec-Fetch-Site": "same-origin",
+        },
+        method="POST",
+    )
+    urllib.request.urlopen(request, timeout=30).close()
 
 
 def exists(token, id):
@@ -321,6 +388,8 @@ def main():
             result = call(
                 token, "/reports", report | {"agent": "example-agent", "model": "example-model-1"}
             )
+            for person, action, form in ACTIONS.get((result["id"], result["version"]), []):
+                act(person, result["id"], action, {"version": result["version"]} | form)
         except urllib.error.HTTPError as error:
             sys.exit(f"{report['id']}: HTTP {error.code} {error.read().decode()[:300]}")
         print(f"{result['id']} v{result['version']}")
