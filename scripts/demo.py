@@ -348,11 +348,25 @@ def act(person, id, action, form):
         data=urlencode(form).encode(),
         headers={
             "Cookie": f"vf_id={person[0]}; vf_name={person[1]}",
+            # the app refuses form posts without the header a browser sends
             "Sec-Fetch-Site": "same-origin",
         },
         method="POST",
     )
-    urllib.request.urlopen(request, timeout=30).close()
+    try:
+        urllib.request.urlopen(request, timeout=30).close()
+    except urllib.error.HTTPError as error:
+        sys.exit(
+            f"{person[1]} could not {action} {id}: HTTP {error.code}."
+            " The demo needs verifair in local mode, with an empty database."
+        )
+
+
+def load(report, push, act):
+    result = push(report)
+    for person, action, form in ACTIONS.get((result["id"], result["version"]), []):
+        act(person, result["id"], action, {"version": result["version"]} | form)
+    return result
 
 
 def exists(token, id):
@@ -385,14 +399,20 @@ def main():
             print(f"{report['id']} already there, skipped")
             continue
         try:
-            result = call(
-                token, "/reports", report | {"agent": "example-agent", "model": "example-model-1"}
+            result = load(
+                report,
+                lambda r: call(
+                    token, "/reports", r | {"agent": "example-agent", "model": "example-model-1"}
+                ),
+                act,
             )
-            for person, action, form in ACTIONS.get((result["id"], result["version"]), []):
-                act(person, result["id"], action, {"version": result["version"]} | form)
         except urllib.error.HTTPError as error:
             sys.exit(f"{report['id']}: HTTP {error.code} {error.read().decode()[:300]}")
+        except urllib.error.URLError as error:
+            sys.exit(f"{report['id']}: cannot reach verifair at {URL} ({error.reason})")
         print(f"{result['id']} v{result['version']}")
+    if present:
+        print("Reviews that were already there keep their state; an empty database resets them.")
     print(f"Done. Open {URL}")
 
 

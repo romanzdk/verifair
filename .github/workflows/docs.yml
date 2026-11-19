@@ -32,7 +32,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # The demo review on the site is a snapshot of a real verifair loaded with scripts/demo.py
+    # The demo reviews on the site are a snapshot of a real verifair loaded with scripts/demo.py
     services:
       postgres:
         image: postgres:18
@@ -58,7 +58,7 @@ jobs:
         env:
           # Hides the notice that Material for MkDocs reaches end of life on 2027-05-05 (successor: Zensical)
           NO_MKDOCS_2_WARNING: "1"
-      - name: Add the static demo review to the site
+      - name: Add the static demo reviews to the site
         env:
           VERIFAIR_API_TOKEN: ci
           VERIFAIR_DATABASE_URL: postgresql://verifair:verifair@localhost:5432/verifair
