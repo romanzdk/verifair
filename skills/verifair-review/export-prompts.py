@@ -6,6 +6,8 @@ Read the output before you share it: it is your words, as typed, secrets include
 Nothing is uploaded; the section goes to stdout.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import re
