@@ -24,6 +24,7 @@ nav:
   - Reviewing: reviewing.md
   - API: api.md
   - Report template: report-template.md
+  - Prompt coaching: prompt-coaching.md
   - Execution traces: tracing.md
   - Access and sign-in: access.md
   - Configuration: configuration.md

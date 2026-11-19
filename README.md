@@ -30,9 +30,12 @@ Agents now write most of the code. A person cannot read every diff they make, an
 
 verifair is a small web service where agents push markdown change-review reports and humans read them, comment by selecting text, and give a verdict. Agents already handle code review. A human should judge the intent and the evidence: is this the right change, and does the proof hold up? verifair gives them one page per change to do that.
 
+When the agent writes the code, the prompts are the part a person wrote. With [prompt coaching](docs/prompt-coaching.md), authors can share them on the same page, so the team learns from each other how to work with agents.
+
 ## Features
 
 - **One report per change.** Intent, the design shown with a before/after and a diagram, edge cases, verification with commands, results and links, what was not verified, rollback, security impact, a summary of the agent reviews, the questions only a human can answer, and one row per merge request. See [the report](#the-report).
+- **Prompt coaching.** Code review checks the code. Prompt coaching lets teammates comment on the prompts behind it. An author can add the prompts they typed to the review, and teammates suggest clearer ones: missing context, a vague goal, no way to check the result. Opt-in, previewed and trimmed by the author before anything is shared, and never blocking. See [prompt coaching](docs/prompt-coaching.md).
 - **A human signs first.** The person who asked for the change reads the agent's report and signs it. Only then does the team get asked to review. The signer or an admin can unsign while nobody has given a verdict.
 - **Comment on any text.** Select a sentence to start a thread. Threads are blocking by default; a reviewer can mark one as a suggestion. [Conventional Comments](https://conventionalcomments.org) label buttons (`issue:`, `nitpick:`, `question:` and more) set the label and whether the thread blocks.
 - **Verdicts with rules.** Approve or request changes. Approve is refused while a blocking thread is open, and the signer cannot approve their own version. Unapprove or withdraw a verdict if you change your mind.
@@ -99,7 +102,7 @@ In a second terminal, load the demo reviews (it needs only Python 3):
 VERIFAIR_API_TOKEN=change-me python3 scripts/demo.py
 ```
 
-It adds four reviews by "Alice": a high-risk change, one with an execution trace, a plan waiting for review, and one already at version 2. Running it again skips what is already there.
+It adds four reviews by "Alice": a high-risk change, one with an execution trace and the author's prompts, a plan waiting for review, and one already at version 2. Running it again skips what is already there.
 
 Set your name to Alice, the demo author, and sign a review. Then open the same page in a private window with another name to comment and approve it.
 
@@ -124,6 +127,10 @@ To let your coding agent set it up, locally or on Kubernetes, paste the prompt f
 | Agent tokens (shared mode) | Members (shared mode) |
 | --- | --- |
 | ![Agent tokens page with active and revoked tokens](docs/images/tokens.png) | ![Members page with roles](docs/images/members.png) |
+
+| Prompt coaching | Prompt coaching, dark |
+| --- | --- |
+| ![The Prompts section of a review: the author's numbered prompts, and a teammate's non-blocking suggestion on a vague one](docs/images/prompts.png) | ![Prompts section in dark theme](docs/images/prompts-dark.png) |
 
 | Execution trace | Execution trace, dark |
 | --- | --- |
@@ -156,7 +163,7 @@ To let your coding agent set it up, locally or on Kubernetes, paste the prompt f
 
 ## Agent skill
 
-[skills/verifair-review/SKILL.md](skills/verifair-review/SKILL.md) teaches a coding agent to write the report in this template, push it, and wait for and answer review feedback. It never signs or gives verdicts. On request it can also add the author's own prompts as a `## Prompts` section, so teammates can suggest clearer prompts. The agent needs `VERIFAIR_URL` and `VERIFAIR_API_TOKEN` (your own agent token in shared mode).
+[skills/verifair-review/SKILL.md](skills/verifair-review/SKILL.md) teaches a coding agent to write the report in this template, push it, and wait for and answer review feedback. It never signs or gives verdicts. On request it can also add the author's own prompts for [prompt coaching](docs/prompt-coaching.md). The agent needs `VERIFAIR_URL` and `VERIFAIR_API_TOKEN` (your own agent token in shared mode).
 
 Install it with [skills](https://github.com/vercel-labs/skills), which works for Claude Code, Codex, Cursor and many other agents:
 
@@ -196,6 +203,7 @@ Full reference: [docs/api.md](docs/api.md) (push, read, comments, wait, errors).
 | --- | --- |
 | [docs/api.md](docs/api.md) | Push a report, read it, read and answer comments, wait for feedback, archive, get the agent skill, errors, required sections, provenance |
 | [docs/reviewing.md](docs/reviewing.md) | Inbox and personal views, plan-first reviews, signing and undo, blocking threads, Conventional Comments, archive and delete |
+| [docs/prompt-coaching.md](docs/prompt-coaching.md) | Share the prompts behind a change, give useful feedback on prompts, privacy and limits |
 | [docs/tracing.md](docs/tracing.md) | Optional execution evidence, supported capture versions, local conversion, submission and privacy limits |
 | [docs/access.md](docs/access.md) | Local and shared mode, sign-in with Google and other providers, members and admins, agent tokens, report ownership, moderation, switching from local to shared |
 | [docs/configuration.md](docs/configuration.md) | All environment variables |

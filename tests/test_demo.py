@@ -42,3 +42,13 @@ def test_demo_refuses_a_remote_server():
         text=True,
     )
     assert result.returncode != 0 and "refusing to load demo data" in result.stderr
+
+
+def test_demo_prompts_use_the_export_scripts_intro():
+    spec = importlib.util.spec_from_file_location(
+        "export_prompts", SCRIPT.parents[1] / "skills" / "verifair-review" / "export-prompts.py"
+    )
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    assert f"## Prompts\n\n{script.INTRO}\n" in load_demo().ROUNDING

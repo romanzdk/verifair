@@ -78,6 +78,30 @@ ROUNDING = body(
     "| 1 | Python, quant | 2 | 1 | 1 |\n| 2 | Python, quant | 0 | 0 | 0 |",
 )
 
+ROUNDING += """
+## Prompts
+
+Optional, for learning: the prompts the author typed in the agent session, word for word. \
+Ideas for clearer prompts are welcome. Please use the **suggestion** label, so your comment \
+does not block approval.
+
+**1.**
+
+> the invoice totals are wrong for japanese customers, fix it
+
+**2.**
+
+> no, JPY has no decimals at all. check the other currencies too
+
+**3.**
+
+> BHD has 3
+
+**4.**
+
+> looks ok, run the tests and open the MR
+"""
+
 
 def event(n, kind, title, start, end, **fields):
     return {

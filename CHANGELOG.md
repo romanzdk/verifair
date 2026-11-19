@@ -10,7 +10,7 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 - Kustomize manifests in `deploy/kustomize`: a base, an optional bundled Postgres and an example overlay to copy. The Kubernetes section of `docs/deployment.md` shows how to try it with a port-forward and what to change for a team.
 - A prompt in `docs/deployment.md` to paste into your coding agent: it asks whether to run verifair with Docker or on Kubernetes, shows its plan, deploys it and connects itself with the agent skill.
-- Optional prompts section for prompt coaching: the skill's `export-prompts.py` prints the prompts the author typed in a Claude Code session as a `## Prompts` section. The agent adds it only on request, after the author has read it and dropped what should stay private. Reviewers comment with the **suggestion** label, so it does not block approval.
+- Prompt coaching, with its own docs page and a demo review: the skill's `export-prompts.py` prints the prompts the author typed in a Claude Code session as a `## Prompts` section. The agent adds it only on request, after the author has read it and dropped what should stay private. Reviewers comment with the **suggestion** label, so it does not block approval.
 
 ## [0.10.1] - 2026-11-14
 
