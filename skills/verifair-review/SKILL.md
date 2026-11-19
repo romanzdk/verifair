@@ -70,7 +70,7 @@ EOF
 
 ### Artifact with optional read-only plan
 
-For a finished implementation, omit `workflow` or choose `"artifact"`. The implementation body and required headings are required on every push. Optionally attach one arbitrary nonblank Markdown `plan`; no template, headings or particular planning skill is required. Read its UTF-8 file as bytes then decode so CRLF is preserved. Send contents, not a path or URL. See [API examples](https://github.com/romanzdk/verifair/blob/v0.11.0/docs/api.md#optional-plan).
+For a finished implementation, omit `workflow` or choose `"artifact"`. The implementation body and required headings are required on every push. Optionally attach one arbitrary nonblank Markdown `plan`; no template, headings or particular planning skill is required. Read its UTF-8 file as bytes then decode so CRLF is preserved. Send contents, not a path or URL. See [API examples](https://github.com/romanzdk/verifair/blob/v0.12.0/docs/api.md#optional-plan).
 
 Reuse `id` on updates. Leave out `ticket_url`, `links`, `agent`, `model` and `session_url` to keep them; if you send any of `agent`, `model` and `session_url`, send all three. Omitted `plan` inherits; `"plan": None` emits JSON null and removes it only from the new snapshot. This workflow's Plan tab stays read-only; plan feedback operations return 422. Each push creates a new unsigned implementation snapshot, including identical-body or plan-only-context changes. Earlier signatures/verdicts remain history.
 
@@ -108,7 +108,7 @@ An open blocking plan thread, including an old unresolved concern, pauses attach
 
 ### Optional execution evidence
 
-The API accepts normalized schema-v1 evidence with an implementation body. Tracing is optional; all no-trace recipes above remain valid. Read [tracing.md](https://github.com/romanzdk/verifair/blob/v0.11.0/docs/tracing.md) for pinned Claude Code, Codex, OpenCode v2 and Pi formats, local conversion flags, privacy limits, a synthetic reconstruction and safe JSON/curl assembly. Native provider records are not accepted by the report API.
+The API accepts normalized schema-v1 evidence with an implementation body. Tracing is optional; all no-trace recipes above remain valid. Read [tracing.md](https://github.com/romanzdk/verifair/blob/v0.12.0/docs/tracing.md) for pinned Claude Code, Codex, OpenCode v2 and Pi formats, local conversion flags, privacy limits, a synthetic reconstruction and safe JSON/curl assembly. Native provider records are not accepted by the report API.
 
 Use only explicitly selected local captures; never discover sessions, start an agent or upload evidence automatically. The importer writes local JSON, not a report. Default conversion excludes prompts, prose, arguments/results and rationale. `--include-details` is an explicit choice with incomplete redaction. Inspect the normalized output for secrets and confidential content before including it in the normal report request; names and timestamps can also be sensitive. Never print tokens. Evidence shares the report's readers and historical copies survive removal from a later version.
 
