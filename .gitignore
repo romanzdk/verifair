@@ -7,6 +7,3 @@ __pycache__/
 .env
 .env.*
 site/
-
-# Kubernetes example secrets
-deploy/kustomize/example/secrets.env
