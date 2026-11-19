@@ -107,6 +107,8 @@ The compose passwords and token are for local use. Change them for any shared se
 
 This is local mode. For a team, use shared mode. See [docs/access.md](docs/access.md).
 
+To let your coding agent set it up, locally or on Kubernetes, paste the prompt from [Deploy with your agent](docs/deployment.md#deploy-with-your-agent).
+
 ## Screenshots
 
 ![A verifair review page: the Design section of a report with a before/after table and a diagram, an open blocking thread on a sentence with the agent's answer, the list of sections and the reviewers on the side](docs/images/review.png)
