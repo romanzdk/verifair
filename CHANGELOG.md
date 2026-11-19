@@ -14,7 +14,7 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ### Fixed
 
-- The agent skill's links to the API and tracing docs now work in an installed copy and in the copy from `GET /api/skill`. The skill and `docs/api.md` show how to check a token: `GET /api/skill` answers `200` for a working token and `401` for a wrong one.
+- The agent skill's links to the API and tracing docs now work in an installed copy and in the copy from `GET /api/skill`. They point to the docs of the skill's own release, so a release also updates them. The skill and `docs/api.md` show how to check a token: `GET /api/skill` answers `200` for a working token, `401` when it is refused, and the command shows `000` when the URL is wrong or the server is down.
 
 ## [0.10.1] - 2026-11-14
 

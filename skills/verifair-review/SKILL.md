@@ -9,7 +9,7 @@ Submit either an implementation report (`artifact`, the default) or a plan first
 
 ## Setup
 
-`VERIFAIR_URL` (default `http://localhost:8000`) and `VERIFAIR_API_TOKEN` (your owner's agent token in shared mode, `vf_…`). Missing token → use the host’s private secret-entry tool if available, otherwise ask the user to configure it outside chat; never guess or request a token in chat. Check the token with `curl -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $VERIFAIR_API_TOKEN" "${VERIFAIR_URL%/}/api/skill"`: `200` works, `401` is a wrong token. Everything you need is below; `$VERIFAIR_URL/docs` only opens for signed-in members in shared mode.
+`VERIFAIR_URL` (default `http://localhost:8000`) and `VERIFAIR_API_TOKEN` (your owner's agent token in shared mode, `vf_…`). Missing token → use the host’s private secret-entry tool if available, otherwise ask the user to configure it outside chat; never guess or request a token in chat. Use `https://` unless the server is on localhost. Check the token with `curl -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $VERIFAIR_API_TOKEN" "${VERIFAIR_URL:-http://localhost:8000}/api/skill"`: `200` works; `401` means the token is refused (run it without `-o /dev/null` to see why), so stop and ask the user to fix it outside chat; `000` or `404` means `VERIFAIR_URL` is wrong or the server is down, not the token. Everything you need is below; `$VERIFAIR_URL/docs` only opens for signed-in members in shared mode.
 
 ## The report
 
@@ -70,7 +70,7 @@ EOF
 
 ### Artifact with optional read-only plan
 
-For a finished implementation, omit `workflow` or choose `"artifact"`. The implementation body and required headings are required on every push. Optionally attach one arbitrary nonblank Markdown `plan`; no template, headings or particular planning skill is required. Read its UTF-8 file as bytes then decode so CRLF is preserved. Send contents, not a path or URL. See [API examples](https://github.com/romanzdk/verifair/blob/main/docs/api.md#optional-plan).
+For a finished implementation, omit `workflow` or choose `"artifact"`. The implementation body and required headings are required on every push. Optionally attach one arbitrary nonblank Markdown `plan`; no template, headings or particular planning skill is required. Read its UTF-8 file as bytes then decode so CRLF is preserved. Send contents, not a path or URL. See [API examples](https://github.com/romanzdk/verifair/blob/v0.10.1/docs/api.md#optional-plan).
 
 Reuse `id` on updates. Leave out `ticket_url`, `links`, `agent`, `model` and `session_url` to keep them; if you send any of `agent`, `model` and `session_url`, send all three. Omitted `plan` inherits; `"plan": None` emits JSON null and removes it only from the new snapshot. This workflow's Plan tab stays read-only; plan feedback operations return 422. Each push creates a new unsigned implementation snapshot, including identical-body or plan-only-context changes. Earlier signatures/verdicts remain history.
 
@@ -108,7 +108,7 @@ An open blocking plan thread, including an old unresolved concern, pauses attach
 
 ### Optional execution evidence
 
-The API accepts normalized schema-v1 evidence with an implementation body. Tracing is optional; all no-trace recipes above remain valid. Read [tracing.md](https://github.com/romanzdk/verifair/blob/main/docs/tracing.md) for pinned Claude Code, Codex, OpenCode v2 and Pi formats, local conversion flags, privacy limits, a synthetic reconstruction and safe JSON/curl assembly. Native provider records are not accepted by the report API.
+The API accepts normalized schema-v1 evidence with an implementation body. Tracing is optional; all no-trace recipes above remain valid. Read [tracing.md](https://github.com/romanzdk/verifair/blob/v0.10.1/docs/tracing.md) for pinned Claude Code, Codex, OpenCode v2 and Pi formats, local conversion flags, privacy limits, a synthetic reconstruction and safe JSON/curl assembly. Native provider records are not accepted by the report API.
 
 Use only explicitly selected local captures; never discover sessions, start an agent or upload evidence automatically. The importer writes local JSON, not a report. Default conversion excludes prompts, prose, arguments/results and rationale. `--include-details` is an explicit choice with incomplete redaction. Inspect the normalized output for secrets and confidential content before including it in the normal report request; names and timestamps can also be sensitive. Never print tokens. Evidence shares the report's readers and historical copies survive removal from a later version.
 
