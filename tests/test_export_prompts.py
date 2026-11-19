@@ -293,6 +293,7 @@ def test_codex_exec_output_without_prompts_fails_closed(tmp_path):
     assert result.returncode == 2
     assert result.stdout == ""
     assert "no prompts found" in result.stderr
+    assert "rollout-*.jsonl" in result.stderr
 
 
 def test_codex_events_skip_injected_context_and_malformed_attachments(tmp_path):
@@ -376,3 +377,40 @@ def test_codex_repeated_prompt_after_turn_boundary_is_not_a_mirror(tmp_path):
             ],
         ).stdout
         assert out.count("> Again") == 2
+
+
+def test_codex_skill_bodies_are_not_prompts(tmp_path):
+    skill = "<skill>\n<name>code-review</name>\n<path>/private/SKILL.md</path>\nprivate\n</skill>"
+    records = [
+        _codex_user({"type": "input_text", "text": skill}),
+        _codex_user({"type": "input_text", "text": "Review it."}),
+    ]
+    out = _export_records(tmp_path, records).stdout
+
+    assert "> Review it." in out
+    assert "private" not in out
+
+
+def test_codex_subagent_rollout_is_refused(tmp_path):
+    # its prompts are another agent's brief, not what the author typed
+    records = [
+        {"type": "session_meta", "payload": {"source": {"subagent": {"thread_spawn": {}}}}},
+        _codex_user({"type": "input_text", "text": "private brief"}),
+    ]
+    result = _export_records(tmp_path, records, check=False)
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "subagent" in result.stderr
+
+
+def test_deeply_nested_line_is_skipped(tmp_path):
+    session = tmp_path / "rollout.jsonl"
+    record = _codex_user({"type": "input_text", "text": "Still here."})
+    session.write_text("[" * 100_000 + "\n" + json.dumps(record) + "\n")
+    result = subprocess.run(
+        [sys.executable, "-I", str(SCRIPT), str(session)], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "> Still here." in result.stdout
