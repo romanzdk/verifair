@@ -19,8 +19,11 @@ You can also run the script yourself, from the installed skill's folder:
 
 ```bash
 python3 -I export-prompts.py ~/.claude/projects/<project>/<session>.jsonl
+python3 -I export-prompts.py ~/.codex/sessions/YYYY/MM/DD/rollout-SESSION.jsonl
 python3 -I export-prompts.py SESSION.jsonl --upto 14 --drop 1-3,9
 ```
+
+The format is detected automatically. For Codex, select the rollout for your session ID and check its `session_meta` working directory; do not pick a file just because it is newest. A custom `CODEX_HOME` changes the directory above, and archived rollouts can be under `archived_sessions/`. The exporter reads user-message events and user input messages, collapsing consecutive matching records from the two representations so mirrored prompts are not shown twice. Repeated prompts you actually typed stay separate. Known injected instructions, environment context and T3 handoffs/history are skipped; images become `[image]` placeholders without their paths.
 
 `--drop` leaves prompts out and keeps the original numbers. `--upto` uses only the first N prompts, so whatever you type after the preview stays out.
 
@@ -52,6 +55,6 @@ Most prompts typed into a coding agent run once. There is no test set to score t
 
 ## Limits
 
-- Claude Code sessions only for now. Other agents can still paste a prompts section by hand.
+- Claude Code sessions and local Codex rollout JSONL are supported (Codex 0.167.0 response-item layout checked locally; user-message event layout covered by synthetic tests). Codex rollout files are an internal format and can change. `codex exec --json` output contains execution events, not input prompts; use the rollout instead. Other agents and Codex sessions without a local rollout can still paste a prompts section by hand.
 - The section is plain report text. There is no separate Prompts tab yet.
 - A prompt that contains Markdown, such as headings or lists, is shown formatted inside its quote. It cannot start a new report section.

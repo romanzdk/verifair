@@ -9,6 +9,7 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 ### Added
 
 - A static demo on the docs site, linked from the top of the README as "Try the demo review": the four `scripts/demo.py` reviews, rebuilt on every docs deploy by `scripts/snapshot-demo.sh`. Commenting, signing and verdicts are off there.
+- Prompt coaching can export prompts from local Codex rollout sessions as well as Claude Code. It keeps the author preview and selection flow, skips known injected context, and avoids mirrored prompt duplicates.
 
 ### Changed
 
