@@ -1206,12 +1206,15 @@ def seen_names(conn: Connection, ids: Collection[str]) -> dict[str, str]:
     # local mode keeps no users, so a requested reviewer is named by their last signature or verdict
     if not ids:
         return {}
+    ids = list(ids)
     rows = conn.execute(
         "SELECT DISTINCT ON (id) id, name FROM ("
         " SELECT signer_id AS id, signer_name AS name, created_at FROM signatures"
+        " WHERE signer_id = ANY(%s)"
         " UNION ALL SELECT reviewer_id, reviewer_name, created_at FROM verdicts"
-        ") seen WHERE id = ANY(%s) ORDER BY id, created_at DESC",
-        (list(ids),),
+        " WHERE reviewer_id = ANY(%s)"
+        ") seen ORDER BY id, created_at DESC, name",
+        (ids, ids),
     ).fetchall()
     return {row["id"]: row["name"] for row in rows}
 
