@@ -13,20 +13,23 @@ Paste this into your coding agent (Claude Code, Codex or another). It asks what 
 
 ```text
 Set up verifair (https://github.com/romanzdk/verifair) for me.
-Read https://romanzdk.github.io/verifair/llms-full.txt first and follow its docs.
+Clone it at its latest release tag (the newest vX.Y.Z) and follow docs/deployment.md
+from that checkout (docs/access.md for sign-in).
 
 1. Ask me: run it on this machine with Docker, or deploy it to Kubernetes?
-2. Ask only what that choice needs:
+2. Ask only what that choice needs, and pick sensible defaults for the rest:
    - Docker: nothing more.
    - Kubernetes: which kube context and namespace, the bundled Postgres or my own,
      and whether I only want to try it (port-forward) or run it for a team
      (domain, TLS, sign-in provider).
 3. Show me the plan and the commands, and wait for my OK before you change anything.
-4. Rules: use the latest release tag, not main. Never put secrets in git or ask me
-   to paste them in chat. Never put verifair on a domain without sign-in.
+4. Rules: use the release tag, not main. Never put secrets in git or ask me to paste
+   them in chat. Never put verifair on a domain without sign-in. Check that the
+   ports you use are free.
 5. When it runs: check that /readyz answers and give me the URL. Then install the
-   verifair-review skill and set VERIFAIR_URL and VERIFAIR_API_TOKEN for yourself,
-   so you can publish a review.
+   verifair-review skill and save VERIFAIR_URL and VERIFAIR_API_TOKEN where your
+   new sessions read them. In shared mode the token comes after the first sign-in:
+   tell me how to create it and how to give it to you outside this chat.
 ```
 
 ## Run from source
@@ -61,6 +64,16 @@ Each `v1.2.3` tag also creates a GitHub release. Its notes are that version's se
 Other git tags, like `v1.2` or `v1.2.3-rc.1`, fail the publish job and publish nothing.
 
 Deploy a version tag or `sha-<short commit>`, not `main` or `latest`, so a restart does not pull a different version. To build it yourself, run `docker build -t verifair .`.
+
+To run it on your own machine with its own database, use Docker Compose from a release tag checkout. Put your own token in `.env` first, because Compose reads it from there:
+
+```bash
+git checkout v1.2.3
+printf 'VERIFAIR_API_TOKEN=%s\n' "$(openssl rand -hex 32)" > .env
+docker compose up -d --build
+```
+
+Compose publishes Postgres on `127.0.0.1:5432` for running from source; if that port is taken, remove the `ports` of `db`.
 
 ```bash
 docker run --rm -e VERIFAIR_API_TOKEN=change-me \
@@ -106,6 +119,8 @@ Open http://localhost:8000. To add the demo reviews, run this from the repositor
 VERIFAIR_API_TOKEN=$(sed -n 's/^VERIFAIR_API_TOKEN=//p' deploy/kustomize/example/secrets.env) python3 scripts/demo.py
 ```
 
+If port 8000 is taken on your machine, forward another one (`8080:80`) and use that port in the URL and in `VERIFAIR_URL`. The port-forward stops when you stop the command. To use another namespace, change `namespace` in `kustomization.yaml` and the name in `namespace.yaml`.
+
 On the first install verifair can restart once or twice while Postgres creates its database. Keep `db.env`: Postgres keeps the password it was created with. With another password, the new verifair pod logs `password authentication failed` and restarts while the old one keeps running; put the old `db.env` back and apply again. The `.env` files are git-ignored. `kubectl delete -k .` deletes the namespace, and the database volume with it.
 
 ### Run it for a team
@@ -115,8 +130,8 @@ Copy the `deploy/kustomize` folder into your own repository, because `example` u
 1. **Sign-in.** Turn on shared mode (see [access.md](access.md#set-up-shared-mode)):
    - in `configMapGenerator`: `VERIFAIR_BASE_URL=https://<your host>`, `VERIFAIR_OIDC_ISSUER`, `VERIFAIR_OIDC_CLIENT_ID`, `VERIFAIR_OIDC_ALLOWED_DOMAINS` and `VERIFAIR_BOOTSTRAP_ADMIN_ID`
    - in `secrets.env`: `VERIFAIR_OIDC_CLIENT_SECRET` and `VERIFAIR_SESSION_SECRET`, and remove `VERIFAIR_API_TOKEN`
-2. **HTTPS.** Only after sign-in works: uncomment `ingress.yaml` in `resources`, and set your host, the TLS secret and `ingressClassName` if your cluster needs one. Without sign-in, anyone who reaches the host can comment and give verdicts. Set `FORWARDED_ALLOW_IPS` in `configMapGenerator` to the addresses of your ingress controller pods, so other pods cannot fake `X-Forwarded-*` headers.
-3. **Your own Postgres.** Remove `../postgres` from `components` and the `verifair-db` secret generator. Put `VERIFAIR_DATABASE_URL` in `secrets.env`, with `sslmode=verify-full` when it is on another host. The bundled Postgres has no backups and no upgrades; it is for trying verifair out.
+2. **HTTPS.** Only after sign-in works: uncomment `ingress.yaml` in `resources`, and set your host, the TLS secret and `ingressClassName` in it. Without sign-in, anyone who reaches the host can comment and give verdicts. Set `FORWARDED_ALLOW_IPS` in `configMapGenerator` to the addresses of your ingress controller pods, so other pods cannot fake `X-Forwarded-*` headers.
+3. **Your own Postgres.** Remove `../postgres` from `components` and the `verifair-db` secret generator. Put `VERIFAIR_DATABASE_URL` in `secrets.env`, with `sslmode=verify-full` when it is on another host. Encode special characters in the password (`@` is `%40`). The bundled Postgres has no backups and no upgrades; it is for trying verifair out.
 4. **The image.** Pin it in your overlay, so a change in this repository does not upgrade you. A digest (`digest: sha256:…` instead of `newTag`) also guards against a moved tag:
 
    ```yaml

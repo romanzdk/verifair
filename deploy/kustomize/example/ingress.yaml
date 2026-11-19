@@ -3,6 +3,7 @@ kind: Ingress
 metadata:
   name: verifair
 spec:
+  # ingressClassName: nginx
   tls:
     - hosts: [verifair.example.com]
       secretName: verifair-tls
