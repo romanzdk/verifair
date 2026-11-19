@@ -197,7 +197,7 @@ Full reference: [docs/api.md](docs/api.md) (push, read, comments, wait, errors).
 | [docs/tracing.md](docs/tracing.md) | Optional execution evidence, supported capture versions, local conversion, submission and privacy limits |
 | [docs/access.md](docs/access.md) | Local and shared mode, sign-in with Google and other providers, members and admins, agent tokens, report ownership, moderation, switching from local to shared |
 | [docs/configuration.md](docs/configuration.md) | All environment variables |
-| [docs/deployment.md](docs/deployment.md) | Run from source, Docker, deploying behind HTTPS, Postgres, backup and restore, upgrading an HTTP deployment |
+| [docs/deployment.md](docs/deployment.md) | Run from source, Docker, Kubernetes, deploying behind HTTPS, Postgres, backup and restore, upgrading an HTTP deployment |
 | [docs/report-template.md](docs/report-template.md) | The report layout, as a full example |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
 
@@ -229,7 +229,7 @@ Details: [docs/configuration.md](docs/configuration.md).
 
 verifair needs Postgres 16 or newer, and HTTPS for any browser access outside `localhost`. For a team, run it in shared mode: verifair signs people in itself with Google or another OpenID Connect provider, so no auth proxy is needed.
 
-- [Run from source](docs/deployment.md#run-from-source) and [Docker](docs/deployment.md#docker)
+- [Run from source](docs/deployment.md#run-from-source), [Docker](docs/deployment.md#docker) and [Kubernetes](docs/deployment.md#kubernetes) (Kustomize manifests in [deploy/kustomize](deploy/kustomize))
 - [Deploying](docs/deployment.md#deploying): sign-in, TLS, Postgres, replicas, probes, backup and restore
 - [Set up shared mode](docs/access.md#set-up-shared-mode) and [switch from local to shared mode](docs/access.md#switching-from-local-to-shared-mode)
 

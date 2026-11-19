@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: verifair
+spec:
+  template:
+    spec:
+      containers:
+        - name: verifair
+          env:
+            # libpq reads PGPASSWORD, so the URL carries no password
+            - name: VERIFAIR_DATABASE_URL
+              value: postgresql://verifair@verifair-db:5432/verifair
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: verifair-secrets
+                  key: POSTGRES_PASSWORD

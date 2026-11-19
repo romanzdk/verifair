@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Added
+
+- Kustomize manifests in `deploy/kustomize`: a base, an optional bundled Postgres and an example overlay to copy. The Kubernetes section of `docs/deployment.md` shows how to try it with a port-forward and what to change for a team.
+
 ## [0.10.1] - 2026-11-14
 
 ### Changed
