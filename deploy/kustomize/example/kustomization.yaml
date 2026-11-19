@@ -4,9 +4,10 @@ namespace: verifair
 resources:
   - namespace.yaml
   - ../base
+  # Only together with sign-in (shared mode), see docs/deployment.md#run-it-for-a-team
   # - ingress.yaml
 components:
-  # Remove to use your own Postgres, and set VERIFAIR_DATABASE_URL below instead
+  # Remove to use your own Postgres, and put VERIFAIR_DATABASE_URL in secrets.env instead
   - ../postgres
 configMapGenerator:
   - name: verifair-config
@@ -16,3 +17,7 @@ secretGenerator:
   - name: verifair-secrets
     envs:
       - secrets.env
+  # Remove together with ../postgres
+  - name: verifair-db
+    envs:
+      - db.env

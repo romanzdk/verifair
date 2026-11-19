@@ -54,10 +54,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Build the Kustomize manifests
+      - name: Build the Kustomize manifests and check them against the Kubernetes schema
+        working-directory: deploy/kustomize/example
         run: |
-          printf 'VERIFAIR_API_TOKEN=ci\nPOSTGRES_PASSWORD=ci\n' > deploy/kustomize/example/secrets.env
-          kubectl kustomize deploy/kustomize/example > /dev/null
+          printf 'VERIFAIR_API_TOKEN=ci\n' > secrets.env
+          printf 'POSTGRES_PASSWORD=ci\n' > db.env
+          sed -i 's|# - ingress.yaml|- ingress.yaml|' kustomization.yaml
+          kubectl kustomize . | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c -strict -summary
 
   image:
     needs: test

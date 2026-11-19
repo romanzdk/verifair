@@ -58,10 +58,10 @@ The image listens on all addresses (`UVICORN_HOST=0.0.0.0`). When a TLS proxy ru
 | Folder | What it has |
 | --- | --- |
 | `base` | verifair's Deployment and Service. Settings come from the ConfigMap `verifair-config` and the Secret `verifair-secrets` |
-| `postgres` | optional: one Postgres 18 pod with a 5 GiB volume, and `VERIFAIR_DATABASE_URL` pointing to it |
-| `example` | the overlay to copy: namespace `verifair`, the settings, the secrets and the bundled Postgres |
+| `postgres` | optional: one Postgres 18 pod with a 5 GiB volume, a network policy that lets only verifair reach it, and `VERIFAIR_DATABASE_URL` pointing to it. The password comes from the Secret `verifair-db` |
+| `example` | the overlay to copy: namespace `verifair` (Pod Security `restricted`), the settings, the secrets and the bundled Postgres |
 
-The image tag in `base` is the current release. Each release changes it, so a new checkout deploys the new version.
+The image tag in `base` is the version of that checkout. Use a release tag (`git checkout v1.2.3`): on `main`, a version that was just released can need a few minutes before its image is published.
 
 ### Try it
 
@@ -69,7 +69,9 @@ This runs verifair in local mode, with no sign-in, and opens it through a port-f
 
 ```bash
 cd deploy/kustomize/example
-printf 'VERIFAIR_API_TOKEN=%s\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > secrets.env
+umask 077
+[ -f secrets.env ] || printf 'VERIFAIR_API_TOKEN=%s\n' "$(openssl rand -hex 32)" > secrets.env
+[ -f db.env ] || printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 32)" > db.env
 kubectl apply -k .
 kubectl -n verifair rollout status deploy/verifair
 kubectl -n verifair port-forward svc/verifair 8000:80
@@ -81,18 +83,18 @@ Open http://localhost:8000. To add the demo reviews, run this from the repositor
 VERIFAIR_API_TOKEN=$(sed -n 's/^VERIFAIR_API_TOKEN=//p' deploy/kustomize/example/secrets.env) python3 scripts/demo.py
 ```
 
-On the first install verifair can restart once or twice while Postgres creates its database. `secrets.env` is git-ignored; keep it, because Postgres keeps the password it started with.
+On the first install verifair can restart once or twice while Postgres creates its database. Keep `db.env`: Postgres keeps the password it was created with. With another password, the new verifair pod logs `password authentication failed` and restarts while the old one keeps running; put the old `db.env` back and apply again. The `.env` files are git-ignored. `kubectl delete -k .` deletes the namespace, and the database volume with it.
 
 ### Run it for a team
 
-Copy `example` into your own repository and change it:
+Copy the `deploy/kustomize` folder into your own repository, because `example` uses `../base` and `../postgres`. Then change `example`:
 
-1. **Your own Postgres.** Remove `../postgres` from `components`. Put `VERIFAIR_DATABASE_URL` in `secrets.env`, with `sslmode=verify-full` when it is on another host, and drop `POSTGRES_PASSWORD`. The bundled Postgres has no backups and no upgrades; it is for trying verifair out.
-2. **HTTPS.** Uncomment `ingress.yaml` in `resources`, set your host, the TLS secret and `ingressClassName` if your cluster needs one.
-3. **Sign-in.** Turn on shared mode (see [access.md](access.md#set-up-shared-mode)):
+1. **Sign-in.** Turn on shared mode (see [access.md](access.md#set-up-shared-mode)):
    - in `configMapGenerator`: `VERIFAIR_BASE_URL=https://<your host>`, `VERIFAIR_OIDC_ISSUER`, `VERIFAIR_OIDC_CLIENT_ID`, `VERIFAIR_OIDC_ALLOWED_DOMAINS` and `VERIFAIR_BOOTSTRAP_ADMIN_ID`
    - in `secrets.env`: `VERIFAIR_OIDC_CLIENT_SECRET` and `VERIFAIR_SESSION_SECRET`, and remove `VERIFAIR_API_TOKEN`
-4. **The image tag.** Pin it in your overlay, so a change in this repository does not upgrade you:
+2. **HTTPS.** Only after sign-in works: uncomment `ingress.yaml` in `resources`, and set your host, the TLS secret and `ingressClassName` if your cluster needs one. Without sign-in, anyone who reaches the host can comment and give verdicts. Set `FORWARDED_ALLOW_IPS` in `configMapGenerator` to the addresses of your ingress controller pods, so other pods cannot fake `X-Forwarded-*` headers.
+3. **Your own Postgres.** Remove `../postgres` from `components` and the `verifair-db` secret generator. Put `VERIFAIR_DATABASE_URL` in `secrets.env`, with `sslmode=verify-full` when it is on another host. The bundled Postgres has no backups and no upgrades; it is for trying verifair out.
+4. **The image.** Pin it in your overlay, so a change in this repository does not upgrade you. A digest (`digest: sha256:…` instead of `newTag`) also guards against a moved tag:
 
    ```yaml
    images:
@@ -100,7 +102,7 @@ Copy `example` into your own repository and change it:
        newTag: 1.2.3
    ```
 
-Keep secrets out of git: create `secrets.env` on deploy, or replace the `secretGenerator` with your own secret tool (Sealed Secrets, External Secrets) that makes a Secret named `verifair-secrets`. The rest of [Deploying](#deploying) applies too: replicas, `FORWARDED_ALLOW_IPS`, backups.
+Keep secrets out of git: create the `.env` files on deploy, or replace the secret generators with your own secret tool (Sealed Secrets, External Secrets) that makes Secrets with the same names. The rest of [Deploying](#deploying) applies too: replicas and backups.
 
 ## Deploying
 
