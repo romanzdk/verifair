@@ -6,6 +6,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-19
+
 ### Added
 
 - Kustomize manifests in `deploy/kustomize`: a base, an optional bundled Postgres and an example overlay to copy. The Kubernetes section of `docs/deployment.md` shows how to try it with a port-forward and what to change for a team.
@@ -178,7 +180,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 - Plan-first reviews, optional execution traces, local and shared mode with Google or OpenID Connect sign-in, members, admins and per-member agent tokens, optional Slack messages and review emails.
 - Docker image at `ghcr.io/romanzdk/verifair` and the `verifair-review` agent skill.
 
-[Unreleased]: https://github.com/romanzdk/verifair/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/romanzdk/verifair/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/romanzdk/verifair/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/romanzdk/verifair/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/romanzdk/verifair/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/romanzdk/verifair/compare/v0.9.0...v0.9.1
