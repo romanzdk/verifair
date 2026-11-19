@@ -106,7 +106,7 @@ In a second terminal, load the demo reviews (it needs only Python 3):
 VERIFAIR_API_TOKEN=change-me python3 scripts/demo.py
 ```
 
-It adds four reviews by "Alice": a high-risk change, one with an execution trace and the author's prompts, a plan waiting for review, and one already at version 2. Running it again skips what is already there.
+It adds five reviews by "Alice" and "Bob", each in a different state: a high-risk change Alice has not signed yet, one with an execution trace and the author's prompts that waits for Bob, an approved plan that waits for its implementation, one Bob approved at version 2 after asking for changes, and one by Bob that waits for Alice's review. Running it again skips what is already there.
 
 Set your name to Alice, the demo author, and sign a review. Then open the same page in a private window with another name to comment and approve it.
 

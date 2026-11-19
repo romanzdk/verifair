@@ -10,7 +10,7 @@ url=${VERIFAIR_URL:-http://127.0.0.1:8000}
 wget --quiet --mirror --page-requisites --convert-links --adjust-extension \
   --no-host-directories --restrict-file-names=windows --directory-prefix "$out" \
   --timeout 10 --tries 2 \
-  --header "Cookie: vf_id=demovisitor; vf_name=Visitor" \
+  --header "Cookie: vf_id=alice-demo; vf_name=Alice" \
   --reject-regex '/(docs|redoc|openapi\.json|access|login|logout|auth|api|name)([/?]|$)|/delete$' \
   "$url/"
 

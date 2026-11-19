@@ -8,11 +8,12 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ### Added
 
-- A static demo on the docs site, linked from the top of the README as "Try the demo review": the four `scripts/demo.py` reviews, rebuilt on every docs deploy by `scripts/snapshot-demo.sh`. Commenting, signing and verdicts are off there.
+- A static demo on the docs site, linked from the top of the README as "Try the demo review": the `scripts/demo.py` reviews, rebuilt on every docs deploy by `scripts/snapshot-demo.sh`. Commenting, signing and verdicts are off there.
 - Prompt coaching can export prompts from local Codex rollout sessions as well as Claude Code. It keeps the author preview and selection flow, skips known injected context, and avoids mirrored prompt duplicates.
 
 ### Changed
 
+- The demo reviews from `scripts/demo.py` are in different states: one to sign, one waiting for a reviewer, an approved plan waiting for its implementation, one approved at version 2, and a new one by Bob that waits for Alice's review. The static demo shows Alice's inbox.
 - `docker compose up` pulls the release image instead of building it, and no longer publishes Postgres on port 5432, so it does not clash with a Postgres already on your machine. To run your checkout, run from source; contributors start a test database with one `docker run` line (see Contributing in the README).
 - The README says prompt export is automatic only for Claude Code today.
 - `AGENTS.md` (also read by Claude Code through `CLAUDE.md`) lists the checks to run before a pull request and the release steps.
