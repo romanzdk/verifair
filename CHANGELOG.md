@@ -10,6 +10,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 - The status column in review lists is wide enough for "Awaiting implementation", which spilled into the risk column. The title column keeps its width at 1024px.
 - The static demo shows list times as the app does ("waiting <1m"), not as a long date that was cut off.
+- The status tabs above a review list no longer open scrolled to the left on a screen with the sidebar (1024px and wider), which cut off the first tabs.
+- The report template example charges the same amount everywhere: the staging check and its response said 13.33 EUR, the before/after said 10.00 EUR.
 
 ## [0.12.0] - 2026-11-19
 

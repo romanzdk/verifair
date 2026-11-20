@@ -1,5 +1,6 @@
 import dataclasses
 import importlib.util
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -100,3 +101,11 @@ def test_demo_reports_have_no_template_hints():
     assert hints
     for report in demo.REPORTS:
         assert not any(hint in report.get("body", "") for hint in hints), report["id"]
+
+
+def test_template_example_charges_the_same_amount_everywhere():
+    template = load_demo().TEMPLATE.read_text()
+    after = re.search(r"^\| After \| ([\d.]+) EUR", template, re.M).group(1)
+    staging = re.search(r"Upgrade works on staging .*invoice line ([\d.]+) EUR", template).group(1)
+    response = re.search(r'"amount": "([\d.]+)"', template).group(1)
+    assert after == staging == response

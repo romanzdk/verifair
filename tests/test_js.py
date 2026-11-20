@@ -23,6 +23,7 @@ import pytest
         "load_reveals_fragment_and_focuses_autofocus",
         "execution_fragment_reveals_all_ancestors",
         "comment_label_buttons",
+        "status_tabs_scroll_from_their_own_left_edge",
     ],
 )
 def test_actual_javascript_anchor_ranges(case):

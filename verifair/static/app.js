@@ -408,7 +408,7 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
   const nav = document.querySelector("[data-status-nav]");
   const active = nav?.querySelector('[aria-current="page"]');
   if (active && nav.scrollWidth > nav.clientWidth) {
-    nav.scrollLeft = Math.max(0, active.offsetLeft - 16);
+    nav.scrollLeft = Math.max(0, active.getBoundingClientRect().left - nav.getBoundingClientRect().left - 16);
   }
   document.addEventListener("click", async event => {
     const button = event.target.closest("[data-copy-identity], [data-copy-target]");

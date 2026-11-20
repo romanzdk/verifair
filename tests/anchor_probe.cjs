@@ -58,6 +58,19 @@ function find(parts, quote, start) {
 }
 
 const cases = {
+  status_tabs_scroll_from_their_own_left_edge() {
+    const rect = (left) => ({ getBoundingClientRect: () => ({ left }) });
+    const tabsAt = (navLeft, activeLeft) => {
+      const nav = { ...rect(navLeft), scrollLeft: 0, scrollWidth: 972, clientWidth: 720 };
+      nav.querySelector = () => ({ ...rect(activeLeft), offsetLeft: activeLeft });
+      const page = { ...document, querySelector: (selector) => selector === "[data-status-nav]" ? nav : null, addEventListener() {} };
+      vm.runInContext(fs.readFileSync(path.join(__dirname, "../verifair/static/app.js"), "utf8"),
+        vm.createContext({ ...scope, document: page, addEventListener() {} }));
+      return nav.scrollLeft;
+    };
+    assert.equal(tabsAt(272, 272), 0);
+    assert.equal(tabsAt(272, 1094), 806);
+  },
   execution_fragment_reveals_all_ancestors() {
     const run = { open: false, parentElement: null, closest() { return this; } };
     const parent = { open: false, parentElement: run, closest() { return this; } };
