@@ -58,18 +58,18 @@ function find(parts, quote, start) {
 }
 
 const cases = {
-  status_tabs_scroll_from_their_own_left_edge() {
-    const rect = (left) => ({ getBoundingClientRect: () => ({ left }) });
-    const tabsAt = (navLeft, activeLeft) => {
-      const nav = { ...rect(navLeft), scrollLeft: 0, scrollWidth: 972, clientWidth: 720 };
-      nav.querySelector = () => ({ ...rect(activeLeft), offsetLeft: activeLeft });
+  status_tabs_scroll_only_to_reveal_the_active_tab() {
+    const tabsAt = (activeLeft, activeRight) => {
+      const nav = { scrollLeft: 0, getBoundingClientRect: () => ({ left: 272, right: 992 }) };
+      nav.querySelector = () => ({ offsetLeft: activeLeft, getBoundingClientRect: () => ({ left: activeLeft, right: activeRight }) });
       const page = { ...document, querySelector: (selector) => selector === "[data-status-nav]" ? nav : null, addEventListener() {} };
       vm.runInContext(fs.readFileSync(path.join(__dirname, "../verifair/static/app.js"), "utf8"),
         vm.createContext({ ...scope, document: page, addEventListener() {} }));
       return nav.scrollLeft;
     };
-    assert.equal(tabsAt(272, 272), 0);
-    assert.equal(tabsAt(272, 1094), 806);
+    assert.equal(tabsAt(272, 336), 0);
+    assert.equal(tabsAt(502, 653), 0);
+    assert.equal(tabsAt(1160, 1245), 269);
   },
   execution_fragment_reveals_all_ancestors() {
     const run = { open: false, parentElement: null, closest() { return this; } };
