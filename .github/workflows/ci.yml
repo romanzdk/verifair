@@ -44,6 +44,8 @@ jobs:
         with:
           node-version: "22"
       - run: uv sync --locked
+      # tests/test_browser.py checks the demo pages' layout in a real browser
+      - run: uv run playwright install --with-deps chromium
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q

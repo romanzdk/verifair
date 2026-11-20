@@ -9,6 +9,7 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 ### Changed
 
 - CI now upgrades from the last release and fails if any demo review or comment reads differently afterwards, or if the upgraded database schema differs from a fresh one.
+- CI opens the demo reviews in a real browser at phone, laptop and desktop widths and fails when the page scrolls sideways, list cells run into each other, text is cut off, or the status tabs hide the current tab.
 
 ## [0.13.0] - 2026-11-20
 
