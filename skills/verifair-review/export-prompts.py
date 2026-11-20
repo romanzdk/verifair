@@ -154,22 +154,32 @@ def opencode_prompts(path: str, export: dict) -> list[str]:
     return prompts
 
 
+def is_opencode_export(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("info"), dict)
+        and isinstance(value.get("messages"), list)
+    )
+
+
 def read_prompts(path: str) -> list[str]:
     with open(path, encoding="utf-8", errors="replace") as session:
-        raw = session.read()
-    try:
-        export = json.loads(raw)
-    except (json.JSONDecodeError, RecursionError):
-        export = None
-    if (
-        isinstance(export, dict)
-        and isinstance(export.get("info"), dict)
-        and isinstance(export.get("messages"), list)
-    ):
-        return opencode_prompts(path, export)
+        if session.readline().strip() == "{":
+            session.seek(0)
+            try:
+                export = json.loads(session.read())
+            except (json.JSONDecodeError, RecursionError):
+                export = None
+            if is_opencode_export(export):
+                return opencode_prompts(path, export)
+        session.seek(0)
+        return read_records(path, session)
+
+
+def read_records(path: str, lines) -> list[str]:
     prompts = []
     previous_source = None
-    for line in raw.splitlines():
+    for line in lines:
         try:
             record = json.loads(line)
         except (json.JSONDecodeError, RecursionError):
@@ -178,6 +188,8 @@ def read_prompts(path: str) -> list[str]:
         if not isinstance(record, dict):
             previous_source = None
             continue
+        if is_opencode_export(record):
+            return opencode_prompts(path, record)
         if record.get("type") == "session_meta" and is_subagent(record):
             raise ValueError(
                 f"{path} is a subagent session: another agent wrote its prompts, not the author"

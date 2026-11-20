@@ -10,7 +10,7 @@ It is optional and off by default. Nobody's prompts are shared unless they ask f
 
 Ask your agent, while it prepares the report: "add my prompts to the review". The [agent skill](api.md#get-the-agent-skill) then:
 
-1. Finds the session you typed in, and shows you its file name and first prompt to confirm it is yours.
+1. Finds the session you typed in, and shows you its file name (or OpenCode session title) and first prompt to confirm it is yours.
 2. Runs `export-prompts.py`, which prints only what you typed: no agent replies, tool output, system text or attachment paths. Nothing is uploaded yet.
 3. Shows you every prompt, numbered, and asks which to leave out, for example `1-12` for prompts about other work, or one that has a secret or a client name in it.
 4. Adds the rest, word for word, as a `## Prompts` section at the end of the report.
@@ -58,6 +58,6 @@ Most prompts typed into a coding agent run once. There is no test set to score t
 
 ## Limits
 
-- Claude Code sessions, local Codex rollout JSONL (tested on Codex 0.118 and 0.167 rollouts) and OpenCode v2 session exports (tested on OpenCode 2.2.6) are supported. Codex rollout files are an internal format and can change, so check the preview. `codex exec --json` output contains execution events, not input prompts; use the rollout instead. Other agents, such as Pi, and Codex sessions without a local rollout can still paste a prompts section by hand.
+- Claude Code sessions, local Codex rollout JSONL (tested on Codex 0.118 and 0.167 rollouts) and OpenCode v2 session exports (tested on OpenCode 2.2.6) are supported. Codex rollout files are an internal format and can change, so check the preview. `codex exec --json` output contains execution events, not input prompts; use the rollout instead. Other agents and Codex sessions without a local rollout can still paste a prompts section by hand.
 - The section is plain report text. There is no separate Prompts tab yet.
 - A prompt that contains Markdown, such as headings or lists, is shown formatted inside its quote. It cannot start a new report section.

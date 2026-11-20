@@ -495,3 +495,32 @@ def test_opencode_v1_export_fails_with_a_hint(tmp_path):
     assert result.stdout == ""
     assert "opencode session export" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_opencode_empty_parent_id_is_still_a_child_session(tmp_path):
+    result = _opencode_export(tmp_path, OPENCODE_MESSAGES, check=False, parentID="")
+
+    assert result.returncode == 2
+    assert "subagent" in result.stderr
+
+
+def test_compact_one_line_opencode_export_is_read(tmp_path):
+    export = {"info": {"id": "ses_x"}, "messages": [_oc("user", 1, text="One line.")]}
+    session = tmp_path / "session.json"
+    session.write_text(json.dumps(export))
+    out = subprocess.run(
+        [sys.executable, "-I", str(SCRIPT), str(session)], capture_output=True, text=True
+    ).stdout
+
+    assert out.endswith("**1.**\n\n> One line.\n")
+
+
+def test_line_separators_inside_a_prompt_do_not_split_the_record(tmp_path):
+    session = tmp_path / "session.jsonl"
+    records = [_user("first second"), _user("Next prompt.")]
+    session.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records))
+    out = subprocess.run(
+        [sys.executable, "-I", str(SCRIPT), str(session)], capture_output=True, text=True
+    ).stdout
+
+    assert "> first\n> second\n" in out and "> Next prompt." in out
