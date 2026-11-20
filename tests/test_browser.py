@@ -15,7 +15,10 @@ from pathlib import Path
 import pytest
 import uvicorn
 
-sync_api = pytest.importorskip("playwright.sync_api")
+if os.environ.get("CI"):
+    from playwright import sync_api
+else:
+    sync_api = pytest.importorskip("playwright.sync_api")
 
 DEMO = Path(__file__).resolve().parents[1] / "scripts" / "demo.py"
 WIDTHS = (390, 1024, 1280)
@@ -116,37 +119,37 @@ def browser():
     with sync_api.sync_playwright() as playwright:
         try:
             browser = playwright.chromium.launch()
-        except sync_api.Error:
+        except sync_api.Error as error:
             if os.environ.get("CI"):
                 raise
-            pytest.skip("Chromium for Playwright is not installed")
+            pytest.skip(f"Chromium for Playwright does not start: {error}")
         yield browser
         browser.close()
 
 
-def test_demo_pages_lay_out_cleanly_at_every_width(browser, demo_url):
-    host = demo_url.split("//")[1].split(":")[0]
-    problems = []
+@pytest.mark.parametrize("width", WIDTHS)
+def test_demo_pages_lay_out_cleanly(browser, demo_url, width):
+    context = browser.new_context(viewport={"width": width, "height": 900})
+    context.add_cookies(
+        [
+            {"name": "vf_id", "value": "alice-demo", "url": demo_url},
+            {"name": "vf_name", "value": "Alice", "url": demo_url},
+        ]
+    )
+    page = context.new_page()
     errors = []
-    for width in WIDTHS:
-        context = browser.new_context(viewport={"width": width, "height": 900})
-        context.add_cookies(
-            [
-                {"name": "vf_id", "value": "alice-demo", "domain": host, "path": "/"},
-                {"name": "vf_name", "value": "Alice", "domain": host, "path": "/"},
-            ]
-        )
-        page = context.new_page()
-        page.on("pageerror", lambda error: errors.append(str(error)))
-        page.on("console", lambda m: m.type == "error" and errors.append(m.text))
-        for path in LIST_PAGES + REPORT_PAGES:
-            response = page.goto(demo_url + path)
-            if response.status != 200:
-                problems.append(f"{width}px {path}: HTTP {response.status}")
-                continue
-            problems += [f"{width}px {path}: {p}" for p in page.evaluate(LAYOUT_PROBLEMS)]
-            problems += [f"{width}px {path}: browser error: {e}" for e in errors]
-            errors.clear()
-        context.close()
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: message.type == "error" and errors.append(message.text))
+    problems = []
+    for path in LIST_PAGES + REPORT_PAGES:
+        response = page.goto(demo_url + path)
+        page.evaluate("document.fonts.ready")
+        if response.status != 200:
+            problems.append(f"{path}: HTTP {response.status}")
+            continue
+        problems += [f"{path}: {problem}" for problem in page.evaluate(LAYOUT_PROBLEMS)]
+        problems += [f"{path}: browser error: {error}" for error in errors]
+        errors.clear()
+    context.close()
 
-    assert not problems, "\n".join(problems)
+    assert not problems, f"at {width}px:\n" + "\n".join(problems)

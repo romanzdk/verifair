@@ -267,7 +267,7 @@ uv run pytest
 uv run ruff check . && uv run ruff format --check .
 ```
 
-Each test gets its own schema in that database and drops it at the end. If port 5432 is taken, publish another port and set `VERIFAIR_TEST_DATABASE_URL` to match. `docker stop verifair-dev-db` removes the database and its data. `tests/test_js.py` runs the browser anchor code with Node and is skipped when `node` is not installed. `tests/test_browser.py` opens the demo reviews in headless Chromium at phone, laptop and desktop widths and checks the layout; run `uv run playwright install chromium` once, or it is skipped.
+Each test gets its own schema in that database and drops it at the end. If port 5432 is taken, publish another port and set `VERIFAIR_TEST_DATABASE_URL` to match. `docker stop verifair-dev-db` removes the database and its data. `tests/test_js.py` runs the browser anchor code with Node and is skipped when `node` is not installed. `tests/test_browser.py` opens the demo reviews in headless Chromium at phone, laptop and desktop widths and checks the layout; run `uv run playwright install chromium` once, or it is skipped (in CI it fails instead).
 
 ## License
 
