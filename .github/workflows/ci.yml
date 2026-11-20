@@ -52,6 +52,8 @@ jobs:
         run: |
           printf '%s\n' '{"type": "user", "message": {"content": "Fix the login."}}' > "$RUNNER_TEMP/session.jsonl"
           uv run --no-project --python 3.9 python -I skills/verifair-review/export-prompts.py "$RUNNER_TEMP/session.jsonl" | grep -q "> Fix the login."
+          printf '%s\n' '{' '"info": {"id": "ses_ci"},' '"messages": [{"id": "msg_1", "type": "user", "text": "Fix the logout."}]' '}' > "$RUNNER_TEMP/session.json"
+          uv run --no-project --python 3.9 python -I skills/verifair-review/export-prompts.py "$RUNNER_TEMP/session.json" | grep -q "> Fix the logout."
 
   manifests:
     runs-on: ubuntu-latest
