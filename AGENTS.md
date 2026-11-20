@@ -13,7 +13,7 @@ uv run --locked --only-group docs mkdocs build --strict -d /tmp/verifair-site
 ```
 
 - Every pull request adds a line under `## [Unreleased]` in `CHANGELOG.md`.
-- CI upgrades from the last release: it loads that release's demo with its image, then runs this code on the same database (`scripts/upgrade-check.py`). A schema change must keep everything the old release wrote readable, unchanged. New fields are fine.
+- CI upgrades from the last release: it loads that release's demo with its image, then runs this code on the same database (`scripts/upgrade-check.py`). A schema change must keep everything the old release wrote: the same values and the same list lengths (new fields are fine), and the upgraded schema must match a fresh one.
 - The docs build is strict: a link from `CHANGELOG.md` to a file under `docs/` breaks it, so write the path as plain text.
 - Use plain, simple language in docs and messages.
 

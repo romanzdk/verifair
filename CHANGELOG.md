@@ -8,7 +8,7 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ### Changed
 
-- CI checks every change against an upgrade: it runs the last release with its demo reviews and comments, then this code on the same database, and fails if any review reads differently.
+- CI now upgrades from the last release and fails if any demo review or comment reads differently afterwards, or if the upgraded database schema differs from a fresh one.
 
 ## [0.13.0] - 2026-11-20
 

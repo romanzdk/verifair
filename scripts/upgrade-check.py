@@ -64,8 +64,8 @@ def snapshot(ids: list[str]) -> dict:
         for target in ("implementation", "plan"):
             try:
                 comments[target] = get(f"/api/reports/{id}/comments?target={target}")
-            except urllib.error.HTTPError:
-                pass
+            except urllib.error.HTTPError as error:
+                comments[target] = {"http": error.code}
         reviews[id] = {"report": report, "versions": versions, "comments": comments}
     return reviews
 
@@ -106,7 +106,9 @@ def compare(ids: list[str], before: dict) -> list[str]:
                 request(path, method).close()
             except urllib.error.HTTPError as error:
                 problems.append(f"{method} {path}: HTTP {error.code}")
-    return problems + [f"after archive and restore: {p}" for p in changed(before, snapshot(ids))]
+    if problems:
+        return problems
+    return [f"after archive and restore: {p}" for p in changed(before, snapshot(ids))]
 
 
 def main() -> None:

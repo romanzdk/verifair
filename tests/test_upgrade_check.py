@@ -22,3 +22,6 @@ def test_new_fields_are_allowed_but_old_values_must_stay():
     assert changed(before, {**before, "versions": [{"body": "b", "plan": None}]}) == [
         "versions[0].body: 'a' -> 'b'"
     ]
+    assert changed(before, {**before, "versions": [None]}) == [
+        "versions[0]: {'body': 'a', 'plan': None} -> None"
+    ]
