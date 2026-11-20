@@ -12,7 +12,7 @@ Ask your agent, while it prepares the report: "add my prompts to the review". Th
 
 1. Finds the session you typed in, and shows you its file name (or OpenCode session title) and first prompt to confirm it is yours.
 2. Runs `export-prompts.py`, which prints only what you typed: no agent replies, tool output, system text or attachment paths. Nothing is uploaded yet.
-3. Shows you every prompt, numbered, and asks which to leave out, for example `1-12` for prompts about other work, or one that has a secret or a client name in it.
+3. Shows you every prompt, numbered, and asks which to leave out, for example `1-12` for prompts about other work, or one that has a secret or a client name in it. If it cannot ask you, for example in a non-interactive run, it adds no prompts at all.
 4. Adds the rest, word for word, as a `## Prompts` section at the end of the report.
 
 You can also run the script yourself, from the installed skill's folder:

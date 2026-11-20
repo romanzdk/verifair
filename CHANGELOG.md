@@ -10,6 +10,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 - Prompt coaching can export prompts from an OpenCode session (`opencode session export`), as well as Claude Code and Codex. Attached files show as `[image]` or `[attachment]`, never their content. Child (subagent) sessions are refused.
 
+### Changed
+
+- The review skill adds no prompts section when it cannot ask the author which prompts to leave out, for example in a non-interactive run. Before, an agent could decide on its own to share them all.
+
 ## [0.12.1] - 2026-11-20
 
 ### Fixed
