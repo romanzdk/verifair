@@ -7,6 +7,7 @@ Read the README's Contributing section first. The rest is what it does not say.
 ```bash
 docker run -d --rm --name verifair-dev-db -e POSTGRES_USER=verifair -e POSTGRES_PASSWORD=verifair \
   -p 127.0.0.1:5432:5432 postgres:18
+uv run playwright install chromium  # once; tests/test_browser.py is skipped without it
 uv run pytest
 uv run ruff check . && uv run ruff format --check .
 uv run --locked --only-group docs mkdocs build --strict -d /tmp/verifair-site
@@ -14,6 +15,7 @@ uv run --locked --only-group docs mkdocs build --strict -d /tmp/verifair-site
 
 - Every pull request adds a line under `## [Unreleased]` in `CHANGELOG.md`.
 - CI upgrades from the last release: it loads that release's demo with its image, then runs this code on the same database (`scripts/upgrade-check.py`). A schema change must keep everything the old release wrote: the same values and the same list lengths (new fields are fine), and the upgraded schema must match a fresh one. `ALTER TABLE ... ADD COLUMN` appends, so a new column also goes last in its `CREATE TABLE`.
+- A change to a page or its CSS: if `tests/test_browser.py` fails, read its message (width, page, what overlaps), and add a check there when a new kind of layout bug slips through.
 - The docs build is strict: a link from `CHANGELOG.md` to a file under `docs/` breaks it, so write the path as plain text.
 - Use plain, simple language in docs and messages.
 
