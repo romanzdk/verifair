@@ -14,7 +14,7 @@ services:
       retries: 30
 
   app:
-    image: ghcr.io/romanzdk/verifair:0.12.1
+    image: ghcr.io/romanzdk/verifair:0.13.0
     restart: unless-stopped
     depends_on:
       db:

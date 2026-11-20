@@ -23,7 +23,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: verifair
-          image: ghcr.io/romanzdk/verifair:0.12.1
+          image: ghcr.io/romanzdk/verifair:0.13.0
           envFrom:
             - configMapRef:
                 name: verifair-config
