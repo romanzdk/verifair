@@ -6,6 +6,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-20
+
 ### Fixed
 
 - The status column in review lists is wide enough for "Awaiting implementation", which spilled into the risk column. The title column keeps its width at 1024px.
@@ -208,7 +210,8 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 - Plan-first reviews, optional execution traces, local and shared mode with Google or OpenID Connect sign-in, members, admins and per-member agent tokens, optional Slack messages and review emails.
 - Docker image at `ghcr.io/romanzdk/verifair` and the `verifair-review` agent skill.
 
-[Unreleased]: https://github.com/romanzdk/verifair/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/romanzdk/verifair/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/romanzdk/verifair/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/romanzdk/verifair/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/romanzdk/verifair/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/romanzdk/verifair/compare/v0.10.0...v0.10.1
