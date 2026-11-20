@@ -414,3 +414,84 @@ def test_deeply_nested_line_is_skipped(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "> Still here." in result.stdout
+
+
+def _opencode_export(tmp_path, messages, check=True, **info):
+    export = {"info": {"id": "ses_test", "title": "t", **info}, "messages": messages}
+    session = tmp_path / "session.json"
+    session.write_text(json.dumps(export, indent=2))
+    return subprocess.run(
+        [sys.executable, "-I", str(SCRIPT), str(session)],
+        capture_output=True,
+        text=True,
+        check=check,
+    )
+
+
+def _oc(kind, n, **fields):
+    return {"id": f"msg_{n}", "type": kind, "time": {"created": n}, **fields}
+
+
+OPENCODE_MESSAGES = [
+    _oc("agent-switched", 1, agent="build"),
+    _oc(
+        "user",
+        2,
+        text="Why is checkout slow?\n\n## Intent\nfind out",
+        files=[
+            {"data": "cHJpdmF0ZSBzY3JlZW4=", "mime": "image/png", "source": {"type": "inline"}},
+            {
+                "data": "cHJpdmF0ZSBjb2Rl",
+                "mime": "text/plain",
+                "name": "private.py",
+                "source": {"type": "uri", "uri": "file:///private.py"},
+            },
+        ],
+    ),
+    _oc("synthetic", 3, text="private injected context"),
+    _oc("system", 4, text="private system update"),
+    _oc("skill", 5, skill="s", name="review", text="private skill body"),
+    _oc("shell", 6, shellID="sh_1", command="cat private.env"),
+    _oc("assistant", 7, content=[{"type": "text", "text": "private reply"}]),
+    _oc("user", 8, text="<system-reminder>private</system-reminder>Add an index."),
+    _oc("compaction", 9, summary="private summary"),
+    _oc("user", 10, text="   "),
+    _oc("idle", 11),
+]
+
+
+def test_opencode_export_keeps_only_typed_prompts(tmp_path):
+    out = _opencode_export(tmp_path, OPENCODE_MESSAGES).stdout
+
+    assert "private" not in out
+    assert "cHJp" not in out
+    assert [line for line in out.splitlines() if line.startswith(">")] == [
+        "> Why is checkout slow?",
+        ">",
+        "> ## Intent",
+        "> find out",
+        ">",
+        "> [image]",
+        ">",
+        "> [attachment]",
+        "> Add an index.",
+    ]
+    assert "**1.**" in out and "**2.**" in out and "**3.**" not in out
+
+
+def test_opencode_child_session_is_refused(tmp_path):
+    result = _opencode_export(tmp_path, OPENCODE_MESSAGES, check=False, parentID="ses_parent")
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "subagent" in result.stderr
+
+
+def test_opencode_v1_export_fails_with_a_hint(tmp_path):
+    v1 = [{"info": {"id": "msg_1", "role": "user"}, "parts": [{"type": "text", "text": "Hi"}]}]
+    result = _opencode_export(tmp_path, v1, check=False)
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "opencode session export" in result.stderr
+    assert "Traceback" not in result.stderr

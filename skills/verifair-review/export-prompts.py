@@ -1,6 +1,6 @@
-"""Print your Claude Code or Codex session prompts as a `## Prompts` report section.
+"""Print your Claude Code, Codex or OpenCode session prompts as a `## Prompts` report section.
 
-Usage: python3 -I export-prompts.py SESSION.jsonl [--upto N] [--drop 1-3,5]
+Usage: python3 -I export-prompts.py SESSION.jsonl|SESSION.json [--upto N] [--drop 1-3,5]
 
 Read the output before you share it: it is your words, as typed, secrets included.
 Nothing is uploaded; the section goes to stdout.
@@ -127,37 +127,75 @@ def is_subagent(meta: dict) -> bool:
     return isinstance(source, dict) and "subagent" in source
 
 
+def opencode_prompts(path: str, export: dict) -> list[str]:
+    info, messages = export["info"], export["messages"]
+    if not str(info.get("id", "")).startswith("ses_") or any(
+        not isinstance(m, dict) or "type" not in m for m in messages
+    ):
+        raise ValueError(
+            f"{path} is not an OpenCode v2 session export: run `opencode session export ses_ID`"
+        )
+    if info.get("parentID") is not None:
+        raise ValueError(
+            f"{path} is a subagent session: another agent wrote its prompts, not the author"
+        )
+    prompts = []
+    for message in messages:
+        if message.get("type") != "user" or not isinstance(message.get("text"), str):
+            continue
+        files = message.get("files") if isinstance(message.get("files"), list) else []
+        content = [{"type": "text", "text": message["text"]}] + [
+            {"type": "image" if str(f.get("mime", "")).startswith("image/") else "file"}
+            for f in files
+            if isinstance(f, dict)
+        ]
+        if text := prompt_text({"type": "user", "message": {"content": content}}):
+            prompts.append(text)
+    return prompts
+
+
 def read_prompts(path: str) -> list[str]:
+    with open(path, encoding="utf-8", errors="replace") as session:
+        raw = session.read()
+    try:
+        export = json.loads(raw)
+    except (json.JSONDecodeError, RecursionError):
+        export = None
+    if (
+        isinstance(export, dict)
+        and isinstance(export.get("info"), dict)
+        and isinstance(export.get("messages"), list)
+    ):
+        return opencode_prompts(path, export)
     prompts = []
     previous_source = None
-    with open(path, encoding="utf-8", errors="replace") as lines:
-        for line in lines:
-            try:
-                record = json.loads(line)
-            except (json.JSONDecodeError, RecursionError):
-                previous_source = None
-                continue
-            if not isinstance(record, dict):
-                previous_source = None
-                continue
-            if record.get("type") == "session_meta" and is_subagent(record):
-                raise ValueError(
-                    f"{path} is a subagent session: another agent wrote its prompts, not the author"
-                )
-            if not (text := prompt_text(record) or codex_prompt(record)):
-                previous_source = None
-                continue
-            source = record.get("type")
-            if (
-                source in ("event_msg", "response_item")
-                and previous_source in ("event_msg", "response_item")
-                and source != previous_source
-                and prompts[-1] == text
-            ):
-                previous_source = None
-                continue
-            prompts.append(text)
-            previous_source = source
+    for line in raw.splitlines():
+        try:
+            record = json.loads(line)
+        except (json.JSONDecodeError, RecursionError):
+            previous_source = None
+            continue
+        if not isinstance(record, dict):
+            previous_source = None
+            continue
+        if record.get("type") == "session_meta" and is_subagent(record):
+            raise ValueError(
+                f"{path} is a subagent session: another agent wrote its prompts, not the author"
+            )
+        if not (text := prompt_text(record) or codex_prompt(record)):
+            previous_source = None
+            continue
+        source = record.get("type")
+        if (
+            source in ("event_msg", "response_item")
+            and previous_source in ("event_msg", "response_item")
+            and source != previous_source
+            and prompts[-1] == text
+        ):
+            previous_source = None
+            continue
+        prompts.append(text)
+        previous_source = source
     return prompts
 
 
@@ -187,7 +225,9 @@ def section(prompts: list[str], drop: set[int]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("session", help="Claude Code session or Codex rollout .jsonl file")
+    parser.add_argument(
+        "session", help="Claude Code session, Codex rollout .jsonl or OpenCode export .json file"
+    )
     parser.add_argument(
         "--upto",
         type=int,
@@ -206,8 +246,9 @@ def main() -> None:
         parser.error(str(error))
     if not prompts:
         parser.error(
-            f"no prompts found in {args.session}: expected a Claude Code session or a Codex"
-            " rollout-*.jsonl file (`codex exec --json` output has no prompts)"
+            f"no prompts found in {args.session}: expected a Claude Code session, a Codex"
+            " rollout-*.jsonl file (`codex exec --json` output has no prompts) or an"
+            " `opencode session export` file"
         )
     if unknown := sorted(args.drop - set(range(1, len(prompts) + 1))):
         parser.error(f"--drop: no prompt numbered {unknown} (there are {len(prompts)})")

@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Added
+
+- Prompt coaching can export prompts from an OpenCode session (`opencode session export`), as well as Claude Code and Codex. Attached files show as `[image]` or `[attachment]`, never their content. Child (subagent) sessions are refused.
+
 ## [0.12.1] - 2026-11-20
 
 ### Fixed
