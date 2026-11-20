@@ -6,6 +6,10 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Changed
+
+- CI checks every change against an upgrade: it runs the last release with its demo reviews and comments, then this code on the same database, and fails if any review reads differently.
+
 ## [0.13.0] - 2026-11-20
 
 ### Added

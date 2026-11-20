@@ -55,6 +55,54 @@ jobs:
           printf '%s\n' '{' '"info": {"id": "ses_ci"},' '"messages": [{"id": "msg_1", "type": "user", "text": "Fix the logout."}]' '}' > "$RUNNER_TEMP/session.json"
           uv run --no-project --python 3.9 python -I skills/verifair-review/export-prompts.py "$RUNNER_TEMP/session.json" | grep -q "> Fix the logout."
 
+  upgrade:
+    name: upgrade from the last release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: verifair
+          POSTGRES_PASSWORD: verifair
+          POSTGRES_DB: verifair
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U verifair -d verifair"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.15"
+      # Self-hosters upgrade with their data in place: what the last release wrote must still read the same
+      - name: Load the last release's demo, then read it back with this code
+        env:
+          VERIFAIR_API_TOKEN: ci
+          VERIFAIR_DATABASE_URL: postgresql://verifair:verifair@localhost:5432/verifair
+        run: |
+          prev="$(git describe --tags --abbrev=0 HEAD^)"
+          echo "Upgrading from $prev"
+          mkdir "$RUNNER_TEMP/old"
+          git archive "$prev" scripts docs | tar -x -C "$RUNNER_TEMP/old"
+          demo="$RUNNER_TEMP/old/scripts/demo.py"
+          ready() { for _ in $(seq 60); do curl -fs -o /dev/null http://localhost:8000/readyz && return; sleep 1; done; return 1; }
+          docker run -d --name old --network host -e VERIFAIR_API_TOKEN -e VERIFAIR_DATABASE_URL "ghcr.io/romanzdk/verifair:${prev#v}"
+          ready || { docker logs old; exit 1; }
+          python3 "$demo"
+          python3 scripts/upgrade-check.py seed "$demo"
+          python3 scripts/upgrade-check.py snapshot "$demo" > "$RUNNER_TEMP/before.json"
+          docker rm -f old
+          uv run --locked --no-dev uvicorn verifair.asgi:app > "$RUNNER_TEMP/uvicorn.log" 2>&1 &
+          ready || { cat "$RUNNER_TEMP/uvicorn.log"; exit 1; }
+          python3 scripts/upgrade-check.py compare "$demo" "$RUNNER_TEMP/before.json" || { cat "$RUNNER_TEMP/uvicorn.log"; exit 1; }
+
   manifests:
     runs-on: ubuntu-latest
     steps:
