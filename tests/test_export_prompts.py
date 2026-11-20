@@ -524,3 +524,15 @@ def test_line_separators_inside_a_prompt_do_not_split_the_record(tmp_path):
     ).stdout
 
     assert "> first\n> second\n" in out and "> Next prompt." in out
+
+
+def test_pretty_json_that_is_not_an_opencode_export_is_refused(tmp_path):
+    session = tmp_path / "other.json"
+    session.write_text('{\n  {"type": "user", "message": {"content": "LEAK"}}\n}\n')
+    result = subprocess.run(
+        [sys.executable, "-I", str(SCRIPT), str(session)], capture_output=True, text=True
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "OpenCode v2 session export" in result.stderr

@@ -170,8 +170,12 @@ def read_prompts(path: str) -> list[str]:
                 export = json.loads(session.read())
             except (json.JSONDecodeError, RecursionError):
                 export = None
-            if is_opencode_export(export):
-                return opencode_prompts(path, export)
+            if not is_opencode_export(export):
+                raise ValueError(
+                    f"{path} is not an OpenCode v2 session export:"
+                    " run `opencode session export ses_ID`"
+                )
+            return opencode_prompts(path, export)
         session.seek(0)
         return read_records(path, session)
 
