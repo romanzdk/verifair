@@ -92,6 +92,7 @@ jobs:
           VERIFAIR_API_TOKEN: ci
           VERIFAIR_DATABASE_URL: postgresql://verifair:verifair@localhost:5432/verifair
         run: |
+          set -o pipefail
           prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD^)"
           echo "Upgrading from $prev"
           mkdir "$RUNNER_TEMP/old"
@@ -99,7 +100,7 @@ jobs:
           demo="$RUNNER_TEMP/old/scripts/demo.py"
           ready() { for _ in $(seq 60); do curl -fs -o /dev/null http://localhost:8000/readyz && return; sleep 1; done; return 1; }
           # the old release reads today's variable names, so renaming one needs a fallback here
-          docker run -d --name old --network host -e VERIFAIR_API_TOKEN -e VERIFAIR_DATABASE_URL "ghcr.io/romanzdk/verifair:${prev#v}"
+          docker run -d --name old --network host -e VERIFAIR_API_TOKEN -e VERIFAIR_DATABASE_URL "ghcr.io/${{ github.repository }}:${prev#v}"
           ready || { docker logs old; exit 1; }
           {
             python3 "$demo" &&
@@ -112,6 +113,7 @@ jobs:
           python3 scripts/upgrade-check.py compare "$demo" "$RUNNER_TEMP/before.json" || { cat "$RUNNER_TEMP/uvicorn.log"; exit 1; }
       - name: The upgraded schema matches a fresh one
         run: |
+          set -o pipefail
           base=postgresql://verifair:verifair@localhost:5432
           dump() { docker run --rm --network host "postgres:${{ matrix.postgres }}" pg_dump --schema-only --no-owner --no-privileges "$base/$1" | grep -v -e '^--' -e '^$' -e '^\\'; }
           docker run --rm --network host "postgres:${{ matrix.postgres }}" psql "$base/verifair" -qc "CREATE DATABASE fresh"
@@ -121,7 +123,9 @@ jobs:
           with db.connect(sys.argv[1]) as conn:
               db.init_schema(conn)
           EOF
-          diff <(dump verifair) <(dump fresh)
+          dump verifair > "$RUNNER_TEMP/upgraded.sql"
+          dump fresh > "$RUNNER_TEMP/fresh.sql"
+          diff "$RUNNER_TEMP/upgraded.sql" "$RUNNER_TEMP/fresh.sql"
 
   manifests:
     runs-on: ubuntu-latest
