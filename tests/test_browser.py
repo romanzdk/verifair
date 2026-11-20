@@ -146,10 +146,14 @@ def test_demo_pages_lay_out_cleanly(browser, demo_url, width):
         page.evaluate("document.fonts.ready")
         if response.status != 200:
             problems.append(f"{path}: HTTP {response.status}")
-            continue
-        problems += [f"{path}: {problem}" for problem in page.evaluate(LAYOUT_PROBLEMS)]
+        else:
+            problems += [f"{path}: {problem}" for problem in page.evaluate(LAYOUT_PROBLEMS)]
         problems += [f"{path}: browser error: {error}" for error in errors]
         errors.clear()
+    page.goto(demo_url + "/")
+    viewer = page.locator(".me-name").first.inner_text()
     context.close()
+
+    assert viewer == "Alice", f"the pages were shown as {viewer!r}, not the demo user Alice"
 
     assert not problems, f"at {width}px:\n" + "\n".join(problems)
