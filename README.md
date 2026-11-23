@@ -272,3 +272,7 @@ Each test gets its own schema in that database and drops it at the end. If port 
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+---
+
+Made by [Roman Žydyk](https://romanzdk.com).
