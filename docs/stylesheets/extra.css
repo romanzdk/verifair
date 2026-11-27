@@ -9,6 +9,15 @@
 [data-md-color-scheme="slate"] {
   --md-accent-fg-color: #6b9dff;
   --md-typeset-a-color: #6b9dff;
+  /* Material's dark code numbers and builtins sit just under 4.5:1 */
+  --md-code-hl-number-color: #ec7a6d;
+  --md-code-hl-constant-color: #9d8fe6;
+}
+
+/* Links inside running text need more than colour to stand out (WCAG 1.4.1) */
+.md-typeset :is(p, li, td) > a:not(.md-button) {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
 }
 
 .md-typeset table img {
