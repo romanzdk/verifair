@@ -1,9 +1,53 @@
 {% extends "base.html" %}
+{% set home_tagline = ": self-hosted review for coding agent changes" %}
+
+{% block htmltitle %}
+  {% if page and page.is_homepage %}
+    <title>{{ config.site_name }}{{ home_tagline }}</title>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
 
 {% block libs %}
   {{ super() }}
   {#- Material loads an unpinned mermaid@11 from unpkg unless `mermaid` is already set, so a failed load sets a no-op stand-in -#}
   {% if page and 'class="mermaid"' in page.content %}
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js" integrity="sha384-EOXBFmc3gx5mb+vn0vPvvGqACToJD24hhacX5Yx+8NUUQrHIle/Qi5Bg9o3zKwW2" crossorigin="anonymous" onerror="window.mermaid = {initialize() {}, render: () => new Promise(() => {})}"></script>
+  {% endif %}
+{% endblock %}
+
+{% block extrahead %}
+  {% if page %}
+    {% set description = page.meta.description or config.site_description %}
+    {% set title = config.site_name ~ home_tagline if page.is_homepage else (page.title | striptags) ~ " - " ~ config.site_name %}
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="{{ config.site_name }}">
+    <meta property="og:title" content="{{ title }}">
+    <meta property="og:description" content="{{ description }}">
+    <meta property="og:url" content="{{ page.canonical_url }}">
+    <meta property="og:image" content="{{ config.site_url }}images/review.png">
+    <meta property="og:image:alt" content="A verifair review: the change report with its evidence, comments and approvals">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ title }}">
+    <meta name="twitter:description" content="{{ description }}">
+    <meta name="twitter:image" content="{{ config.site_url }}images/review.png">
+    {% if page.is_homepage %}
+      <script type="application/ld+json">
+        {{ {
+          "@context": "https://schema.org",
+          "@type": "SoftwareApplication",
+          "name": config.site_name,
+          "description": config.site_description,
+          "url": config.site_url,
+          "applicationCategory": "DeveloperApplication",
+          "operatingSystem": "Linux, macOS, Windows (Docker)",
+          "license": "https://opensource.org/licenses/MIT",
+          "sameAs": [config.repo_url],
+          "screenshot": config.site_url ~ "images/review.png",
+          "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}
+        } | tojson }}
+      </script>
+    {% endif %}
   {% endif %}
 {% endblock %}

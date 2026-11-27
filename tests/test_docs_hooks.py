@@ -122,3 +122,27 @@ def test_post_build_writes_markdown_copies_and_llms_files(tmp_path):
     full = (site / "llms-full.txt").read_text()
     assert "Source: https://x.dev/v/report-template.md\n\n# Template\n\n## Intent" in full
     assert "Source: https://x.dev/v/api.md\n\n# API\n" in full
+
+
+def test_site_plays_readme_gifs_as_video():
+    text = docs_hooks.readme_page("![The loop](docs/images/demo.gif)")
+    assert text == (
+        '<video src="images/demo.mp4" aria-label="The loop" autoplay muted loop playsinline>'
+        "</video>"
+    )
+    for gif in re.findall(r"docs/images/([\w-]+)\.gif", Path("README.md").read_text()):
+        assert Path(f"docs/images/{gif}.mp4").exists(), gif
+
+
+def test_docs_pages_get_their_readme_summary_as_description():
+    config = SimpleNamespace(config_file_path="mkdocs.yml")
+    pages = {}
+    for src in ("api.md", "changelog.md", "index.md"):
+        page = SimpleNamespace(
+            file=SimpleNamespace(src_uri=src, generated_by=src != "api.md"), meta={}
+        )
+        docs_hooks.on_page_markdown("# x", page, config, None)
+        pages[src] = page.meta
+    assert pages["api.md"]["description"].startswith("Push a report")
+    assert pages["changelog.md"]["description"] == "What changed in each version"
+    assert "description" not in pages["index.md"]
