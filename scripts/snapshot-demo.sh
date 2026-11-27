@@ -19,8 +19,9 @@ wget --quiet --mirror --page-requisites --convert-links --adjust-extension \
 cp -R verifair/static/. "$out/static/"
 
 export BASE="$base" ORIGIN="$url"
-export HEAD='<script>try { const t = localStorage.getItem("vf-demo-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>'
-export NOTE='<p class="banner" role="status">Static demo: commenting, signing and verdicts are off. <a href="https://github.com/romanzdk/verifair#quickstart">Run verifair</a> to try them.</p>'
+# The demo counts visits like the docs site; a self-hosted verifair never does
+export HEAD='<script data-goatcounter="https://verifair.goatcounter.com/count" async src="https://gc.zgo.at/count.v4.js" crossorigin="anonymous" integrity="sha384-nRw6qfbWyJha9LhsOtSb2YJDyZdKvvCFh0fJYlkquSFjUxp9FVNugbfy8q1jdxI+"></script><script>try { const t = localStorage.getItem("vf-demo-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>'
+export NOTE='<p class="banner" role="status">Static demo: commenting, signing and verdicts are off. <a href="https://github.com/romanzdk/verifair#quickstart">Run verifair</a> to try them. Visits are counted with GoatCounter, without cookies.</p>'
 export OFF='<script>
 const pressTheme = (form, theme) => { for (const b of form.querySelectorAll("button")) b.setAttribute("aria-pressed", b.value === theme); };
 for (const f of document.querySelectorAll(".theme-form")) pressTheme(f, document.documentElement.dataset.theme || "system");
