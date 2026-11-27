@@ -798,3 +798,11 @@ def test_local_mode_host_check_spares_the_api_and_probes(client):
         == 404
     )
     assert client.get("/", headers=host).status_code == 400
+
+
+def test_local_mode_host_check_covers_the_api_with_the_docs_token(settings, make_app):
+    client = TestClient(make_app(replace(settings, api_token="change-me")))
+    auth = {"Authorization": "Bearer change-me"}
+    rebound = client.get("/api/reports/missing", headers=auth | {"Host": "attacker.example:8000"})
+    assert rebound.status_code == 400
+    assert client.get("/api/reports/missing", headers=auth).status_code == 404

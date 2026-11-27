@@ -6,6 +6,11 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Fixed
+
+- In local mode, the API refuses unknown host names (400) when its token is `change-me`, the token from the docs. Before, a malicious website could use DNS rebinding and that public token to read and write reports.
+- The docs site gives each page its own description, Open Graph and Twitter card tags, and the home page a clearer title and structured data. The demo animation on the site is an MP4 (1 MB instead of 4 MB), and code comments and the footer have enough contrast.
+
 ### Changed
 
 - CI now upgrades from the last release and fails if any demo review or comment reads differently afterwards, or if the upgraded database schema differs from a fresh one.

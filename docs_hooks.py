@@ -6,11 +6,13 @@ from pathlib import Path
 
 REPO = "https://github.com/romanzdk/verifair/blob/main/"
 SITE = "https://romanzdk.github.io/verifair/"
+CHANGELOG_SUMMARY = "What changed in each version"
 PICTURE = re.compile(
     r'<picture>\s*<source[^>]*srcset="([^"]+)">\s*<img src="([^"]+)"([^>]*)>\s*</picture>'
 )
 OUTSIDE_DOCS = re.compile(r"\]\((?!docs/|https?:|#|mailto:)([^)\s]+)\)")
 IMAGE = re.compile(r"(?<!\[)!\[([^\]]*)\]\((images/[^)\s]+)\)")
+GIF = re.compile(r'^!\[([^\]"]*)\]\(docs/images/([\w-]+)\.gif\)$', re.M)
 
 
 def link_images(text: str) -> str:
@@ -26,6 +28,10 @@ def readme_links(text: str) -> str:
 def readme_page(text: str) -> str:
     # GitHub picks the wordmark from the OS theme; the site has its own light/dark toggle
     text = PICTURE.sub(r'<img src="\2#only-light"\3> <img src="\1#only-dark"\3>', text)
+    # GitHub cannot play a video from the README; the site plays the MP4, a quarter of the size
+    text = GIF.sub(
+        r'<video src="images/\2.mp4" aria-label="\1" autoplay muted loop playsinline></video>', text
+    )
     text = text.replace('<div align="center">', '<div align="center" markdown>')
     text = text.replace(f"[Docs]({SITE}) · ", "")
     return link_images(readme_links(text))
@@ -77,6 +83,10 @@ def on_files(files, config):
 
 
 def on_page_markdown(markdown, page, config, files):
+    readme = (Path(config.config_file_path).parent / "README.md").read_text()
+    summaries = page_summaries(readme) | {"changelog.md": CHANGELOG_SUMMARY}
+    if page.file.src_uri in summaries:
+        page.meta.setdefault("description", summaries[page.file.src_uri])
     if page.file.generated_by:
         source = "CHANGELOG.md" if page.file.src_uri == "changelog.md" else "README.md"
         page.edit_url = REPO.replace("/blob/", "/edit/") + source
@@ -91,7 +101,7 @@ def on_post_build(config):
     readme = (root / "README.md").read_text()
     summaries = page_summaries(readme) | {
         "index.md": config.site_description,
-        "changelog.md": "What changed in each version",
+        "changelog.md": CHANGELOG_SUMMARY,
     }
     pages, full = [], []
     for item in config.nav:

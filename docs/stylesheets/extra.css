@@ -21,3 +21,17 @@
     color: var(--md-primary-bg-color);
   }
 }
+
+/* Material's grey code comments and footer text sit just under the 4.5:1 contrast minimum */
+[data-md-color-scheme="default"] {
+  --md-code-hl-comment-color: rgba(0, 0, 0, 0.62);
+  --md-code-hl-variable-color: rgba(0, 0, 0, 0.62);
+}
+
+.md-copyright {
+  color: hsla(0, 0%, 100%, 0.6);
+}
+
+.md-typeset video {
+  max-width: 100%;
+}
