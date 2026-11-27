@@ -145,9 +145,9 @@ To let your coding agent set it up, locally or on Kubernetes, paste the prompt f
 | ![Execution tab with the agent's call tree, a failed test run with its output, and the plan used for the implementation](docs/images/execution.png) | ![Execution tab in dark theme](docs/images/execution-dark.png) |
 
 <p align="center">
-  <img src="docs/images/mobile.png" width="260" alt="Inbox on a phone">
+  <img src="docs/images/mobile.png" width="260" loading="lazy" alt="Inbox on a phone">
   &nbsp;&nbsp;
-  <img src="docs/images/mobile-review.png" width="260" alt="Review page on a phone: the Design diagram and an open blocking thread">
+  <img src="docs/images/mobile-review.png" width="260" loading="lazy" alt="Review page on a phone: the Design diagram and an open blocking thread">
 </p>
 
 ## The report

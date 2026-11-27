@@ -15,6 +15,7 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 - In local mode, the API refuses unknown host names (400) when its token is `change-me`, the token from the docs. Before, a malicious website could use DNS rebinding and that public token to read and write reports.
 - The docs site gives each page its own description, Open Graph and Twitter card tags, and the home page a clearer title and structured data. The demo animation on the site is an MP4 (1 MB instead of 4 MB), and code comments and the footer have enough contrast.
+- The docs home page loads screenshots only when they scroll into view and no longer waits for the diagram library before it shows text: on a phone (Lighthouse, mobile) the first text appears after 2.3 s instead of 7.3 s, and the page weighs 2.3 MB instead of 6.6 MB. Links in running text are underlined, and numbers and built-in names in dark-theme code blocks have enough contrast.
 
 ### Changed
 

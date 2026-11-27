@@ -14,7 +14,7 @@ def test_readme_links_point_into_the_site_or_github():
         "[skill](skills/verifair-review/SKILL.md), [top](#quickstart) and [x](https://x.dev)."
     )
     assert "[api.md](api.md#push)" in text
-    assert "[![shot](images/review.png)](images/review.png)" in text
+    assert "[![shot](images/review.png){ loading=lazy }](images/review.png)" in text
     assert '<img src="images/mobile.png" width="260">' in text
     assert f"[LICENSE]({REPO}LICENSE)" in text
     assert f"[skill]({REPO}skills/verifair-review/SKILL.md)" in text
@@ -46,7 +46,7 @@ def test_doc_links_outside_docs_go_to_github():
     assert f"[script]({REPO}docs/examples/trace-report.py)" in text
     assert "[API](api.md)" in text
     assert '<img src="../images/mobile-execution.png" width="260">' in text
-    assert "[![tree](images/execution.png)](images/execution.png)" in text
+    assert "[![tree](images/execution.png){ loading=lazy }](images/execution.png)" in text
 
 
 def test_real_readme_has_no_links_left_outside_the_site():

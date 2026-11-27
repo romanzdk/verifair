@@ -16,8 +16,9 @@ GIF = re.compile(r'^!\[([^\]"]*)\]\(docs/images/([\w-]+)\.gif\)$', re.M)
 
 
 def link_images(text: str) -> str:
-    # Screenshots shrink to text width, tables and phones; GitHub links them too
-    return IMAGE.sub(r"[![\1](\2)](\2)", text)
+    # Screenshots shrink to text width, tables and phones; GitHub links them too.
+    # Lazy, so the home page does not fetch a dozen screenshots before its first paint.
+    return IMAGE.sub(r"[![\1](\2){ loading=lazy }](\2)", text)
 
 
 def readme_links(text: str) -> str:
