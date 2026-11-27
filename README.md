@@ -9,7 +9,7 @@
 
 **Review the evidence, not the diff.** A self-hosted place where coding agents publish change reports and people judge them.
 
-For teams where coding agents write most of the code. Self-hosted: reports stay in your own Postgres, and verifair runs no AI itself.
+For people and teams whose coding agents write most of the code. Reports are stored in your own Postgres, and verifair runs no AI itself.
 
 **[Try the demo review →](https://romanzdk.github.io/verifair/demo/r/demo-currency-rounding.html)** (a static copy: you can read it, but not comment)
 

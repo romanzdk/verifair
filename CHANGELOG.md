@@ -8,7 +8,7 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ### Added
 
-- The docs site and its demo count visits with GoatCounter (no cookies, no personal data). A self-hosted verifair counts nothing; a test checks that the app holds no counting code.
+- The docs site and its demo count visits with GoatCounter (no cookies, no personal data stored). A self-hosted verifair counts nothing; a test checks that the app holds no counting code.
 - The README opens with who verifair is for and a one-line command to run it.
 
 ### Fixed
