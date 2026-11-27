@@ -64,7 +64,7 @@ ROUNDING = body(
     " Is that fine until the follow-up?",
     "`round_amount(amount, currency)` reads minor units from the currency table."
     " All three callers pass the currency.\n\n"
-    "| | 1234.6 JPY | 1.2346 BHD |\n|---|---|---|\n"
+    "| Rounded | 1234.6 JPY | 1.2346 BHD |\n|---|---|---|\n"
     "| Before | 1234.60 | 1.23 |\n| After | 1235 | 1.235 |\n\n"
     "```mermaid\nflowchart LR\n"
     "  A[Amount] --> B[Look up currency] --> C[Round to its minor units]\n```\n\n"

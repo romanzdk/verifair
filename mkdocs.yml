@@ -4,7 +4,7 @@ site_url: https://romanzdk.github.io/verifair/
 repo_url: https://github.com/romanzdk/verifair
 repo_name: romanzdk/verifair
 edit_uri: edit/main/docs/
-copyright: MIT licence · Visits are counted with <a href="https://www.goatcounter.com">GoatCounter</a>, without cookies
+copyright: MIT licence · Visits are counted with <a href="https://www.goatcounter.com">GoatCounter</a>, without cookies · <a href="https://romanzdk.github.io/verifair/privacy/">Privacy</a>
 
 exclude_docs: |
   superpowers/
@@ -30,6 +30,7 @@ nav:
   - Configuration: configuration.md
   - Deployment: deployment.md
   - Changelog: changelog.md
+  - Privacy: privacy.md
 
 theme:
   name: material
