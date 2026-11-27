@@ -6,6 +6,11 @@ Every pull request adds a line under **Unreleased**. A release moves those lines
 
 ## [Unreleased]
 
+### Added
+
+- The docs site and its demo count visits with GoatCounter (no cookies, no personal data). A self-hosted verifair counts nothing; a test checks that the app holds no counting code.
+- The README opens with who verifair is for and a one-line command to run it.
+
 ### Fixed
 
 - In local mode, the API refuses unknown host names (400) when its token is `change-me`, the token from the docs. Before, a malicious website could use DNS rebinding and that public token to read and write reports.

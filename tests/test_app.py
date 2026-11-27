@@ -5,6 +5,7 @@ import sys
 import time
 from contextlib import closing
 from dataclasses import replace
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import psycopg
@@ -806,3 +807,10 @@ def test_local_mode_host_check_covers_the_api_with_the_docs_token(settings, make
     rebound = client.get("/api/reports/missing", headers=auth | {"Host": "attacker.example:8000"})
     assert rebound.status_code == 400
     assert client.get("/api/reports/missing", headers=auth).status_code == 404
+
+
+def test_the_app_itself_counts_no_visits():
+    # only the public docs site and its demo copy load GoatCounter
+    files = [p for p in Path("verifair").rglob("*") if p.suffix in {".html", ".js", ".py"}]
+    assert files
+    assert not [p for p in files if "goatcounter" in p.read_text(errors="ignore").lower()]
